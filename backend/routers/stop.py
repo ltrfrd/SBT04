@@ -59,17 +59,18 @@ def get_stop(stop_id: int, db: Session = Depends(get_db)):
 # PUT /stops/{stop_id} → Update stop info
 # -----------------------------------------------------------
 @router.put("/{stop_id}", response_model=schemas.StopOut)
-def update_stop(stop_id: int, stop_in: schemas.StopCreate, db: Session = Depends(get_db)):
-    """Update stop details such as type or sequence number."""
-    stop = db.get(stop_model.Stop, stop_id)
-    if not stop:
+def update_stop(stop_id: int, stop_in: schemas.StopUpdate, db: Session = Depends(get_db)):
+    stop = db.get(stop_model.Stop, stop_id)                      # Load stop from DB
+    if not stop:                                                 # If stop does not exist
         raise HTTPException(status_code=404, detail="Stop not found")
-    for key, value in stop_in.model_dump().items():  # Apply updates field by field
-        setattr(stop, key, value)
-    db.commit()
-    db.refresh(stop)
-    return stop
 
+    updates = stop_in.model_dump(exclude_none=True)              # Only apply provided fields
+    for key, value in updates.items():                           # Loop through fields
+        setattr(stop, key, value)                                # Update stop attributes
+
+    db.commit()                                                  # Save changes
+    db.refresh(stop)                                             # Refresh instance
+    return stop                                                  # Return updated stop
 # -----------------------------------------------------------
 # DELETE /stops/{stop_id} → Remove stop
 # -----------------------------------------------------------

@@ -13,7 +13,9 @@
 from .driver import DriverCreate, DriverOut
 from .school import SchoolCreate, SchoolOut
 from .route import RouteCreate, RouteOut
-from .stop import StopCreate, StopOut
+from .stop import StopCreate  # Import schema used for creating stops
+from .stop import StopUpdate  # Import schema used for partial stop updates (drag pin)
+from .stop import StopOut     # Import schema used for returning stops
 from .student import StudentCreate, StudentOut
 from .run import RunStart, RunOut    # Run request/response
 from .payroll import PayrollCreate, PayrollOut       # Payroll (view + charter)

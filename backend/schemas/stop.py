@@ -29,6 +29,16 @@ class StopCreate(BaseModel):
     address: str | None = None
     latitude: float | None = None
     longitude: float | None = None
+
+class StopUpdate(BaseModel):                               # Partial update schema for Stop
+    sequence: int | None = None                            # Optional stop order update
+    type: StopType | None = None                           # Optional stop type update
+    route_id: int | None = None                            # Optional route reassignment (usually not used)
+
+    name: str | None = None                                # Optional label update
+    address: str | None = None                             # Optional address update
+    latitude: float | None = None                           # Optional latitude update (dragging pin)
+    longitude: float | None = None                          # Optional longitude update (dragging pin)    
 # -----------------------------------------------------------
 # Schema for returning stop data (GET response)
 # -----------------------------------------------------------
