@@ -10,6 +10,8 @@ from database import get_db
 from backend.models.route import Route
 from backend.models.school import School
 from backend.schemas.route import RouteCreate, RouteOut
+from backend.models.stop import Stop
+from backend.schemas.stop import StopOut
 
 # -----------------------------------------------------------
 # Router setup
@@ -103,3 +105,29 @@ def get_route_schools(route_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Route not found")
 
     return [{"id": s.id, "name": s.name, "address": s.address} for s in route.schools]
+
+# -----------------------------------------------------------
+# GET /routes/{route_id}/stops → Retrieve all stops for a route
+# -----------------------------------------------------------
+@router.get("/{route_id}/stops", response_model=List[StopOut])
+def get_route_stops(route_id: int, db: Session = Depends(get_db)):
+    
+    # Check if the route exists in the database
+    route = db.get(Route, route_id)
+    
+    # If route does not exist, return 404 error
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
+
+    # Query all stops that belong to this route
+    # Filter by route_id
+    # Order by sequence so stops are in correct route order
+    stops = (
+        db.query(Stop)
+        .filter(Stop.route_id == route_id)
+        .order_by(Stop.sequence.asc())
+        .all()
+    )
+
+    # Return the list of stops (can be empty list [])
+    return stops

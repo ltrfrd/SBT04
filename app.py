@@ -279,7 +279,7 @@ def logout(request: Request):
 @app.get("/")
 def root():
     """Basic API health endpoint."""
-    return {"status": "BST backend is running"}
+    return {"status": "BST01 backend is running"}
 
 
 # -----------------------------------------------------------

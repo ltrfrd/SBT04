@@ -10,7 +10,10 @@ from database import get_db  # DB dependency
 from backend import schemas  # Stop schemas
 from backend.models import stop as stop_model  # Stop model
 from backend.models import route as route_model  # Route model (FK validation)
-
+from sqlalchemy import func                              # For MAX() query
+from fastapi import HTTPException                        # For clean API errors
+from backend.schemas.stop import StopCreate, StopOut
+from backend.models.stop import Stop
 # -----------------------------------------------------------
 # Router setup
 # -----------------------------------------------------------
@@ -20,21 +23,56 @@ router = APIRouter(
 )
 
 # -----------------------------------------------------------
-# POST /stops → Create new stop
+# POST /stops → Create stop (auto sequence if missing)
 # -----------------------------------------------------------
-@router.post("/", response_model=schemas.StopOut, status_code=status.HTTP_201_CREATED)
-def create_stop(stop: schemas.StopCreate, db: Session = Depends(get_db)):
-    """Add a new stop to a specific route."""
-    # Validate route existence
-    route = db.get(route_model.Route, stop.route_id)
-    if not route:
-        raise HTTPException(status_code=404, detail="Route not found")
+@router.post("/", response_model=StopOut, status_code=201)
+def create_stop(payload: StopCreate, db: Session = Depends(get_db)):
+
+    # -----------------------------------------------------------
+    # Decide sequence (auto if missing)
+    # -----------------------------------------------------------
+    if payload.sequence is None:                                      # If client omitted sequence
+        max_seq = (
+            db.query(func.max(Stop.sequence))                         # SELECT MAX(sequence)
+            .filter(Stop.route_id == payload.route_id)                # WHERE route_id = X
+            .scalar()                                                 # Get single value
+        )
+        seq = (max_seq or 0) + 1                                      # Next sequence
+    else:
+        seq = payload.sequence                                        # Use provided sequence
+
+    # -----------------------------------------------------------
+    # Block duplicate sequence per route
+    # -----------------------------------------------------------
+    exists = (
+        db.query(Stop)
+        .filter(Stop.route_id == payload.route_id)                    # Same route
+        .filter(Stop.sequence == seq)                                 # Same sequence
+        .first()
+    )
+    if exists:
+        raise HTTPException(status_code=409, detail="Stop sequence already exists for this route")
+
+    # -----------------------------------------------------------
     # Create stop record
-    new_stop = stop_model.Stop(**stop.model_dump())
-    db.add(new_stop)
-    db.commit()
-    db.refresh(new_stop)
-    return new_stop
+    # -----------------------------------------------------------
+    data = payload.model_dump()                                       # Convert to dict
+    data["sequence"] = seq                                            # Force sequence value
+
+    stop = Stop(**data)                                               # Build ORM object
+    db.add(stop)                                                      # Add to session
+    db.commit()                                                       # Save
+    db.refresh(stop)                                                  # Reload
+    return stop                                                       # Return created stop
+
+    # -----------------------------------------------------------
+    # Create stop record
+    # -----------------------------------------------------------
+    stop = Stop(**payload.model_dump())                  # Convert schema to dict
+    db.add(stop)                                         # Add to session
+    db.commit()                                          # Save changes
+    db.refresh(stop)                                     # Reload with DB-generated id
+    return stop                                          # Return created stop
 
 # -----------------------------------------------------------
 # GET /stops → List all stops
@@ -45,16 +83,19 @@ def get_stops(db: Session = Depends(get_db)):
     return db.query(stop_model.Stop).all()
 
 # -----------------------------------------------------------
-# GET /stops/{stop_id} → Fetch single stop
+# GET /stops → List stops (optionally filter by route_id)
+# Always ordered by sequence ascending
 # -----------------------------------------------------------
-@router.get("/{stop_id}", response_model=schemas.StopOut)
-def get_stop(stop_id: int, db: Session = Depends(get_db)):
-    """Retrieve one stop by ID."""
-    stop = db.get(stop_model.Stop, stop_id)
-    if not stop:
-        raise HTTPException(status_code=404, detail="Stop not found")
-    return stop
+@router.get("/", response_model=List[schemas.StopOut])
+def get_stops(route_id: int | None = None, db: Session = Depends(get_db)):
+    query = db.query(stop_model.Stop)                         # Base query
 
+    if route_id is not None:                                  # If filtering by route
+        query = query.filter(stop_model.Stop.route_id == route_id)  # Apply route filter
+
+    query = query.order_by(stop_model.Stop.sequence.asc())    # Ensure stops ordered by sequence
+
+    return query.all()                                        # Return ordered results
 # -----------------------------------------------------------
 # PUT /stops/{stop_id} → Update stop info
 # -----------------------------------------------------------
