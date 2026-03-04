@@ -22,9 +22,8 @@ from typing import Generator                                # Generator typing
 # -----------------------------------------------------------
 from dotenv import load_dotenv                              # Load .env into os.environ
 from sqlalchemy import create_engine                         # Create DB engine
-from sqlalchemy.ext.declarative import declarative_base      # Base class for ORM models
-from sqlalchemy.orm import sessionmaker                      # Session factory
-
+from sqlalchemy.orm import declarative_base  # SQLAlchemy 2.x: declarative_base now imported from sqlalchemy.orm
+from sqlalchemy.orm import sessionmaker      # Session factory for creating DB sessions
 
 # -----------------------------------------------------------
 # Environment

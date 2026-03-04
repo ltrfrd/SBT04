@@ -7,7 +7,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status  # FastAPI helpers
 from sqlalchemy.orm import Session  # Database session
-from datetime import datetime  # For timestamps
+from datetime import datetime, timezone                 # Use timezone-aware UTC now (avoid utcnow() deprecation)
 from typing import List  # For list responses
 from database import get_db  # DB dependency
 from backend import schemas  # Pydantic schemas
@@ -62,7 +62,7 @@ def start_run(run: RunStart, db: Session = Depends(get_db)):
         driver_id=run.driver_id,
         route_id=run.route_id,
         run_type=run.run_type,
-        start_time=datetime.utcnow(),
+        start_time=datetime.now(timezone.utc).replace(tzinfo=None)         # UTC timestamp (naive) for DB compatibility; avoids utcnow() deprecation
     )
 
     db.add(new_run)
@@ -84,7 +84,7 @@ def end_run(run_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Run already ended")
 
     # Record end time
-    run.end_time = datetime.utcnow()
+    run.end_time = datetime.now(timezone.utc).replace(tzinfo=None)         # UTC timestamp (naive) for DB compatibility; avoids utcnow() deprecation
     db.commit()
     db.refresh(run)
     return run

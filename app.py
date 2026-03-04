@@ -61,7 +61,7 @@ app = FastAPI(title="BST — School Bus Tracking System", version="1.0.0")
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SESSION_SECRET", "dev-secret-key-change-in-prod")
-)
+) 
 
 # CORS policy — open for now, restrict in production
 app.add_middleware(
@@ -158,7 +158,11 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         "student_count": db.query(student_model.Student).count(),
         "run_count": db.query(run_model.Run).filter(run_model.Run.end_time.is_(None)).count(),
     }
-    return templates.TemplateResponse("dashboard.html", {"request": request, **counts})
+    return templates.TemplateResponse(
+        request,                                              # Request first (prevents deprecation warning)
+        "dashboard.html",                                     # Template name
+        counts,                                               # Context dict (request auto-injected)
+    )
 
 
 # -----------------------------------------------------------
@@ -171,11 +175,15 @@ def route_report(route_id: int, request: Request, db: Session = Depends(get_db))
     if not route:
         raise HTTPException(status_code=404, detail="Route not found")
     driver_name = route.driver.name if route.driver else "Unassigned"
-    return templates.TemplateResponse("route_report.html", {
-        "request": request,
-        "route": route,
-        "driver_name": driver_name
-    })
+    return templates.TemplateResponse(
+        request,                                              # New Starlette signature: request first
+            "route_report.html",                                  # Template name
+            {
+            "request": request,
+            "route": route,
+            "driver_name": driver_name
+            }
+        )
 
 
 # -----------------------------------------------------------
@@ -206,7 +214,9 @@ def driver_run_view(
     stops = sorted(active_run.route.stops, key=lambda s: s.sequence) if active_run else []
     current_stop_index = 1
 
-    return templates.TemplateResponse("driver_run.html", {
+    return templates.TemplateResponse(
+        request,                                              # Request must be first
+        "driver_run.html", {
         "request": request,
         "driver_id": driver_id,
         "driver_name": current_driver.name,
@@ -217,7 +227,8 @@ def driver_run_view(
         "current_stop_index": current_stop_index,
         "available_routes": db.query(route_model.Route).all(),
         "today": datetime.now().date().isoformat()
-    })
+        }
+    )
 
 
 # -----------------------------------------------------------
@@ -236,16 +247,20 @@ def summary_report(request: Request, start: date = None, end: date = None, db: S
     pending_days = len(records) - approved_days
     total_charter_hours = sum(float(r.charter_hours or 0) for r in records)
 
-    return templates.TemplateResponse("summary_report.html", {
-        "request": request,
-        "records": records,
-        "start_date": start,
-        "end_date": end,
-        "total_drivers": total_drivers,
+    return templates.TemplateResponse(
+        request,                                              # Updated argument order
+        "summary_report.html",                                # Template name
+        {
+            "request": request,
+            "records": records,
+            "start_date": start,
+            "end_date": end,
+            "total_drivers": total_drivers,
         "approved_days": approved_days,
         "pending_days": pending_days,
         "total_charter_hours": round(total_charter_hours, 2)
-    })
+        }
+    )
 
 
 # -----------------------------------------------------------
