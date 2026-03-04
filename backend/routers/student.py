@@ -9,22 +9,24 @@ from typing import List  # For list responses
 from database import get_db  # DB dependency
 from backend import schemas  # Pydantic schemas
 from backend.models import student as student_model  # Student model
-from backend.models import school as school_model    # School validation
-from backend.models import route as route_model      # Route validation
-from backend.models import stop as stop_model        # Stop validation
+from backend.models import school as school_model  # School validation
+from backend.models import route as route_model  # Route validation
+from backend.models import stop as stop_model  # Stop validation
 
 # -----------------------------------------------------------
 # Router setup
 # -----------------------------------------------------------
 router = APIRouter(
-    prefix="/students",  # Base path
-    tags=["Students"]    # Swagger section
+    prefix="/students", tags=["Students"]  # Base path  # Swagger section
 )
+
 
 # -----------------------------------------------------------
 # POST /students → Create new student
 # -----------------------------------------------------------
-@router.post("/", response_model=schemas.StudentOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/", response_model=schemas.StudentOut, status_code=status.HTTP_201_CREATED
+)
 def create_student(student: schemas.StudentCreate, db: Session = Depends(get_db)):
     """Add a new student and link to school, route, and stop."""
     # Validate school
@@ -48,6 +50,7 @@ def create_student(student: schemas.StudentCreate, db: Session = Depends(get_db)
     db.refresh(new_student)
     return new_student
 
+
 # -----------------------------------------------------------
 # GET /students → Get all students
 # -----------------------------------------------------------
@@ -55,6 +58,7 @@ def create_student(student: schemas.StudentCreate, db: Session = Depends(get_db)
 def get_students(db: Session = Depends(get_db)):
     """Return all students in the system."""
     return db.query(student_model.Student).all()
+
 
 # -----------------------------------------------------------
 # GET /students/{student_id} → Get one student
@@ -67,11 +71,14 @@ def get_student(student_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Student not found")
     return student
 
+
 # -----------------------------------------------------------
 # PUT /students/{student_id} → Update student info
 # -----------------------------------------------------------
 @router.put("/{student_id}", response_model=schemas.StudentOut)
-def update_student(student_id: int, student_in: schemas.StudentCreate, db: Session = Depends(get_db)):
+def update_student(
+    student_id: int, student_in: schemas.StudentCreate, db: Session = Depends(get_db)
+):
     """Update student details or reassign route/stop."""
     student = db.get(student_model.Student, student_id)
     if not student:
@@ -81,6 +88,7 @@ def update_student(student_id: int, student_in: schemas.StudentCreate, db: Sessi
     db.commit()
     db.refresh(student)
     return student
+
 
 # -----------------------------------------------------------
 # DELETE /students/{student_id} → Remove student
@@ -95,6 +103,7 @@ def delete_student(student_id: int, db: Session = Depends(get_db)):
     db.commit()
     return None
 
+
 # -----------------------------------------------------------
 # GET /students/school/{school_id} → List by school
 # -----------------------------------------------------------
@@ -104,9 +113,12 @@ def get_students_by_school(school_id: int, db: Session = Depends(get_db)):
     school = db.get(school_model.School, school_id)
     if not school:
         raise HTTPException(status_code=404, detail="School not found")
-    return db.query(student_model.Student)\
-             .filter(student_model.Student.school_id == school_id)\
-             .all()
+    return (
+        db.query(student_model.Student)
+        .filter(student_model.Student.school_id == school_id)
+        .all()
+    )
+
 
 # -----------------------------------------------------------
 # GET /students/route/{route_id} → List by route
@@ -117,6 +129,8 @@ def get_students_by_route(route_id: int, db: Session = Depends(get_db)):
     route = db.get(route_model.Route, route_id)
     if not route:
         raise HTTPException(status_code=404, detail="Route not found")
-    return db.query(student_model.Student)\
-             .filter(student_model.Student.route_id == route_id)\
-             .all()
+    return (
+        db.query(student_model.Student)
+        .filter(student_model.Student.route_id == route_id)
+        .all()
+    )

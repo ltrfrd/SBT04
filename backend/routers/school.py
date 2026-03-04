@@ -16,8 +16,9 @@ from backend.models import route as route_model  # Route model (for linking)
 # -----------------------------------------------------------
 router = APIRouter(
     prefix="/schools",  # All endpoints under /schools
-    tags=["Schools"]    # Swagger category label
+    tags=["Schools"],  # Swagger category label
 )
+
 
 # -----------------------------------------------------------
 # CREATE: Add new school
@@ -31,6 +32,7 @@ def create_school(school: schemas.SchoolCreate, db: Session = Depends(get_db)):
     db.refresh(new_school)
     return new_school
 
+
 # -----------------------------------------------------------
 # READ: Get all schools
 # -----------------------------------------------------------
@@ -38,6 +40,7 @@ def create_school(school: schemas.SchoolCreate, db: Session = Depends(get_db)):
 def get_schools(db: Session = Depends(get_db)):
     """Return a list of all registered schools."""
     return db.query(school_model.School).all()
+
 
 # -----------------------------------------------------------
 # READ: Get single school by ID
@@ -50,11 +53,14 @@ def get_school(school_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="School not found")
     return school
 
+
 # -----------------------------------------------------------
 # UPDATE: Modify school information
 # -----------------------------------------------------------
 @router.put("/{school_id}", response_model=schemas.SchoolOut)
-def update_school(school_id: int, school_in: schemas.SchoolCreate, db: Session = Depends(get_db)):
+def update_school(
+    school_id: int, school_in: schemas.SchoolCreate, db: Session = Depends(get_db)
+):
     """Update school details (name, address, phone)."""
     school = db.get(school_model.School, school_id)
     if not school:
@@ -64,6 +70,7 @@ def update_school(school_id: int, school_in: schemas.SchoolCreate, db: Session =
     db.commit()
     db.refresh(school)
     return school
+
 
 # -----------------------------------------------------------
 # DELETE: Remove school
@@ -78,11 +85,14 @@ def delete_school(school_id: int, db: Session = Depends(get_db)):
     db.commit()
     return None
 
+
 # -----------------------------------------------------------
 # ACTION: Link school to route
 # -----------------------------------------------------------
 @router.post("/{school_id}/assign_route/{route_id}", response_model=schemas.SchoolOut)
-def assign_route_to_school(school_id: int, route_id: int, db: Session = Depends(get_db)):
+def assign_route_to_school(
+    school_id: int, route_id: int, db: Session = Depends(get_db)
+):
     """Link an existing school to a route (many-to-many)."""
     school = db.get(school_model.School, school_id)
     route = db.get(route_model.Route, route_id)
@@ -94,11 +104,16 @@ def assign_route_to_school(school_id: int, route_id: int, db: Session = Depends(
         db.refresh(school)
     return school
 
+
 # -----------------------------------------------------------
 # ACTION: Unlink school from route
 # -----------------------------------------------------------
-@router.delete("/{school_id}/unassign_route/{route_id}", response_model=schemas.SchoolOut)
-def unassign_route_from_school(school_id: int, route_id: int, db: Session = Depends(get_db)):
+@router.delete(
+    "/{school_id}/unassign_route/{route_id}", response_model=schemas.SchoolOut
+)
+def unassign_route_from_school(
+    school_id: int, route_id: int, db: Session = Depends(get_db)
+):
     """Remove a route association from a school."""
     school = db.get(school_model.School, school_id)
     route = db.get(route_model.Route, route_id)

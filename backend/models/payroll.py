@@ -5,8 +5,9 @@
 # ===========================================================
 from sqlalchemy import Column, Integer, Date, Time, Boolean, ForeignKey, Numeric
 from sqlalchemy.orm import relationship
-from database import Base # Root-level
+from database import Base  # Root-level
 from datetime import datetime, timedelta
+
 
 class Payroll(Base):
     __tablename__ = "payrolls"
@@ -15,7 +16,7 @@ class Payroll(Base):
     driver_id = Column(Integer, ForeignKey("drivers.id"), nullable=False)
     work_date = Column(Date, nullable=False)  # Workday date
     charter_start = Column(Time, nullable=True)  # Start time for charter
-    charter_end = Column(Time, nullable=True)    # End time for charter
+    charter_end = Column(Time, nullable=True)  # End time for charter
     charter_hours = Column(Numeric(5, 2), default=0.00)  # Auto-calculated
     approved = Column(Boolean, default=False)  # Payroll verification flag
 

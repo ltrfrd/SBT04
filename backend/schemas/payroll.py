@@ -8,6 +8,7 @@ from datetime import date, time
 from decimal import Decimal
 from typing import Optional
 
+
 # -----------------------------------------------------------
 # Schema for creating or updating payroll entry
 # -----------------------------------------------------------
@@ -15,8 +16,9 @@ class PayrollCreate(BaseModel):
     driver_id: int  # FK: driver submitting
     work_date: date  # Workday date
     charter_start: Optional[time] = None  # Charter start time
-    charter_end: Optional[time] = None    # Charter end time
-    approved: Optional[bool] = False      # Default not verified
+    charter_end: Optional[time] = None  # Charter end time
+    approved: Optional[bool] = False  # Default not verified
+
 
 # -----------------------------------------------------------
 # Schema for returning payroll summary

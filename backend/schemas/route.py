@@ -5,11 +5,12 @@
 from pydantic import BaseModel, ConfigDict
 from typing import List, Optional
 
+
 # -----------------------------------------------------------
 # Schema for creating a new route (POST request)
 # -----------------------------------------------------------
 class RouteCreate(BaseModel):
-    route_number: str  
+    route_number: str
     unit_number: str
     driver_id: int
     school_ids: Optional[List[int]] = []  # optional list of assigned schools

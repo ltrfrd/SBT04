@@ -8,17 +8,22 @@
 # ---------- CORE IMPORTS ----------
 from datetime import datetime, timedelta  # For ETA and timestamps
 from math import (
-    radians, cos, sin, sqrt, atan2, asin, degrees
+    radians,
+    cos,
+    sin,
+    sqrt,
+    atan2,
+    asin,
+    degrees,
 )  # Haversine math functions
 from typing import Tuple, Optional, Dict, List  # Type hints for clarity
 from sqlalchemy.orm import Session  # DB session for queries
 
 # Import your models (adjust if names differ)
 from backend.models import (
-    route as route_model,
     stop as stop_model,
     run as run_model,
-    student as student_model
+    student as student_model,
 )
 
 
@@ -36,9 +41,7 @@ def validate_gps(lat: float, lng: float) -> bool:
 # -----------------------------------------------------------
 # 2. CALCULATE DISTANCE BETWEEN TWO POINTS
 # -----------------------------------------------------------
-def haversine_distance(
-    lat1: float, lng1: float, lat2: float, lng2: float
-) -> float:
+def haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     """
     Calculate great-circle distance in meters using Haversine formula.
     Used for: stop progress, ETA, alerts.
@@ -57,8 +60,7 @@ def haversine_distance(
 # 3. SIMULATE BUS MOVEMENT
 # -----------------------------------------------------------
 def simulate_gps_position(
-    start_lat: float, start_lng: float,
-    bearing: float, speed_kmh: float, seconds: int
+    start_lat: float, start_lng: float, bearing: float, speed_kmh: float, seconds: int
 ) -> Tuple[float, float]:
     """
     Simulate bus moving along a bearing at given speed.
@@ -72,12 +74,12 @@ def simulate_gps_position(
     lng1 = radians(start_lng)
 
     lat2 = asin(
-        sin(lat1) * cos(distance_m / R) +
-        cos(lat1) * sin(distance_m / R) * cos(bearing_rad)
+        sin(lat1) * cos(distance_m / R)
+        + cos(lat1) * sin(distance_m / R) * cos(bearing_rad)
     )
     lng2 = lng1 + atan2(
         sin(bearing_rad) * sin(distance_m / R) * cos(lat1),
-        cos(distance_m / R) - sin(lat1) * sin(lat2)
+        cos(distance_m / R) - sin(lat1) * sin(lat2),
     )
 
     return round(degrees(lat2), 6), round(degrees(lng2), 6)
@@ -87,9 +89,11 @@ def simulate_gps_position(
 # 4. CHECK IF BUS IS APPROACHING A STOP
 # -----------------------------------------------------------
 def is_bus_approaching(
-    bus_lat: float, bus_lng: float,
-    target_lat: float, target_lng: float,
-    threshold_meters: float = 500
+    bus_lat: float,
+    bus_lng: float,
+    target_lat: float,
+    target_lng: float,
+    threshold_meters: float = 500,
 ) -> bool:
     """
     Check if bus is within custom threshold of a stop.
@@ -121,7 +125,8 @@ def get_current_stop_progress(
 
     # Only stops with GPS
     valid_stops = [
-        stop for stop in stops
+        stop
+        for stop in stops
         if stop.latitude is not None and stop.longitude is not None
     ]
     if not valid_stops:
@@ -129,7 +134,10 @@ def get_current_stop_progress(
 
     # Find closest stop
     distances = [
-        (stop, haversine_distance(current_lat, current_lng, stop.latitude, stop.longitude))
+        (
+            stop,
+            haversine_distance(current_lat, current_lng, stop.latitude, stop.longitude),
+        )
         for stop in valid_stops
     ]
     current_stop, _ = min(distances, key=lambda x: x[1])
@@ -141,12 +149,13 @@ def get_current_stop_progress(
     progress = 0.0
     if next_stop and next_stop.latitude is not None:
         total = haversine_distance(
-            current_stop.latitude, current_stop.longitude,
-            next_stop.latitude, next_stop.longitude
+            current_stop.latitude,
+            current_stop.longitude,
+            next_stop.latitude,
+            next_stop.longitude,
         )
         remaining = haversine_distance(
-            current_lat, current_lng,
-            next_stop.latitude, next_stop.longitude
+            current_lat, current_lng, next_stop.latitude, next_stop.longitude
         )
         if total > 0:
             progress = max(0, min(100, ((total - remaining) / total) * 100))
@@ -155,16 +164,24 @@ def get_current_stop_progress(
         "current_stop": {
             "id": current_stop.id,
             "sequence": current_stop.sequence,
-            "type": current_stop.type.value if hasattr(current_stop.type, 'value') else str(current_stop.type),
-            "name": current_stop.name or f"Stop {current_stop.sequence}"
+            "type": (
+                current_stop.type.value
+                if hasattr(current_stop.type, "value")
+                else str(current_stop.type)
+            ),
+            "name": current_stop.name or f"Stop {current_stop.sequence}",
         },
-        "next_stop": {
-            "id": next_stop.id,
-            "sequence": next_stop.sequence,
-            "name": next_stop.name or "End of Route"
-        } if next_stop else None,
+        "next_stop": (
+            {
+                "id": next_stop.id,
+                "sequence": next_stop.sequence,
+                "name": next_stop.name or "End of Route",
+            }
+            if next_stop
+            else None
+        ),
         "progress_percent": round(progress, 1),
-        "total_stops": len(stops)
+        "total_stops": len(stops),
     }
 
 
@@ -172,7 +189,11 @@ def get_current_stop_progress(
 # 6. ESTIMATE TIME OF ARRIVAL
 # -----------------------------------------------------------
 def estimate_eta(
-    db: Session, run_id: int, current_lat: float, current_lng: float, avg_speed_kmh: float = 30
+    db: Session,
+    run_id: int,
+    current_lat: float,
+    current_lng: float,
+    avg_speed_kmh: float = 30,
 ) -> Optional[datetime]:
     """
     Estimate ETA to next stop.
@@ -188,8 +209,7 @@ def estimate_eta(
         return None
 
     distance_m = haversine_distance(
-        current_lat, current_lng,
-        next_stop.latitude, next_stop.longitude
+        current_lat, current_lng, next_stop.latitude, next_stop.longitude
     )
     minutes = distance_m / (avg_speed_kmh * 1000 / 60)
     return datetime.now() + timedelta(minutes=minutes)
@@ -214,22 +234,33 @@ def get_approaching_alerts(
         return []
 
     # Get all students at this stop
-    students = db.query(student_model.Student).filter(
-        student_model.Student.stop_id == next_stop.id
-    ).all()
+    students = (
+        db.query(student_model.Student)
+        .filter(student_model.Student.stop_id == next_stop.id)
+        .all()
+    )
 
     alerts = []
     for student in students:
         threshold = student.notification_distance_meters or 500
-        if is_bus_approaching(bus_lat, bus_lng, next_stop.latitude, next_stop.longitude, threshold):
+        if is_bus_approaching(
+            bus_lat, bus_lng, next_stop.latitude, next_stop.longitude, threshold
+        ):
             eta = estimate_eta(db, run_id, bus_lat, bus_lng)
             eta_str = eta.strftime("%I:%M %p") if eta else "soon"
 
-            alerts.append({
-                "student_id": student.id,
-                "student_name": student.name,
-                "message": f"Bus is approaching your stop! ETA: {eta_str}",
-                "distance_meters": round(haversine_distance(bus_lat, bus_lng, next_stop.latitude, next_stop.longitude), 1),
-                "stop_name": next_stop.name or f"Stop {next_stop.sequence}"
-            })
+            alerts.append(
+                {
+                    "student_id": student.id,
+                    "student_name": student.name,
+                    "message": f"Bus is approaching your stop! ETA: {eta_str}",
+                    "distance_meters": round(
+                        haversine_distance(
+                            bus_lat, bus_lng, next_stop.latitude, next_stop.longitude
+                        ),
+                        1,
+                    ),
+                    "stop_name": next_stop.name or f"Stop {next_stop.sequence}",
+                }
+            )
     return alerts

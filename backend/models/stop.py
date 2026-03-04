@@ -5,10 +5,19 @@
 # Each stop belongs to a route and can be pickup or dropoff.    # Ownership + type
 # ===========================================================  # Separator
 
-from sqlalchemy import Column, Integer, ForeignKey, Enum, String, Float, Index  # Add Index for DB performance
+from sqlalchemy import (
+    Column,
+    Integer,
+    ForeignKey,
+    Enum,
+    String,
+    Float,
+    Index,
+)  # Add Index for DB performance
 from sqlalchemy.orm import relationship  # SQLAlchemy relationships
 from database import Base  # Root-level import
 import enum  # Python enum
+
 
 # -----------------------------------------------------------  # Separator
 # Stop type enum: pickup or dropoff                            # Enum purpose
@@ -17,6 +26,7 @@ class StopType(str, enum.Enum):  # Enum class
     PICKUP = "pickup"  # Pickup stop
     DROPOFF = "dropoff"  # Dropoff stop
 
+
 # -----------------------------------------------------------  # Separator
 # Stop model                                                   # Model purpose
 # -----------------------------------------------------------  # Separator
@@ -24,7 +34,9 @@ class Stop(Base):  # ORM model
     __tablename__ = "stops"  # DB table name
 
     __table_args__ = (  # Table-level DB options
-        Index("ix_stops_route_id_sequence", "route_id", "sequence"),  # Speeds up route filter + ordering
+        Index(
+            "ix_stops_route_id_sequence", "route_id", "sequence"
+        ),  # Speeds up route filter + ordering
     )  # End table args
 
     id = Column(Integer, primary_key=True, index=True)  # Unique stop ID
@@ -39,5 +51,9 @@ class Stop(Base):  # ORM model
     # -------------------------------------------------------  # Separator
     # Relationships                                            # Relationship group
     # -------------------------------------------------------  # Separator
-    route = relationship("Route", back_populates="stops")  # Each stop belongs to one route
-    students = relationship("Student", back_populates="stop")  # Students linked to this stop
+    route = relationship(
+        "Route", back_populates="stops"
+    )  # Each stop belongs to one route
+    students = relationship(
+        "Student", back_populates="stop"
+    )  # Students linked to this stop

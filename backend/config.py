@@ -7,12 +7,12 @@
 #   - Provide a single `settings` object for imports
 # ===========================================================
 
-from __future__ import annotations                         # Forward refs for typing
+from __future__ import annotations  # Forward refs for typing
 
 # -----------------------------------------------------------
 # Standard library
 # -----------------------------------------------------------
-import os                                                   # Environment variables
+import os  # Environment variables
 
 
 # -----------------------------------------------------------
@@ -30,11 +30,11 @@ class Settings:
     # ENV
     # - Optional environment name (dev/staging/prod)
     # -------------------------------------------------------
-    ENV: str = os.getenv("ENV", "dev")                      # Default environment label
+    ENV: str = os.getenv("ENV", "dev")  # Default environment label
 
 
 # -----------------------------------------------------------
 # Singleton settings instance
 # - Import as: from backend.config import settings
 # -----------------------------------------------------------
-settings = Settings()                                       # Create settings once
+settings = Settings()  # Create settings once

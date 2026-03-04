@@ -8,7 +8,7 @@ from .report_generator import (
     driver_summary,
     route_summary,
     payroll_summary,
-    generate_report
+    generate_report,
 )
 
 # Optional: Add future utils here

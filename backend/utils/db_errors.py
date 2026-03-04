@@ -48,7 +48,7 @@ def raise_conflict_if_unique(
     # -------------------------------------------------------------------------
     if dialect == "postgresql" and orig is not None:
         pgcode = getattr(orig, "pgcode", None)  # "23505" for unique_violation
-        diag = getattr(orig, "diag", None)      # Has constraint_name
+        diag = getattr(orig, "diag", None)  # Has constraint_name
         diag_name = getattr(diag, "constraint_name", None) if diag else None
 
         if pgcode == "23505" and diag_name == constraint_name:

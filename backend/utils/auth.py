@@ -13,14 +13,16 @@ from backend.models import driver as driver_model
 # -----------------------------------------------------------
 # SESSION AUTH: GET CURRENT DRIVER
 # -----------------------------------------------------------
-def get_current_driver(request: Request, db: Session = Depends(get_db)) -> driver_model.Driver:
+def get_current_driver(
+    request: Request, db: Session = Depends(get_db)
+) -> driver_model.Driver:
     """Get logged-in driver from session."""
     driver_id = request.session.get("driver_id")
     if not driver_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Login required",
-            headers={"WWW-Authenticate": "Bearer"}
+            headers={"WWW-Authenticate": "Bearer"},
         )
     driver = db.get(driver_model.Driver, driver_id)
     if not driver:

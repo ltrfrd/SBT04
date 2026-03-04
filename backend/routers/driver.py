@@ -9,17 +9,13 @@ from typing import List
 from database import get_db
 from backend import schemas
 from backend.models import driver as driver_model
-from backend.models import run as run_model
-from datetime import datetime
 from backend.schemas.driver import DriverUpdate
 
 # -----------------------------------------------------------
 # Router setup
 # -----------------------------------------------------------
-router = APIRouter(
-    prefix="/drivers",
-    tags=["Drivers"]
-)
+router = APIRouter(prefix="/drivers", tags=["Drivers"])
+
 
 # -----------------------------------------------------------
 # CREATE: Add new driver
@@ -32,12 +28,14 @@ def create_driver(driver: schemas.DriverCreate, db: Session = Depends(get_db)):
     db.refresh(new_driver)
     return new_driver
 
+
 # -----------------------------------------------------------
 # READ: Get all drivers
 # -----------------------------------------------------------
 @router.get("/", response_model=List[schemas.DriverOut])
 def get_drivers(db: Session = Depends(get_db)):
     return db.query(driver_model.Driver).all()
+
 
 # -----------------------------------------------------------
 # READ: Get driver by ID
@@ -49,14 +47,13 @@ def get_driver(driver_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Driver not found")
     return driver
 
+
 # -----------------------------------------------------------
 # UPDATE: Modify driver
 # -----------------------------------------------------------
 @router.put("/{driver_id}", response_model=schemas.DriverOut)
 def update_driver(
-    driver_id: int,
-    driver_in: DriverUpdate,
-    db: Session = Depends(get_db)
+    driver_id: int, driver_in: DriverUpdate, db: Session = Depends(get_db)
 ):
     driver = db.get(driver_model.Driver, driver_id)
     if not driver:
@@ -69,6 +66,7 @@ def update_driver(
     db.commit()
     db.refresh(driver)
     return driver
+
 
 # -----------------------------------------------------------
 # DELETE: Remove driver

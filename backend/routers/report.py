@@ -15,8 +15,9 @@ from backend.utils import report_generator  # Import generator functions
 # -----------------------------------------------------------
 router = APIRouter(
     prefix="/reports",  # Base path for all reporting endpoints
-    tags=["Reports"]    # Swagger section title
+    tags=["Reports"],  # Swagger section title
 )
+
 
 # -----------------------------------------------------------
 # GET /reports/driver/{driver_id} → Driver summary
@@ -29,6 +30,7 @@ def get_driver_report(driver_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=report["error"])
     return report
 
+
 # -----------------------------------------------------------
 # GET /reports/route/{route_id} → Route summary
 # -----------------------------------------------------------
@@ -39,6 +41,7 @@ def get_route_report(route_id: int, db: Session = Depends(get_db)):
     if "error" in report:
         raise HTTPException(status_code=404, detail=report["error"])
     return report
+
 
 # -----------------------------------------------------------
 # GET /reports/payroll?start=YYYY-MM-DD&end=YYYY-MM-DD → Payroll report
@@ -55,8 +58,9 @@ def get_payroll_report(start: date, end: date, db: Session = Depends(get_db)):
     return {
         "date_range": {"start": start, "end": end},
         "total_records": len(report),
-        "records": report
+        "records": report,
     }
+
 
 # -----------------------------------------------------------
 # Export router explicitly

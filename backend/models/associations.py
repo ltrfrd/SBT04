@@ -14,5 +14,5 @@ route_schools = Table(
     "route_schools",
     Base.metadata,
     Column("route_id", Integer, ForeignKey("routes.id"), primary_key=True),
-    Column("school_id", Integer, ForeignKey("schools.id"), primary_key=True)
+    Column("school_id", Integer, ForeignKey("schools.id"), primary_key=True),
 )

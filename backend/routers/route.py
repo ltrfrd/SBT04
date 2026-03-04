@@ -16,10 +16,8 @@ from backend.schemas.stop import StopOut
 # -----------------------------------------------------------
 # Router setup
 # -----------------------------------------------------------
-router = APIRouter(
-    prefix="/routes",
-    tags=["Routes"]
-)
+router = APIRouter(prefix="/routes", tags=["Routes"])
+
 
 # -----------------------------------------------------------
 # POST /routes → Create new route
@@ -32,7 +30,9 @@ def create_route(route: RouteCreate, db: Session = Depends(get_db)):
     db.refresh(db_route)
 
     if route.school_ids:
-        db_route.schools = db.query(School).filter(School.id.in_(route.school_ids)).all()
+        db_route.schools = (
+            db.query(School).filter(School.id.in_(route.school_ids)).all()
+        )
         db.commit()
         db.refresh(db_route)
 
@@ -75,7 +75,9 @@ def update_route(route_id: int, route_in: RouteCreate, db: Session = Depends(get
 
     # Update school relationships if included
     if route_in.school_ids is not None:
-        route.schools = db.query(School).filter(School.id.in_(route_in.school_ids)).all()
+        route.schools = (
+            db.query(School).filter(School.id.in_(route_in.school_ids)).all()
+        )
         db.commit()
 
     db.refresh(route)
@@ -106,15 +108,16 @@ def get_route_schools(route_id: int, db: Session = Depends(get_db)):
 
     return [{"id": s.id, "name": s.name, "address": s.address} for s in route.schools]
 
+
 # -----------------------------------------------------------
 # GET /routes/{route_id}/stops → Retrieve all stops for a route
 # -----------------------------------------------------------
 @router.get("/{route_id}/stops", response_model=List[StopOut])
 def get_route_stops(route_id: int, db: Session = Depends(get_db)):
-    
+
     # Check if the route exists in the database
     route = db.get(Route, route_id)
-    
+
     # If route does not exist, return 404 error
     if not route:
         raise HTTPException(status_code=404, detail="Route not found")

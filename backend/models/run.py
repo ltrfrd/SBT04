@@ -8,6 +8,7 @@ from sqlalchemy.orm import relationship
 from database import Base  # Root-level
 import enum
 
+
 # -----------------------------------------------------------
 # Run type enum: AM or PM
 # -----------------------------------------------------------
@@ -28,8 +29,8 @@ class Run(Base):
     driver_id = Column(Integer, ForeignKey("drivers.id"), nullable=False)
     route_id = Column(Integer, ForeignKey("routes.id"), nullable=False)
     run_type = Column(Enum(RunType), nullable=False)  # AM or PM
-    start_time = Column(DateTime, nullable=False)     # Actual start time
-    end_time = Column(DateTime)                      # Actual end time (nullable until completed)
+    start_time = Column(DateTime, nullable=False)  # Actual start time
+    end_time = Column(DateTime)  # Actual end time (nullable until completed)
 
     # -------------------------------------------------------
     # Relationships

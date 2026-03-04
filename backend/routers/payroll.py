@@ -15,21 +15,21 @@ from backend.models import driver as driver_model  # Validate driver link
 # -----------------------------------------------------------
 # Router setup
 # -----------------------------------------------------------
-router = APIRouter(
-    prefix="/payroll",
-    tags=["Payroll"]
-)
+router = APIRouter(prefix="/payroll", tags=["Payroll"])
+
 
 # -----------------------------------------------------------
 # POST /payroll/charter → Driver submits daily charter hours
 # -----------------------------------------------------------
-@router.post("/charter", response_model=schemas.PayrollOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/charter", response_model=schemas.PayrollOut, status_code=status.HTTP_201_CREATED
+)
 def log_charter_hours(
     driver_id: int,  # Driver who did the charter
     work_date: date,  # Date of charter
     charter_start: time,  # Start time
     charter_end: time,  # End time
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """Drivers submit charter start/end; hours auto-calculated."""
     driver = db.get(driver_model.Driver, driver_id)
@@ -48,6 +48,7 @@ def log_charter_hours(
     db.refresh(record)
     return record  # Return full PayrollOut
 
+
 # -----------------------------------------------------------
 # GET /payroll → List all payroll entries (for department)
 # -----------------------------------------------------------
@@ -55,6 +56,7 @@ def log_charter_hours(
 def get_all_payroll(db: Session = Depends(get_db)):
     """Payroll department retrieves every entry."""
     return db.query(payroll_model.Payroll).all()
+
 
 # -----------------------------------------------------------
 # GET /payroll/driver/{driver_id} → Driver’s personal summary
@@ -65,9 +67,12 @@ def get_driver_payroll(driver_id: int, db: Session = Depends(get_db)):
     driver = db.get(driver_model.Driver, driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
-    return db.query(payroll_model.Payroll)\
-             .filter(payroll_model.Payroll.driver_id == driver_id)\
-             .all()
+    return (
+        db.query(payroll_model.Payroll)
+        .filter(payroll_model.Payroll.driver_id == driver_id)
+        .all()
+    )
+
 
 # -----------------------------------------------------------
 # PUT /payroll/{id}/approve → Payroll verification

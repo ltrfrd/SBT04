@@ -8,6 +8,7 @@ from sqlalchemy.orm import relationship
 from database import Base  # Root-level database.py
 from .associations import route_schools  # associations.py is in the same folder
 
+
 class School(Base):
     __tablename__ = "schools"
     id = Column(Integer, primary_key=True, index=True)
@@ -15,9 +16,5 @@ class School(Base):
     address = Column(String(255), nullable=False)
     phone = Column(String(20))
 
-    routes = relationship(
-        "Route",
-        secondary=route_schools,
-        back_populates="schools"
-    )
+    routes = relationship("Route", secondary=route_schools, back_populates="schools")
     students = relationship("Student", back_populates="school")

@@ -8,16 +8,14 @@
 # ===========================================================
 
 from sqlalchemy.orm import Session  # Provides DB session interface
-from datetime import date           # Used for payroll date filtering
+from datetime import date  # Used for payroll date filtering
 from backend.models import (
     driver as driver_model,
     route as route_model,
     run as run_model,
     payroll as payroll_model,
-    school as school_model,
-    student as student_model,
-    stop as stop_model
 )
+
 
 # -----------------------------------------------------------
 # DRIVER REPORT
@@ -29,7 +27,9 @@ def driver_summary(db: Session, driver_id: int) -> dict:
         return {"error": "Driver not found"}
 
     # Count all completed runs for this driver
-    total_runs = db.query(run_model.Run).filter(run_model.Run.driver_id == driver_id).count()
+    total_runs = (
+        db.query(run_model.Run).filter(run_model.Run.driver_id == driver_id).count()
+    )
 
     # Collect all charter hour entries for this driver
     total_charter_hours = (
@@ -43,15 +43,23 @@ def driver_summary(db: Session, driver_id: int) -> dict:
     total_hours = sum(float(h[0]) for h in total_charter_hours if h[0])
 
     # Count approved vs pending payroll records
-    approved = db.query(payroll_model.Payroll).filter(
-        payroll_model.Payroll.driver_id == driver_id,
-        payroll_model.Payroll.approved.is_(True)
-    ).count()
+    approved = (
+        db.query(payroll_model.Payroll)
+        .filter(
+            payroll_model.Payroll.driver_id == driver_id,
+            payroll_model.Payroll.approved.is_(True),
+        )
+        .count()
+    )
 
-    pending = db.query(payroll_model.Payroll).filter(
-        payroll_model.Payroll.driver_id == driver_id,
-        payroll_model.Payroll.approved.is_(False)
-    ).count()
+    pending = (
+        db.query(payroll_model.Payroll)
+        .filter(
+            payroll_model.Payroll.driver_id == driver_id,
+            payroll_model.Payroll.approved.is_(False),
+        )
+        .count()
+    )
 
     # Return structured summary
     return {
@@ -62,6 +70,7 @@ def driver_summary(db: Session, driver_id: int) -> dict:
         "approved_days": approved,
         "pending_days": pending,
     }
+
 
 # -----------------------------------------------------------
 # ROUTE REPORT
@@ -77,18 +86,16 @@ def route_summary(db: Session, route_id: int) -> dict:
 
     # Extract stops with ID, order, and type (pickup/dropoff)
     stops_list = [
-        {"id": st.id, "sequence": st.sequence, "type": st.type.value}
-        for st in r.stops
+        {"id": st.id, "sequence": st.sequence, "type": st.type.value} for st in r.stops
     ]
 
     # Extract all students assigned to this route
-    students_list = [
-        {"id": s.id, "name": s.name, "grade": s.grade}
-        for s in r.students
-    ]
+    students_list = [{"id": s.id, "name": s.name, "grade": s.grade} for s in r.students]
 
     # Count total runs recorded for this route
-    total_runs = db.query(run_model.Run).filter(run_model.Run.route_id == route_id).count()
+    total_runs = (
+        db.query(run_model.Run).filter(run_model.Run.route_id == route_id).count()
+    )
 
     # Return combined summary
     return {
@@ -102,6 +109,7 @@ def route_summary(db: Session, route_id: int) -> dict:
         "total_runs": total_runs,
     }
 
+
 # -----------------------------------------------------------
 # PAYROLL SUMMARY (Department view)
 # -----------------------------------------------------------
@@ -110,8 +118,10 @@ def payroll_summary(db: Session, start: date, end: date) -> list:
     # Query payroll records between two specific dates
     records = (
         db.query(payroll_model.Payroll)
-        .filter(payroll_model.Payroll.work_date >= start,
-                payroll_model.Payroll.work_date <= end)
+        .filter(
+            payroll_model.Payroll.work_date >= start,
+            payroll_model.Payroll.work_date <= end,
+        )
         .all()
     )
 
@@ -128,6 +138,7 @@ def payroll_summary(db: Session, start: date, end: date) -> list:
         )
     return summary
 
+
 # -----------------------------------------------------------
 # GLOBAL DISPATCHER (Optional unified interface)
 # -----------------------------------------------------------
@@ -136,7 +147,7 @@ def generate_report(
     report_type: str,
     ref_id: int = None,
     start: date = None,
-    end: date = None
+    end: date = None,
 ):
     """Generic entry point for any report type."""
     # Route calls to their respective functions
