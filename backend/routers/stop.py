@@ -243,10 +243,21 @@ def delete_stop(stop_id: int, db: Session = Depends(get_db)):
         db.commit()                                                       # Commit entire operation atomically
         return None                                                       # 204 No Content response
 
-    except IntegrityError as e:                                           # Catch DB constraint issues
-        db.rollback()                                                     # Roll back transaction safely
-        raise_conflict_if_unique(db, e)                                   # Convert UNIQUE violations to HTTP 409
-        raise HTTPException(status_code=400, detail="Integrity error")     # Other DB errors → 400
+    # -----------------------------------------------------------
+# IntegrityError handling
+# - Convert UNIQUE(route_id, sequence) into HTTP 409
+# - Keep other integrity errors as HTTP 400
+# -----------------------------------------------------------
+    except IntegrityError as e:                                             # Catch DB constraint issues
+        db.rollback()                                                       # Roll back transaction safely
+        raise_conflict_if_unique(                                           # Raise 409 if UNIQUE violated
+            db,                                                             # DB session (dialect detection)
+            e,                                                              # IntegrityError instance
+            constraint_name="uq_stops_route_sequence",                      # Postgres constraint name
+            sqlite_columns=("route_id", "sequence"),                        # SQLite message fallback keys
+            detail="Stop sequence conflict for this route",                 # Client-friendly 409 detail
+        )
+        raise HTTPException(status_code=400, detail="Integrity error")      # Other DB errors → 400
 
 
 # -----------------------------------------------------------
@@ -302,11 +313,21 @@ def reorder_stop(stop_id: int, payload: schemas.StopReorder, db: Session = Depen
         db.refresh(stop)                                                  # Reload updated stop
         return stop                                                       # Return updated stop
 
-    except IntegrityError as e:                                           # Catch DB integrity errors
-        db.rollback()                                                     # Roll back transaction safely
-        raise_conflict_if_unique(db, e)                                   # Convert UNIQUE violations to HTTP 409
-        raise HTTPException(status_code=400, detail="Integrity error")     # Other integrity issues
-
+    # -----------------------------------------------------------
+# IntegrityError handling
+# - Convert UNIQUE(route_id, sequence) into HTTP 409
+# - Keep other integrity errors as HTTP 400
+# -----------------------------------------------------------
+    except IntegrityError as e:                                               # Catch DB constraint issues
+        db.rollback()                                                         # Roll back transaction safely
+        raise_conflict_if_unique(                                             # Raise 409 if UNIQUE violated
+            db,                                                               # DB session (dialect detection)
+            e,                                                                # IntegrityError instance
+            constraint_name="uq_stops_route_sequence",                        # Postgres constraint name
+            sqlite_columns=("route_id", "sequence"),                          # SQLite message fallback keys
+            detail="Stop sequence conflict for this route",                   # Client-friendly 409 detail
+        )
+        raise HTTPException(status_code=400, detail="Integrity error")        # Other DB errors → 400
 # -----------------------------------------------------------
 # GET /stops/validate/{route_id}
 # DEV TOOL — Validate route sequence integrity
@@ -380,7 +401,18 @@ def force_normalize_route(route_id: int, db: Session = Depends(get_db)):
             "sequences": [s.sequence for s in stops]
         }
 
-    except IntegrityError as e:                                     # Handle constraint issues
-        db.rollback()
-        raise_conflict_if_unique(db, e)                                # Convert UNIQUE violations to HTTP 409
-        raise HTTPException(status_code=400, detail="Integrity error")
+   # -----------------------------------------------------------
+# IntegrityError handling
+# - Convert UNIQUE(route_id, sequence) into HTTP 409
+# - Keep other integrity errors as HTTP 400
+# -----------------------------------------------------------
+    except IntegrityError as e:                                         # Catch DB constraint errors
+        db.rollback()                                                   # Roll back transaction safely
+        raise_conflict_if_unique(                                       # Raise 409 if UNIQUE violated
+            db,                                                         # DB session (dialect detection)
+            e,                                                          # IntegrityError instance
+            constraint_name="uq_stops_route_sequence",                  # Postgres constraint name
+            sqlite_columns=("route_id", "sequence"),                    # SQLite message fallback keys
+            detail="Stop sequence conflict for this route",             # Client-friendly 409 detail
+        )
+        raise HTTPException(status_code=400, detail="Integrity error")  # Other integrity issues → 400
