@@ -22,14 +22,16 @@ class StopType(str, Enum):
 # -----------------------------------------------------------
 # Schema for creating a stop (POST request)
 # -----------------------------------------------------------
-class StopCreate(BaseModel):  # Create schema
-    route_id: int  # Required route id
-    type: str  # Required ("pickup" or "dropoff")
-    sequence: Optional[int] = None  # Optional; backend can auto-set
-    name: Optional[str] = None  # Optional
-    address: Optional[str] = None  # Optional
-    latitude: Optional[float] = None  # Optional
-    longitude: Optional[float] = None  # Optional
+class StopCreate(BaseModel):                                   # Create schema
+    route_id: int                                              # Required route id
+    type: str                                                  # Required ("pickup" or "dropoff")
+    sequence: Optional[int] = None                             # Optional; backend can auto-set
+
+    name: Optional[str] = None                                 # Optional stop name
+    address: Optional[str] = None                              # Optional address
+
+    latitude: Optional[float] = None                           # Optional latitude
+    longitude: Optional[float] = None                          # Optional longitude
 
 
 class StopUpdate(BaseModel):  # Partial update schema for Stop

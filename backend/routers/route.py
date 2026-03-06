@@ -24,7 +24,9 @@ router = APIRouter(prefix="/routes", tags=["Routes"])
 # -----------------------------------------------------------
 @router.post("/", response_model=RouteOut)
 def create_route(route: RouteCreate, db: Session = Depends(get_db)):
-    db_route = Route(**route.model_dump(exclude_unset=True))
+    payload = route.model_dump(exclude_unset=True)            # Convert Pydantic RouteCreate -> dict
+    school_ids = payload.pop("school_ids", [])                # Remove school_ids (not a Route model column); keep list for linking
+    db_route = Route(**payload)                               # Create Route using only valid Route model fields
     db.add(db_route)
     db.commit()
     db.refresh(db_route)

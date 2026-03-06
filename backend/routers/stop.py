@@ -304,9 +304,19 @@ def create_stop(payload: StopCreate, db: Session = Depends(get_db)):
 
         # -----------------------------------------------------------
         # Create stop record (force computed sequence)
+        # - Auto-fill stop name if missing:
+        #     1) Use provided name
+        #     2) If name missing but address exists → use address
+        #     3) If both missing → use "Stop {sequence}"
         # -----------------------------------------------------------
         data = payload.model_dump()  # Convert payload to dict
         data["sequence"] = seq  # Force final sequence into dict
+
+        if not data.get("name") and data.get("address"):  # If name missing but address exists
+            data["name"] = data["address"]  # Use address as stop name
+
+        if not data.get("name"):  # If still missing
+            data["name"] = f"Stop {seq}"  # Fallback name based on sequence
 
         stop = stop_model.Stop(**data)  # Build ORM object
         db.add(stop)  # Add to session
@@ -326,8 +336,6 @@ def create_stop(payload: StopCreate, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=400, detail="Integrity error"
         )  # Other integrity issues → 400
-
-
 # -----------------------------------------------------------
 # GET /stops → List stops (optionally filter by route_id)
 # Always ordered by sequence ascending
