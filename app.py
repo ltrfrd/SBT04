@@ -45,6 +45,7 @@ from backend.routers import (
 # ---------- UTILS ----------
 # Custom utilities: GPS tools and authentication helpers
 from backend.utils import gps_tools
+from backend.utils import report_generator
 from backend.utils.auth import get_current_driver, login_driver, logout_driver
 
 # ---------- WEBSOCKET TRACKING ----------
@@ -172,16 +173,19 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
 @app.get("/route_report/{route_id}", response_class=HTMLResponse)
 def route_report(route_id: int, request: Request, db: Session = Depends(get_db)):
     """Shows route-specific report including driver name and route details."""
+    route_data = report_generator.route_summary(db, route_id)
+    if "error" in route_data:
+        raise HTTPException(status_code=404, detail=route_data["error"])
+
     route = db.get(route_model.Route, route_id)
-    if not route:
-        raise HTTPException(status_code=404, detail="Route not found")
-    driver_name = route.driver.name if route.driver else "Unassigned"
+    driver_name = route.driver.name if route and route.driver else "Unassigned"
     return templates.TemplateResponse(
         request,                                              # New Starlette signature: request first
             "route_report.html",                                  # Template name
             {
             "request": request,
             "route": route,
+            "route_data": route_data,
             "driver_name": driver_name
             }
         )

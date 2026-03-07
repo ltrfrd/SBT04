@@ -22,6 +22,7 @@ from typing import Generator                                # Generator typing
 # -----------------------------------------------------------
 from dotenv import load_dotenv                              # Load .env into os.environ
 from sqlalchemy import create_engine                         # Create DB engine
+from sqlalchemy import event
 from sqlalchemy.orm import declarative_base  # SQLAlchemy 2.x: declarative_base now imported from sqlalchemy.orm
 from sqlalchemy.orm import sessionmaker      # Session factory for creating DB sessions
 
@@ -46,6 +47,13 @@ engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
 )
+
+if "sqlite" in DATABASE_URL:
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 
 # -----------------------------------------------------------

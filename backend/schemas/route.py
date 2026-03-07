@@ -21,8 +21,9 @@ class RouteCreate(BaseModel):
 # -----------------------------------------------------------
 class RouteOut(BaseModel):
     id: int
-    unit_number: str
-    driver_id: int
+    route_number: str
+    unit_number: Optional[str] = None
+    driver_id: Optional[int] = None
     school_ids: Optional[List[int]] = None
 
     model_config = ConfigDict(from_attributes=True)

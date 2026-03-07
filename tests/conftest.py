@@ -25,6 +25,7 @@ if PROJECT_ROOT not in sys.path:
 
 import pytest  # Pytest fixtures
 from sqlalchemy import create_engine  # DB engine factory
+from sqlalchemy import event
 from sqlalchemy.orm import sessionmaker  # Session factory
 
 from database import Base  # SQLAlchemy Base (root database.py)
@@ -46,6 +47,12 @@ def db_engine(tmp_path):
         connect_args={"check_same_thread": False},  # Needed for TestClient threads
         pool_pre_ping=True,  # Helps avoid stale connections
     )
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
     Base.metadata.create_all(bind=engine)  # Create tables
     yield engine  # Provide engine to tests

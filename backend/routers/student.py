@@ -12,6 +12,8 @@ from backend.models import student as student_model  # Student model
 from backend.models import school as school_model  # School validation
 from backend.models import route as route_model  # Route validation
 from backend.models import stop as stop_model  # Stop validation
+from backend.models import associations as assoc_model  # Run assignment mapping
+from backend.models import run as run_model  # Route->run join
 
 # -----------------------------------------------------------
 # Router setup
@@ -28,7 +30,7 @@ router = APIRouter(
     "/", response_model=schemas.StudentOut, status_code=status.HTTP_201_CREATED
 )
 def create_student(student: schemas.StudentCreate, db: Session = Depends(get_db)):
-    """Add a new student and link to school, route, and stop."""
+    """Add a new student. Runtime run/stop mapping is managed in StudentRunAssignment."""
     # Validate school
     school = db.get(school_model.School, student.school_id)
     if not school:
@@ -79,7 +81,7 @@ def get_student(student_id: int, db: Session = Depends(get_db)):
 def update_student(
     student_id: int, student_in: schemas.StudentCreate, db: Session = Depends(get_db)
 ):
-    """Update student details or reassign route/stop."""
+    """Update student profile fields. Runtime run assignment is managed elsewhere."""
     student = db.get(student_model.Student, student_id)
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
@@ -125,12 +127,18 @@ def get_students_by_school(school_id: int, db: Session = Depends(get_db)):
 # -----------------------------------------------------------
 @router.get("/route/{route_id}", response_model=List[schemas.StudentOut])
 def get_students_by_route(route_id: int, db: Session = Depends(get_db)):
-    """List all students assigned to a given route."""
+    """List students with at least one run assignment on this route."""
     route = db.get(route_model.Route, route_id)
     if not route:
         raise HTTPException(status_code=404, detail="Route not found")
     return (
         db.query(student_model.Student)
-        .filter(student_model.Student.route_id == route_id)
+        .join(
+            assoc_model.StudentRunAssignment,
+            assoc_model.StudentRunAssignment.student_id == student_model.Student.id,
+        )
+        .join(run_model.Run, run_model.Run.id == assoc_model.StudentRunAssignment.run_id)
+        .filter(run_model.Run.route_id == route_id)
+        .distinct()
         .all()
     )

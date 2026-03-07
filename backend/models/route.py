@@ -11,9 +11,14 @@ class Route(Base):
     route_number = Column(String(50), nullable=False)
     unit_number = Column(String(50), nullable=True)
     num_runs = Column(Integer, nullable=True)
-    driver_id = Column(Integer, ForeignKey("drivers.id"))
+    driver_id = Column(Integer, ForeignKey("drivers.id", ondelete="SET NULL"), nullable=True)
 
     driver = relationship("Driver", back_populates="routes")
     schools = relationship("School", secondary=route_schools, back_populates="routes")
-    runs = relationship("Run", back_populates="route", cascade="all, delete-orphan")
-    students = relationship("Student", back_populates="route")
+    runs = relationship(
+        "Run",
+        back_populates="route",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    students = relationship("Student", viewonly=True)

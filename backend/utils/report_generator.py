@@ -5,6 +5,8 @@ from backend.models import (
     route as route_model,
     run as run_model,
     payroll as payroll_model,
+    associations as assoc_model,
+    student as student_model,
 )
 
 
@@ -74,12 +76,33 @@ def route_summary(db: Session, route_id: int) -> dict:
                 }
             )
 
-    students_list = [{"id": s.id, "name": s.name, "grade": s.grade} for s in r.students]
+    route_run_ids = [run.id for run in r.runs]
+    assignments = []
+    if route_run_ids:
+        assignments = (
+            db.query(assoc_model.StudentRunAssignment)
+            .filter(assoc_model.StudentRunAssignment.run_id.in_(route_run_ids))
+            .all()
+        )
+
+    students_by_id = {}
+    for assignment in assignments:
+        student = db.get(student_model.Student, assignment.student_id)
+        if not student or student.id in students_by_id:
+            continue
+        students_by_id[student.id] = {
+            "id": student.id,
+            "name": student.name,
+            "grade": student.grade,
+        }
+
+    students_list = list(students_by_id.values())
 
     total_runs = db.query(run_model.Run).filter(run_model.Run.route_id == route_id).count()
 
     return {
         "route_id": route_id,
+        "route_number": r.route_number,
         "unit_number": r.unit_number,
         "num_runs": r.num_runs,
         "driver_id": r.driver_id,
