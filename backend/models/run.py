@@ -67,8 +67,8 @@ class Run(Base):
     )
 
     # -------------------------------------------------------------------------
-    # Operational Fields
-    # -------------------------------------------------------------------------
+# Operational Fields
+# -------------------------------------------------------------------------
     run_type = Column(
         Enum(RunType),
         nullable=False                                  # Run type is required
@@ -81,6 +81,14 @@ class Run(Base):
 
     end_time = Column(
         DateTime                                        # Null while run is still active
+    )
+
+# -------------------------------------------------------------------------
+# Live progress tracking
+# -------------------------------------------------------------------------
+    current_stop_sequence = Column(
+        Integer,
+        nullable=True                                   # Driver's current stop sequence in the run
     )
 
     # -------------------------------------------------------------------------

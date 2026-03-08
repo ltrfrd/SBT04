@@ -46,6 +46,7 @@ class RunOut(BaseModel):
     run_type: RunType
     start_time: datetime
     end_time: Optional[datetime] = None
+    current_stop_sequence: Optional[int] = None  # Driver's current stop sequence in the run
 
     # -------------------------------------------------------------------------
     # Enriched display fields
@@ -54,7 +55,7 @@ class RunOut(BaseModel):
     route_number: Optional[str] = None      # Route number (not route name)
 
     model_config = ConfigDict(from_attributes=True)
-
+    
 
 # =============================================================================
 # Running Board Schemas

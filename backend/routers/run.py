@@ -116,6 +116,7 @@ def start_run(run: RunStart, db: Session = Depends(get_db)):
         route_id=run.route_id,  # Assigned route
         run_type=run.run_type,  # AM / PM / other
         start_time=datetime.now(timezone.utc).replace(tzinfo=None),  # Start timestamp
+        current_stop_sequence=None,  # No stop reached yet
     )
 
     db.add(new_run)  # Add run to session
@@ -330,6 +331,7 @@ def get_all_runs(
             run_type=run.run_type,                         # Run type
             start_time=run.start_time,                     # Start timestamp
             end_time=run.end_time,                         # End timestamp
+            current_stop_sequence=run.current_stop_sequence,
             driver_name=run.driver.name if run.driver else None,            # Driver name
             route_number=run.route.route_number if run.route else None,     # Route number
         )
@@ -411,6 +413,61 @@ def get_run_stops(run_id: int, db: Session = Depends(get_db)):
 
     return stops  # Return ordered stop list
 
+
+# =============================================================================
+# POST /runs/{run_id}/arrive_stop
+# Mark the driver as arrived at a specific stop in the run
+#
+# Rules:
+#   - run must exist
+#   - run must still be active
+#   - stop sequence must exist in that run
+#   - updates run.current_stop_sequence
+# =============================================================================
+@router.post("/{run_id}/arrive_stop", response_model=schemas.RunOut)
+def arrive_at_stop(
+    run_id: int,
+    stop_sequence: int = Query(..., ge=1),          # Stop sequence reached by driver
+    db: Session = Depends(get_db),                  # Database session dependency
+):
+    # -------------------------------------------------------------------------
+    # Load run
+    # -------------------------------------------------------------------------
+    run = db.get(run_model.Run, run_id)             # Load run by ID
+
+    if not run:                                     # If run does not exist
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    if run.end_time is not None:                    # If run already ended
+        raise HTTPException(status_code=400, detail="Run has already ended")
+
+    # -------------------------------------------------------------------------
+    # Validate stop exists in this run
+    # -------------------------------------------------------------------------
+    stop = (
+        db.query(stop_model.Stop)
+        .filter(stop_model.Stop.run_id == run_id)   # Only stops in this run
+        .filter(stop_model.Stop.sequence == stop_sequence)
+        .first()
+    )
+
+    if not stop:                                    # If stop sequence not found
+        raise HTTPException(
+            status_code=404,
+            detail="Stop sequence not found for this run",
+        )
+
+    # -------------------------------------------------------------------------
+    # Update live run progress
+    # -------------------------------------------------------------------------
+    run.current_stop_sequence = stop_sequence       # Save driver's current stop sequence
+
+    db.commit()                                     # Save updated run
+    db.refresh(run)                                 # Reload updated run
+
+    return run                                      # Return updated run
+
+
 # =============================================================================
 # GET /runs/{run_id}
 # Return one run by ID with enriched display fields
@@ -443,7 +500,8 @@ def get_run(run_id: int, db: Session = Depends(get_db)):
         route_id=run.route_id,                          # Route ID
         run_type=run.run_type,                          # Run type
         start_time=run.start_time,                      # Start timestamp
-        end_time=run.end_time,                          # End timestamp
+        end_time=run.end_time,
+        current_stop_sequence=run.current_stop_sequence,                          # End timestamp
         driver_name=run.driver.name if run.driver else None,              # Driver name
         route_number=run.route.route_number if run.route else None,       # Route number
     )
