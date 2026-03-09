@@ -111,7 +111,7 @@ class RunSummaryOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    # =============================================================================
+# =============================================================================
 # Live Run Progress Output
 # -----------------------------------------------------------------------------
 # Used by the driver workflow endpoint that shows:
@@ -140,3 +140,157 @@ class RunProgressOut(BaseModel):
     next_stop_planned_time: Optional[time] = None  # Planned time for next stop
 
     model_config = ConfigDict(from_attributes=True)  # Enable ORM -> schema conversion
+
+    # =============================================================================
+# Student Pickup Schemas
+# -----------------------------------------------------------------------------
+# These schemas support runtime student boarding operations during a run.
+#
+# Purpose:
+#   - Allow driver to mark a student as picked up at a stop
+#   - Used by endpoint:
+#       POST /runs/{run_id}/pickup_student
+#
+# Workflow:
+#   Driver arrives at stop → boards student → API marks pickup
+# =============================================================================
+
+
+# =============================================================================
+# PickupStudentRequest
+# -----------------------------------------------------------------------------
+# Request body sent by the driver to mark a student as boarded.
+#
+# Only the student_id is required because:
+#   - run_id is already provided in the endpoint path
+#   - the stop is determined automatically using run.current_stop_sequence
+# =============================================================================
+
+class PickupStudentRequest(BaseModel):
+    student_id: int  # ID of the student being picked up
+
+
+# =============================================================================
+# PickupStudentResponse
+# -----------------------------------------------------------------------------
+# Response returned after a successful pickup operation.
+#
+# Provides confirmation and key runtime tracking fields so that:
+#   - driver apps
+#   - live dashboards
+#   - parent notifications (future feature)
+#
+# can immediately know the student is onboard.
+# =============================================================================
+
+class PickupStudentResponse(BaseModel):
+    message: str  # Human-readable confirmation message
+
+    run_id: int  # Run where pickup occurred
+    student_id: int  # Student that was picked up
+
+    picked_up: bool  # Confirms pickup flag was set
+    is_onboard: bool  # Indicates the student is now on the bus
+
+    picked_up_at: datetime  # Timestamp when pickup occurred
+
+# =============================================================================
+# Student Dropoff Schemas
+# -----------------------------------------------------------------------------
+# These schemas support runtime student drop-off operations during a run.
+#
+# Purpose:
+#   - Allow driver to mark a student as dropped off
+#   - Used by endpoint:
+#       POST /runs/{run_id}/dropoff_student
+#
+# Workflow:
+#   Student onboard → driver confirms drop-off → system records timestamp
+# =============================================================================
+
+
+# =============================================================================
+# DropoffStudentRequest
+# -----------------------------------------------------------------------------
+# Request body sent by the driver to mark a student as dropped off.
+#
+# Only the student_id is required because:
+#   - run_id is already provided in the endpoint path
+#   - stop validation uses run.current_stop_sequence
+# =============================================================================
+class DropoffStudentRequest(BaseModel):
+    student_id: int  # ID of the student being dropped off
+
+
+# =============================================================================
+# DropoffStudentResponse
+# -----------------------------------------------------------------------------
+# Response returned after a successful drop-off operation.
+#
+# Confirms:
+#   - student is no longer onboard
+#   - drop-off timestamp stored
+#
+# This information supports:
+#   - attendance verification
+#   - parent notifications
+#   - route completion analytics
+# =============================================================================
+class DropoffStudentResponse(BaseModel):
+    message: str  # Human-readable confirmation
+
+    run_id: int  # Run where drop-off occurred
+    student_id: int  # Student that was dropped off
+
+    dropped_off: bool  # Confirms drop-off flag was set
+    is_onboard: bool  # Should now be False
+
+    dropped_off_at: datetime  # Timestamp when drop-off occurred
+
+    # =============================================================================
+# Onboard Students Schemas
+# -----------------------------------------------------------------------------
+# These schemas support returning the list of students currently onboard
+# during an active run.
+#
+# Used by endpoint:
+#   - GET /runs/{run_id}/onboard_students
+# =============================================================================
+
+
+# =============================================================================
+# OnboardStudentItem
+# -----------------------------------------------------------------------------
+# One student currently onboard the bus.
+#
+# Includes:
+#   - student identity
+#   - assigned stop info
+#   - pickup timestamp
+# =============================================================================
+class OnboardStudentItem(BaseModel):
+    student_id: int  # Student ID
+    student_name: str  # Student name
+
+    stop_id: int  # Assigned stop ID
+    stop_name: str  # Assigned stop name
+    stop_sequence: int  # Assigned stop order in the run
+
+    picked_up_at: datetime | None = None  # Time student was picked up
+
+
+# =============================================================================
+# OnboardStudentsResponse
+# -----------------------------------------------------------------------------
+# Response returned for the onboard-students endpoint.
+#
+# Includes:
+#   - run ID
+#   - total students currently onboard
+#   - ordered list of onboard students
+# =============================================================================
+class OnboardStudentsResponse(BaseModel):
+    run_id: int  # Run being checked
+    total_onboard_students: int  # Count of onboard students
+
+    students: list[OnboardStudentItem]  # Students currently onboard

@@ -23,7 +23,6 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import joinedload  # Used for eager loading relationships
-
 from database import get_db
 from backend import schemas
 from backend.models import run as run_model
@@ -38,7 +37,14 @@ from backend.schemas.run import (  # Running board response schemas
     RunningBoardStop,
     RunningBoardStudent,
 )
-
+from backend.schemas.run import (
+    PickupStudentRequest,
+    PickupStudentResponse,
+    DropoffStudentRequest,
+    DropoffStudentResponse,
+    OnboardStudentsResponse,
+    OnboardStudentItem,
+)
 router = APIRouter(prefix="/runs", tags=["Runs"])
 
 
@@ -532,6 +538,366 @@ def advance_to_next_stop(
     db.refresh(run)                                 # Reload updated run
 
     return run                                      # Return updated run
+
+# =============================================================================
+# POST /runs/{run_id}/pickup_student
+# -----------------------------------------------------------------------------
+# Mark a student as picked up during an active run.
+#
+# Purpose:
+#   - confirm boarding at the current stop
+#   - store pickup timestamp
+#   - mark student as onboard
+#
+# Validation:
+#   - run must exist
+#   - run must be started / active
+#   - run must currently be at a stop
+#   - student must be assigned to this run
+#   - student's assigned stop must match current stop sequence
+#   - student must not already be picked up
+# =============================================================================
+@router.post("/{run_id}/pickup_student", response_model=PickupStudentResponse)
+def pickup_student(
+    run_id: int,
+    payload: PickupStudentRequest,
+    db: Session = Depends(get_db),
+):
+    # -------------------------------------------------------------------------
+    # Load the target run
+    # -------------------------------------------------------------------------
+    run = db.query(run_model.Run).filter(run_model.Run.id == run_id).first()
+
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Run not found",
+        )
+
+    # -------------------------------------------------------------------------
+    # Ensure the run has started
+    # -------------------------------------------------------------------------
+    # Adjust this rule later if your project adds an explicit run status field.
+    if run.start_time is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Run has not started yet",
+        )
+
+    # -------------------------------------------------------------------------
+    # Ensure the driver is currently positioned at a stop
+    # -------------------------------------------------------------------------
+    if run.current_stop_sequence is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Run is not currently at a stop",
+        )
+
+    # -------------------------------------------------------------------------
+    # Load the student assignment for this run
+    # -------------------------------------------------------------------------
+    # joinedload() is used so the assigned stop is available immediately.
+    assignment = (
+        db.query(StudentRunAssignment)
+        .options(joinedload(StudentRunAssignment.stop))
+        .filter(
+            StudentRunAssignment.run_id == run_id,
+            StudentRunAssignment.student_id == payload.student_id,
+        )
+        .first()
+    )
+
+    if not assignment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Student is not assigned to this run",
+        )
+
+    # -------------------------------------------------------------------------
+    # Ensure the assignment is connected to a stop
+    # -------------------------------------------------------------------------
+    if not assignment.stop:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Student assignment is missing stop information",
+        )
+
+    # -------------------------------------------------------------------------
+    # Ensure the student is being picked up at the correct current stop
+    # -------------------------------------------------------------------------
+    if assignment.stop.sequence != run.current_stop_sequence:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Student is not assigned to the current stop",
+        )
+
+    # -------------------------------------------------------------------------
+    # Prevent duplicate pickup
+    # -------------------------------------------------------------------------
+    if assignment.picked_up is True:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Student has already been picked up",
+        )
+
+    # -------------------------------------------------------------------------
+    # Mark pickup fields
+    # -------------------------------------------------------------------------
+    now = datetime.now(timezone.utc)  # Current UTC timestamp (timezone-aware)
+    
+    assignment.picked_up = True  # Student has boarded
+    assignment.picked_up_at = now  # Store pickup time
+    assignment.is_onboard = True  # Student is now physically on the bus
+
+    # -------------------------------------------------------------------------
+    # Save changes
+    # -------------------------------------------------------------------------
+    db.commit()  # Persist pickup state
+    db.refresh(assignment)  # Reload updated assignment from DB
+
+    # -------------------------------------------------------------------------
+    # Return clean API response
+    # -------------------------------------------------------------------------
+    return PickupStudentResponse(
+        message="Student picked up successfully",
+        run_id=run.id,
+        student_id=assignment.student_id,
+        picked_up=assignment.picked_up,
+        is_onboard=assignment.is_onboard,
+        picked_up_at=assignment.picked_up_at,
+    )
+
+# =============================================================================
+# POST /runs/{run_id}/dropoff_student
+# -----------------------------------------------------------------------------
+# Mark a student as dropped off during an active run.
+#
+# Purpose:
+#   - confirm drop-off at the current stop
+#   - store drop-off timestamp
+#   - mark student as no longer onboard
+#
+# Validation:
+#   - run must exist
+#   - run must be started / active
+#   - run must currently be at a stop
+#   - student must be assigned to this run
+#   - student's assigned stop must match current stop sequence
+#   - student must currently be onboard
+#   - student must not already be dropped off
+# =============================================================================
+@router.post("/{run_id}/dropoff_student", response_model=DropoffStudentResponse)
+def dropoff_student(
+    run_id: int,
+    payload: DropoffStudentRequest,
+    db: Session = Depends(get_db),
+):
+    # -------------------------------------------------------------------------
+    # Load the target run
+    # -------------------------------------------------------------------------
+    run = (
+        db.query(run_model.Run)
+        .filter(run_model.Run.id == run_id)
+        .first()
+    )  # Find run by ID
+
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Run not found",
+        )
+
+    # -------------------------------------------------------------------------
+    # Ensure the run has started and is still active
+    # -------------------------------------------------------------------------
+    if run.start_time is None or run.end_time is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Run is not active",
+        )
+
+    # -------------------------------------------------------------------------
+    # Ensure the run is currently positioned at a stop
+    # -------------------------------------------------------------------------
+    if run.current_stop_sequence is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Run is not currently at a stop",
+        )
+
+    # -------------------------------------------------------------------------
+    # Load the student's runtime assignment and assigned stop
+    # -------------------------------------------------------------------------
+    assignment = (
+        db.query(StudentRunAssignment)
+        .options(joinedload(StudentRunAssignment.stop))
+        .filter(
+            StudentRunAssignment.run_id == run_id,
+            StudentRunAssignment.student_id == payload.student_id,
+        )
+        .first()
+    )
+
+    if not assignment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Student is not assigned to this run",
+        )
+
+    # -------------------------------------------------------------------------
+    # Ensure assignment includes stop information
+    # -------------------------------------------------------------------------
+    if not assignment.stop:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Student assignment is missing stop information",
+        )
+
+    # -------------------------------------------------------------------------
+    # Ensure the student's assigned stop matches the current run stop
+    # -------------------------------------------------------------------------
+    if assignment.stop.sequence != run.current_stop_sequence:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Student is not assigned to the current stop",
+        )
+
+    # -------------------------------------------------------------------------
+    # Ensure the student is currently onboard before drop-off
+    # -------------------------------------------------------------------------
+    if assignment.picked_up is not True or assignment.is_onboard is not True:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Student is not currently onboard",
+        )
+
+    # -------------------------------------------------------------------------
+    # Prevent duplicate drop-off
+    # -------------------------------------------------------------------------
+    if assignment.dropped_off is True:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Student has already been dropped off",
+        )
+
+    # -------------------------------------------------------------------------
+    # Mark drop-off fields
+    # -------------------------------------------------------------------------
+    now = datetime.now(timezone.utc)  # Current UTC timestamp (timezone-aware)
+
+    assignment.dropped_off = True  # Student has been dropped off
+    assignment.dropped_off_at = now  # Store drop-off time
+    assignment.is_onboard = False  # Student is no longer on the bus
+
+    # -------------------------------------------------------------------------
+    # Save changes
+    # -------------------------------------------------------------------------
+    db.commit()  # Persist drop-off state
+    db.refresh(assignment)  # Reload updated assignment from DB
+
+    # -------------------------------------------------------------------------
+    # Return clean API response
+    # -------------------------------------------------------------------------
+    return DropoffStudentResponse(
+        message="Student dropped off successfully",
+        run_id=run.id,
+        student_id=assignment.student_id,
+        dropped_off=assignment.dropped_off,
+        is_onboard=assignment.is_onboard,
+        dropped_off_at=assignment.dropped_off_at,
+    )
+
+# =============================================================================
+# GET /runs/{run_id}/onboard_students
+# -----------------------------------------------------------------------------
+# Return all students currently onboard the bus for an active run.
+#
+# Purpose:
+#   - allow drivers to see who is still on the bus
+#   - allow dispatch to monitor live bus occupancy
+#
+# Data source:
+#   StudentRunAssignment where:
+#       run_id == run_id
+#       is_onboard == True
+#
+# Students are returned ordered by stop sequence.
+# =============================================================================
+@router.get("/{run_id}/onboard_students", response_model=OnboardStudentsResponse)
+def get_onboard_students(
+    run_id: int,
+    db: Session = Depends(get_db),
+):
+    # -------------------------------------------------------------------------
+    # Load run
+    # -------------------------------------------------------------------------
+    run = (
+        db.query(run_model.Run)
+        .filter(run_model.Run.id == run_id)
+        .first()
+    )
+
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Run not found",
+        )
+
+    # -------------------------------------------------------------------------
+    # Ensure run is active
+    # -------------------------------------------------------------------------
+    if run.start_time is None or run.end_time is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Run is not active",
+        )
+
+    # -------------------------------------------------------------------------
+    # Load onboard assignments with related student + stop
+    # -------------------------------------------------------------------------
+    assignments = (
+        db.query(StudentRunAssignment)
+        .options(
+            joinedload(StudentRunAssignment.student),
+            joinedload(StudentRunAssignment.stop),
+        )
+        .filter(
+            StudentRunAssignment.run_id == run_id,
+            StudentRunAssignment.is_onboard == True,
+        )
+        .all()
+    )
+
+    # -------------------------------------------------------------------------
+    # Sort students by stop sequence
+    # -------------------------------------------------------------------------
+    assignments.sort(key=lambda a: a.stop.sequence if a.stop else 0)
+
+    # -------------------------------------------------------------------------
+    # Build response items
+    # -------------------------------------------------------------------------
+    students = []
+
+    for a in assignments:
+        students.append(
+            OnboardStudentItem(
+                student_id=a.student.id,
+                student_name=a.student.name,
+                stop_id=a.stop.id,
+                stop_name=a.stop.name,
+                stop_sequence=a.stop.sequence,
+                picked_up_at=a.picked_up_at,
+            )
+        )
+
+    # -------------------------------------------------------------------------
+    # Return structured response
+    # -------------------------------------------------------------------------
+    return OnboardStudentsResponse(
+        run_id=run_id,
+        total_onboard_students=len(students),
+        students=students,
+    )
 
 # =============================================================================
 # GET /runs/{run_id}
