@@ -467,6 +467,71 @@ def arrive_at_stop(
 
     return run                                      # Return updated run
 
+# =============================================================================
+# POST /runs/{run_id}/next_stop
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Advance the run to the next stop without requiring the driver to know the
+#   stop sequence number.
+# =============================================================================
+@router.post("/{run_id}/next_stop", response_model=schemas.RunOut)
+def advance_to_next_stop(
+    run_id: int,
+    db: Session = Depends(get_db),                  # Database session dependency
+):
+    # -------------------------------------------------------------------------
+    # Load run
+    # -------------------------------------------------------------------------
+    run = db.get(run_model.Run, run_id)             # Load run by ID
+
+    if not run:                                     # If run does not exist
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    if run.end_time is not None:                    # If run already ended
+        raise HTTPException(status_code=400, detail="Run has already ended")
+
+    # -------------------------------------------------------------------------
+    # Load ordered stops for this run
+    # -------------------------------------------------------------------------
+    stops = (
+        db.query(stop_model.Stop)
+        .filter(stop_model.Stop.run_id == run_id)   # Only stops in this run
+        .order_by(stop_model.Stop.sequence.asc(), stop_model.Stop.id.asc())
+        .all()
+    )
+
+    if not stops:                                   # If run has no stops
+        raise HTTPException(status_code=404, detail="No stops found for this run")
+
+    # -------------------------------------------------------------------------
+    # Resolve next stop sequence
+    # -------------------------------------------------------------------------
+    if run.current_stop_sequence is None:           # No progress stored yet
+        next_sequence = 1                           # Start at first stop
+    else:
+        next_sequence = run.current_stop_sequence + 1  # Advance to next stop
+
+    # -------------------------------------------------------------------------
+    # Validate next stop exists in this run
+    # -------------------------------------------------------------------------
+    next_stop = (
+        db.query(stop_model.Stop)
+        .filter(stop_model.Stop.run_id == run_id)   # Only stops in this run
+        .filter(stop_model.Stop.sequence == next_sequence)
+        .first()
+    )
+
+    if not next_stop:                               # No further stop available
+        raise HTTPException(status_code=404, detail="No next stop found for this run")
+
+    # -------------------------------------------------------------------------
+    # Persist progress
+    # -------------------------------------------------------------------------
+    run.current_stop_sequence = next_sequence       # Save current stop progress
+    db.commit()                                     # Persist update
+    db.refresh(run)                                 # Reload updated run
+
+    return run                                      # Return updated run
 
 # =============================================================================
 # GET /runs/{run_id}
