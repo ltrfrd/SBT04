@@ -1,3 +1,19 @@
+# ============================================================
+# Run router for BusTrack operational workflows
+# ============================================================
+
+# -----------------------------
+# Imports
+# -----------------------------
+
+# -----------------------------
+# Router / Model / Schema
+# -----------------------------
+
+# -----------------------------
+# Logic
+# -----------------------------
+
 # =============================================================================
 # backend/routers/run.py — SBT02 Run Router
 # -----------------------------------------------------------------------------
@@ -81,8 +97,10 @@ def create_run(run: RunStart, db: Session = Depends(get_db)):
         )
     new_run = run_model.Run(
         **run.model_dump(),  # Copy input payload fields
-        start_time=datetime.now(timezone.utc).replace(tzinfo=None)  # Store naive UTC
-    )
+        start_time=datetime.now(timezone.utc).replace(tzinfo=None),  # Store naive UTC
+        current_stop_id=None,  # Start with no actual stop location recorded
+        current_stop_sequence=None,  # Start with no actual stop sequence recorded
+    )  # Build the new run record
     db.add(new_run)  # Add run to session
     db.commit()  # Save to DB
     db.refresh(new_run)  # Reload saved object
@@ -124,8 +142,9 @@ def start_run(run: RunStart, db: Session = Depends(get_db)):
         route_id=run.route_id,  # Assigned route
         run_type=run.run_type,  # AM / PM / other
         start_time=datetime.now(timezone.utc).replace(tzinfo=None),  # Start timestamp
+        current_stop_id=None,  # Start with no actual stop location recorded
         current_stop_sequence=None,  # No stop reached yet
-    )
+    )  # Build the started run record
 
     db.add(new_run)  # Add run to session
     db.flush()  # Get new_run.id before copying stops
@@ -339,7 +358,8 @@ def get_all_runs(
             run_type=run.run_type,                         # Run type
             start_time=run.start_time,                     # Start timestamp
             end_time=run.end_time,                         # End timestamp
-            current_stop_sequence=run.current_stop_sequence,
+            current_stop_id=run.current_stop_id,           # Current actual stop ID
+            current_stop_sequence=run.current_stop_sequence,  # Current actual stop sequence
             driver_name=run.driver.name if run.driver else None,            # Driver name
             route_number=run.route.route_number if run.route else None,     # Route number
         )
@@ -466,9 +486,10 @@ def arrive_at_stop(
         )
 
     # -------------------------------------------------------------------------
-    # Update live run progress
+    # Update live run location
     # -------------------------------------------------------------------------
-    run.current_stop_sequence = stop_sequence       # Save driver's current stop sequence
+    run.current_stop_id = stop.id                   # Save the actual current stop ID
+    run.current_stop_sequence = stop.sequence       # Save the actual current stop sequence
 
     db.commit()                                     # Save updated run
     db.refresh(run)                                 # Reload updated run
@@ -535,7 +556,8 @@ def advance_to_next_stop(
     # -------------------------------------------------------------------------
     # Persist progress
     # -------------------------------------------------------------------------
-    run.current_stop_sequence = next_sequence       # Save current stop progress
+    run.current_stop_id = next_stop.id              # Save the resolved next stop ID
+    run.current_stop_sequence = next_stop.sequence  # Save the resolved next stop sequence
     db.commit()                                     # Persist update
     db.refresh(run)                                 # Reload updated run
 
@@ -577,19 +599,18 @@ def pickup_student(
         )
 
     # -------------------------------------------------------------------------
-    # Ensure the run has started
+    # Ensure the run is active
     # -------------------------------------------------------------------------
-    # Adjust this rule later if your project adds an explicit run status field.
-    if run.start_time is None:
+    if run.start_time is None or run.end_time is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Run has not started yet",
+            detail="Run is not active",
         )
 
     # -------------------------------------------------------------------------
     # Ensure the driver is currently positioned at a stop
     # -------------------------------------------------------------------------
-    if run.current_stop_sequence is None:
+    if run.current_stop_sequence is None or run.current_stop_id is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Run is not currently at a stop",
@@ -616,24 +637,6 @@ def pickup_student(
         )
 
     # -------------------------------------------------------------------------
-    # Ensure the assignment is connected to a stop
-    # -------------------------------------------------------------------------
-    if not assignment.stop:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Student assignment is missing stop information",
-        )
-
-    # -------------------------------------------------------------------------
-    # Ensure the student is being picked up at the correct current stop
-    # -------------------------------------------------------------------------
-    if assignment.stop.sequence != run.current_stop_sequence:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Student is not assigned to the current stop",
-        )
-
-    # -------------------------------------------------------------------------
     # Prevent duplicate pickup
     # -------------------------------------------------------------------------
     if assignment.picked_up is True:
@@ -650,6 +653,7 @@ def pickup_student(
     assignment.picked_up = True  # Student has boarded
     assignment.picked_up_at = now  # Store pickup time
     assignment.is_onboard = True  # Student is now physically on the bus
+    assignment.actual_pickup_stop_id = run.current_stop_id  # Record the actual boarding stop
 
     # -------------------------------------------------------------------------
     # Save changes
@@ -721,7 +725,7 @@ def dropoff_student(
     # -------------------------------------------------------------------------
     # Ensure the run is currently positioned at a stop
     # -------------------------------------------------------------------------
-    if run.current_stop_sequence is None:
+    if run.current_stop_sequence is None or run.current_stop_id is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Run is not currently at a stop",
@@ -744,24 +748,6 @@ def dropoff_student(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Student is not assigned to this run",
-        )
-
-    # -------------------------------------------------------------------------
-    # Ensure assignment includes stop information
-    # -------------------------------------------------------------------------
-    if not assignment.stop:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Student assignment is missing stop information",
-        )
-
-    # -------------------------------------------------------------------------
-    # Ensure the student's assigned stop matches the current run stop
-    # -------------------------------------------------------------------------
-    if assignment.stop.sequence != run.current_stop_sequence:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Student is not assigned to the current stop",
         )
 
     # -------------------------------------------------------------------------
@@ -790,6 +776,7 @@ def dropoff_student(
     assignment.dropped_off = True  # Student has been dropped off
     assignment.dropped_off_at = now  # Store drop-off time
     assignment.is_onboard = False  # Student is no longer on the bus
+    assignment.actual_dropoff_stop_id = run.current_stop_id  # Record the actual drop-off stop
 
     # -------------------------------------------------------------------------
     # Save changes
@@ -1014,8 +1001,9 @@ def get_run(run_id: int, db: Session = Depends(get_db)):
         route_id=run.route_id,                          # Route ID
         run_type=run.run_type,                          # Run type
         start_time=run.start_time,                      # Start timestamp
-        end_time=run.end_time,
-        current_stop_sequence=run.current_stop_sequence,                          # End timestamp
+        end_time=run.end_time,                          # End timestamp
+        current_stop_id=run.current_stop_id,            # Current actual stop ID
+        current_stop_sequence=run.current_stop_sequence,  # Current actual stop sequence
         driver_name=run.driver.name if run.driver else None,              # Driver name
         route_number=run.route.route_number if run.route else None,       # Route number
     )
@@ -1404,4 +1392,3 @@ def get_run_progress(
         next_stop_sequence=next_stop.sequence if next_stop else None,
         next_stop_planned_time=next_stop.planned_time if next_stop else None,
     )
-

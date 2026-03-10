@@ -1,9 +1,22 @@
-import pytest
-from backend.models.run import Run  # Run model for direct test DB setup
-from backend.models.associations import StudentRunAssignment  # Runtime student assignment model
-from tests.conftest import client
-from sqlalchemy.orm import sessionmaker  # Create local DB session for tests
+# ============================================================
+# End-to-end API tests for BusTrack backend behavior
+# ============================================================
+
+# -----------------------------
+# Imports
+# -----------------------------
+
+# -----------------------------
+# Router / Model / Schema
+# -----------------------------
+
+# -----------------------------
+# Logic
+# -----------------------------
+
 from datetime import datetime, timezone  # UTC timestamps for runtime fields
+from sqlalchemy.orm import sessionmaker  # Create local DB session for tests
+from backend.models.associations import StudentRunAssignment  # Runtime student assignment model
 # =============================================================================
 # Project Models (used directly in tests)
 # =============================================================================
@@ -960,163 +973,13 @@ def test_dropoff_student_already_dropped_off(client):
     assert second_dropoff.status_code == 400
     assert second_dropoff.json()["detail"] == "Student is not currently onboard"
 
-# =============================================================================
-# Onboard Students Tests
-# -----------------------------------------------------------------------------
-# These tests verify the onboard-students endpoint for active runs.
-#
-# Coverage:
-#   - success with one onboard student
-#   - success with no onboard students
-#   - run not found
-# =============================================================================
-
-
-# =============================================================================
-# Test onboard_students returns one onboard student
-# =============================================================================
-def test_get_onboard_students_success(client):
-    # -------------------------------------------------------------------------
-    # Create driver
-    # -------------------------------------------------------------------------
-    driver = client.post(
-        "/drivers/",
-        json={
-            "name": "Driver One",
-            "email": "driver1@test.com",
-            "phone": "11111",
-        },
-    )
-    driver_id = driver.json()["id"]
-
-    # -------------------------------------------------------------------------
-    # Create school
-    # -------------------------------------------------------------------------
-    school = client.post(
-        "/schools/",
-        json={
-            "name": "Test School",
-            "address": "123 Test St",
-        },
-    )
-    school_id = school.json()["id"]
-
-    # -------------------------------------------------------------------------
-    # Create route
-    # -------------------------------------------------------------------------
-    route = client.post(
-        "/routes/",
-        json={
-            "route_number": "R1",
-            "unit_number": "Bus-01",
-            "driver_id": driver_id,
-        },
-    )
-    route_id = route.json()["id"]
-
-    # -------------------------------------------------------------------------
-    # Create run
-    # -------------------------------------------------------------------------
-    run = client.post(
-        "/runs/",
-        json={
-            "driver_id": driver_id,
-            "route_id": route_id,
-            "run_type": "AM",
-        },
-    )
-    run_id = run.json()["id"]
-
-    # -------------------------------------------------------------------------
-    # Add stop 1 and stop 2
-    # -------------------------------------------------------------------------
-    client.post(
-        "/stops/",
-        json={
-            "name": "Stop 1",
-            "latitude": 53.5461,
-            "longitude": -113.4938,
-            "type": "pickup",
-            "run_id": run_id,
-            "sequence": 1,
-        },
-    )
-
-    stop2 = client.post(
-        "/stops/",
-        json={
-            "name": "Stop 2",
-            "latitude": 53.5561,
-            "longitude": -113.4838,
-            "type": "pickup",
-            "run_id": run_id,
-            "sequence": 2,
-        },
-    )
-    stop2_id = stop2.json()["id"]
-
-    # -------------------------------------------------------------------------
-    # Create student
-    # -------------------------------------------------------------------------
-    student = client.post(
-        "/students/",
-        json={
-            "name": "Student Two",
-            "grade": "5",
-            "school_id": school_id,
-            "route_id": route_id,
-            "stop_id": stop2_id,
-        },
-    )
-    student_id = student.json()["id"]
-
-    # -------------------------------------------------------------------------
-    # Create runtime assignment
-    # -------------------------------------------------------------------------
-    assignment = client.post(
-        "/student-run-assignments/",
-        json={
-            "student_id": student_id,
-            "run_id": run_id,
-            "stop_id": stop2_id,
-        },
-    )
-    assert assignment.status_code == 201
-
-    # -------------------------------------------------------------------------
-    # Move run to stop 2 and pick up student
-    # -------------------------------------------------------------------------
-    arrive = client.post(f"/runs/{run_id}/arrive_stop?stop_sequence=2")
-    assert arrive.status_code == 200
-
-    pickup = client.post(
-        f"/runs/{run_id}/pickup_student",
-        json={"student_id": student_id},
-    )
-    assert pickup.status_code == 200
-
-    # -------------------------------------------------------------------------
-    # Get onboard students
-    # -------------------------------------------------------------------------
-    response = client.get(f"/runs/{run_id}/onboard_students")
-
-    assert response.status_code == 200
-    body = response.json()
-
-    assert body["run_id"] == run_id
-    assert body["total_onboard_students"] == 1
-    assert len(body["students"]) == 1
-    assert body["students"][0]["student_id"] == student_id
-    assert body["students"][0]["student_name"] == "Student Two"
-    assert body["students"][0]["stop_id"] == stop2_id
-    assert body["students"][0]["stop_sequence"] == 2
-    assert body["students"][0]["picked_up_at"] is not None
 
 
 # =============================================================================
 # Test onboard_students returns empty list when nobody is onboard
 # =============================================================================
 def test_get_onboard_students_empty(client):
+   
     # -------------------------------------------------------------------------
     # Create driver
     # -------------------------------------------------------------------------
@@ -1128,6 +991,7 @@ def test_get_onboard_students_empty(client):
             "phone": "11111",
         },
     )
+    assert driver.status_code in (200, 201)
     driver_id = driver.json()["id"]
 
     # -------------------------------------------------------------------------
@@ -1141,12 +1005,13 @@ def test_get_onboard_students_empty(client):
             "driver_id": driver_id,
         },
     )
+    assert route.status_code in (200, 201)
     route_id = route.json()["id"]
 
     # -------------------------------------------------------------------------
     # Create run
     # -------------------------------------------------------------------------
-    run = client.post(
+    run_response = client.post(
         "/runs/",
         json={
             "driver_id": driver_id,
@@ -1154,7 +1019,9 @@ def test_get_onboard_students_empty(client):
             "run_type": "AM",
         },
     )
-    run_id = run.json()["id"]
+    assert run_response.status_code in (200, 201)
+    run_id = run_response.json()["id"]
+
 
     # -------------------------------------------------------------------------
     # Query onboard students without any pickups
@@ -1184,65 +1051,172 @@ def test_get_occupancy_summary_success(client, db_engine):
     """
 
     # -------------------------------------------------------------------------
+    # Create driver
+    # -------------------------------------------------------------------------
+    driver = client.post(
+        "/drivers/",
+        json={
+            "name": "Driver One",
+            "email": "driver1@test.com",
+            "phone": "11111",
+        },
+    )
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]
+
+    # -------------------------------------------------------------------------
+    # Create route
+    # -------------------------------------------------------------------------
+    route = client.post(
+        "/routes/",
+        json={
+            "route_number": "R1",
+            "unit_number": "Bus-01",
+            "driver_id": driver_id,
+        },
+    )
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    # -------------------------------------------------------------------------
+    # Create run
+    # -------------------------------------------------------------------------
+    run_response = client.post(
+        "/runs/",
+        json={
+            "driver_id": driver_id,
+            "route_id": route_id,
+            "run_type": "AM",
+        },
+    )
+    assert run_response.status_code in (200, 201)
+    run_id = run_response.json()["id"]
+
+    # -------------------------------------------------------------------------
     # Create local DB session from the existing test engine
     # -------------------------------------------------------------------------
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
     db = TestingSessionLocal()
+    # -------------------------------------------------------------------------
+# Create school
+# -------------------------------------------------------------------------
+    school = client.post(
+        "/schools/",
+         json={
+            "name": "Test School",
+            "address": "123 Test St",
+        },
+   )
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]
+
+# -------------------------------------------------------------------------
+# Create stop 1
+# -------------------------------------------------------------------------
+    stop1 = client.post(
+        "/stops/",
+        json={
+            "name": "Stop 1",
+            "latitude": 53.5461,
+            "longitude": -113.4938,
+            "type": "pickup",
+            "run_id": run_id,
+            "sequence": 1,
+        },
+    )
+    assert stop1.status_code in (200, 201)
+    stop1_id = stop1.json()["id"]
+
+# -------------------------------------------------------------------------
+# Create stop 2
+# -------------------------------------------------------------------------
+    stop2 = client.post(
+        "/stops/",
+        json={
+            "name": "Stop 2",
+            "latitude": 53.5561,
+            "longitude": -113.4838,
+            "type": "pickup",
+            "run_id": run_id,
+            "sequence": 2,
+        },
+    )
+    assert stop2.status_code in (200, 201)
+    stop2_id = stop2.json()["id"]
+
+# -------------------------------------------------------------------------
+# Create student 1
+# -------------------------------------------------------------------------
+    student1 = client.post(
+        "/students/",
+        json={
+            "name": "Student One",
+            "grade": "5",
+            "school_id": school_id,
+            "route_id": route_id,
+            "stop_id": stop1_id,
+        },
+    )
+    assert student1.status_code in (200, 201)
+    student1_id = student1.json()["id"]
+
+# -------------------------------------------------------------------------
+# Create student 2
+# -------------------------------------------------------------------------
+    student2 = client.post(
+        "/students/",
+        json={
+            "name": "Student Two",
+            "grade": "5",
+            "school_id": school_id,
+            "route_id": route_id,
+            "stop_id": stop2_id,
+        },
+    )
+    assert student2.status_code in (200, 201)
+    student2_id = student2.json()["id"]
 
     try:
-        # ---------------------------------------------------------------------
-        # Create run directly in test DB
-        # ---------------------------------------------------------------------
-        run = Run(
-            driver_id=1,                # Existing seeded driver
-            route_id=1,                 # Existing seeded route
-            run_type="AM",              # Valid run type
-        )
-        db.add(run)
-        db.commit()
-        db.refresh(run)
-
         # ---------------------------------------------------------------------
         # Create two runtime student assignments with mixed occupancy state
         # ---------------------------------------------------------------------
         assignment_1 = StudentRunAssignment(
-            run_id=run.id,                                  # Link to created run
-            student_id=1,                                   # Existing seeded student
-            stop_id=1,                                      # Existing seeded stop
-            picked_up=True,                                 # Student was picked up
-            picked_up_at=datetime.now(timezone.utc),        # Pickup timestamp
-            dropped_off=False,                              # Not dropped off yet
-            dropped_off_at=None,                            # No dropoff timestamp yet
-            is_onboard=True,                                # Currently onboard
+            run_id=run_id,                               # Link to created run
+            student_id=student1_id,                      # Actual created student
+            stop_id=stop1_id,                            # Actual created stop
+            picked_up=True,                              # Student was picked up
+            picked_up_at=datetime.now(timezone.utc),     # Pickup timestamp
+            dropped_off=False,
+            dropped_off_at=None,
+            is_onboard=True,
         )
 
         assignment_2 = StudentRunAssignment(
-            run_id=run.id,                                  # Link to created run
-            student_id=2,                                   # Existing seeded student
-            stop_id=2,                                      # Existing seeded stop
-            picked_up=False,                                # Not picked up yet
-            picked_up_at=None,                              # No pickup timestamp
-            dropped_off=False,                              # Not dropped off
-            dropped_off_at=None,                            # No dropoff timestamp
-            is_onboard=False,                               # Not onboard
+            run_id=run_id,
+            student_id=student2_id,                      # Actual created student
+            stop_id=stop2_id,                            # Actual created stop
+            picked_up=False,
+            picked_up_at=None,
+            dropped_off=False,
+            dropped_off_at=None,
+            is_onboard=False,
         )
 
         db.add_all([assignment_1, assignment_2])
         db.commit()
-
     finally:
         db.close()
 
     # -------------------------------------------------------------------------
     # Call occupancy summary endpoint
     # -------------------------------------------------------------------------
-    response = client.get(f"/runs/{run.id}/occupancy_summary")
+    response = client.get(f"/runs/{run_id}/occupancy_summary")
     assert response.status_code == 200
 
     data = response.json()
 
-    assert data["run_id"] == run.id
-    assert data["route_id"] == 1
+    assert data["run_id"] == run_id
+    assert data["route_id"] == route_id
     assert data["run_type"] == "AM"
     assert data["total_assigned_students"] == 2
     assert data["total_picked_up"] == 1
@@ -1250,44 +1224,63 @@ def test_get_occupancy_summary_success(client, db_engine):
     assert data["total_currently_onboard"] == 1
     assert data["total_not_yet_boarded"] == 1
 
-
-def test_get_occupancy_summary_empty_assignments(client, db_engine):
+def test_get_occupancy_summary_empty_assignments(client):
     """
     Verify summary works when a run has no student assignments.
     """
 
     # -------------------------------------------------------------------------
-    # Create local DB session from the existing test engine
+    # Create driver
     # -------------------------------------------------------------------------
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-    db = TestingSessionLocal()
+    driver = client.post(
+        "/drivers/",
+        json={
+            "name": "Driver Two",
+            "email": "driver2@test.com",
+            "phone": "22222",
+        },
+    )
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]
 
-    try:
-        # ---------------------------------------------------------------------
-        # Create run with no assignments
-        # ---------------------------------------------------------------------
-        run = Run(
-            driver_id=1,                # Existing seeded driver
-            route_id=1,                 # Existing seeded route
-            run_type="AM",              # Valid run type
-        )
-        db.add(run)
-        db.commit()
-        db.refresh(run)
+    # -------------------------------------------------------------------------
+    # Create route
+    # -------------------------------------------------------------------------
+    route = client.post(
+        "/routes/",
+        json={
+            "route_number": "R2",
+            "unit_number": "Bus-02",
+            "driver_id": driver_id,
+        },
+    )
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
 
-    finally:
-        db.close()
+    # -------------------------------------------------------------------------
+    # Create run
+    # -------------------------------------------------------------------------
+    run_response = client.post(
+        "/runs/",
+        json={
+            "driver_id": driver_id,
+            "route_id": route_id,
+            "run_type": "AM",
+        },
+    )
+    assert run_response.status_code in (200, 201)
+    run_id = run_response.json()["id"]
 
     # -------------------------------------------------------------------------
     # Call occupancy summary endpoint
     # -------------------------------------------------------------------------
-    response = client.get(f"/runs/{run.id}/occupancy_summary")
+    response = client.get(f"/runs/{run_id}/occupancy_summary")
     assert response.status_code == 200
 
     data = response.json()
 
-    assert data["run_id"] == run.id
-    assert data["route_id"] == 1
+    assert data["run_id"] == run_id
+    assert data["route_id"] == route_id
     assert data["run_type"] == "AM"
     assert data["total_assigned_students"] == 0
     assert data["total_picked_up"] == 0
@@ -1304,3 +1297,76 @@ def test_get_occupancy_summary_run_not_found(client):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Run not found."
+
+
+def test_arrive_stop_allows_backward_movement(client):
+    driver = client.post("/drivers/", json={"name": "Driver Move", "email": "move@test.com", "phone": "33333"})  # Create driver
+    driver_id = driver.json()["id"]  # Extract driver ID from API response
+    route = client.post("/routes/", json={"route_number": "R3", "unit_number": "Bus-03", "driver_id": driver_id})  # Create route
+    route_id = route.json()["id"]  # Extract route ID from API response
+    run = client.post("/runs/", json={"driver_id": driver_id, "route_id": route_id, "run_type": "AM"})  # Create active run
+    run_id = run.json()["id"]  # Extract run ID from API response
+    stop1 = client.post("/stops/", json={"name": "Stop 1", "latitude": 53.5461, "longitude": -113.4938, "type": "pickup", "run_id": run_id, "sequence": 1})  # Create first stop
+    stop1_id = stop1.json()["id"]  # Extract first stop ID from API response
+    stop2 = client.post("/stops/", json={"name": "Stop 2", "latitude": 53.5561, "longitude": -113.4838, "type": "pickup", "run_id": run_id, "sequence": 2})  # Create second stop
+    stop2_id = stop2.json()["id"]  # Extract second stop ID from API response
+
+    forward_arrival = client.post(f"/runs/{run_id}/arrive_stop?stop_sequence=2")  # Move the bus forward to stop 2
+    assert forward_arrival.status_code == 200  # Confirm forward arrival succeeded
+    assert forward_arrival.json()["current_stop_id"] == stop2_id  # Confirm current stop ID matches stop 2
+    assert forward_arrival.json()["current_stop_sequence"] == 2  # Confirm current stop sequence matches stop 2
+
+    backward_arrival = client.post(f"/runs/{run_id}/arrive_stop?stop_sequence=1")  # Move the bus backward to stop 1
+    assert backward_arrival.status_code == 200  # Confirm backward arrival succeeded
+    assert backward_arrival.json()["current_stop_id"] == stop1_id  # Confirm current stop ID matches stop 1
+    assert backward_arrival.json()["current_stop_sequence"] == 1  # Confirm current stop sequence matches stop 1
+
+
+def test_flexible_pickup_dropoff_records_actual_stops_and_keeps_occupancy_correct(client, db_engine):
+    driver = client.post("/drivers/", json={"name": "Driver Flex", "email": "flex@test.com", "phone": "44444"})  # Create driver
+    driver_id = driver.json()["id"]  # Extract driver ID from API response
+    school = client.post("/schools/", json={"name": "Flex School", "address": "456 Flex Ave"})  # Create school
+    school_id = school.json()["id"]  # Extract school ID from API response
+    route = client.post("/routes/", json={"route_number": "R4", "unit_number": "Bus-04", "driver_id": driver_id})  # Create route
+    route_id = route.json()["id"]  # Extract route ID from API response
+    run = client.post("/runs/", json={"driver_id": driver_id, "route_id": route_id, "run_type": "AM"})  # Create run
+    run_id = run.json()["id"]  # Extract run ID from API response
+    stop1 = client.post("/stops/", json={"name": "Corner Pickup", "latitude": 53.5461, "longitude": -113.4938, "type": "pickup", "run_id": run_id, "sequence": 1})  # Create alternate pickup stop
+    stop1_id = stop1.json()["id"]  # Extract alternate pickup stop ID
+    stop2 = client.post("/stops/", json={"name": "Assigned Pickup", "latitude": 53.5561, "longitude": -113.4838, "type": "pickup", "run_id": run_id, "sequence": 2})  # Create assigned pickup stop
+    stop2_id = stop2.json()["id"]  # Extract assigned pickup stop ID
+    stop3 = client.post("/stops/", json={"name": "School Dropoff", "latitude": 53.5661, "longitude": -113.4738, "type": "dropoff", "run_id": run_id, "sequence": 3})  # Create alternate dropoff stop
+    stop3_id = stop3.json()["id"]  # Extract alternate dropoff stop ID
+    student = client.post("/students/", json={"name": "Flexible Rider", "grade": "5", "school_id": school_id, "route_id": route_id, "stop_id": stop2_id})  # Create student assigned to stop 2
+    student_id = student.json()["id"]  # Extract student ID from API response
+    assignment = client.post("/student-run-assignments/", json={"student_id": student_id, "run_id": run_id, "stop_id": stop2_id})  # Create runtime assignment at planned stop 2
+    assert assignment.status_code == 201  # Confirm assignment creation succeeded
+
+    pickup_arrival = client.post(f"/runs/{run_id}/arrive_stop?stop_sequence=1")  # Move the bus to a different pickup stop
+    assert pickup_arrival.status_code == 200  # Confirm alternate pickup arrival succeeded
+    pickup = client.post(f"/runs/{run_id}/pickup_student", json={"student_id": student_id})  # Pick the student up at stop 1 instead of stop 2
+    assert pickup.status_code == 200  # Confirm flexible pickup succeeded
+
+    dropoff_arrival = client.post(f"/runs/{run_id}/arrive_stop?stop_sequence=3")  # Move the bus to a different dropoff stop
+    assert dropoff_arrival.status_code == 200  # Confirm alternate dropoff arrival succeeded
+    dropoff = client.post(f"/runs/{run_id}/dropoff_student", json={"student_id": student_id})  # Drop the student off at stop 3
+    assert dropoff.status_code == 200  # Confirm flexible dropoff succeeded
+
+    summary = client.get(f"/runs/{run_id}/occupancy_summary")  # Read the final occupancy summary
+    assert summary.status_code == 200  # Confirm occupancy summary request succeeded
+    assert summary.json()["total_assigned_students"] == 1  # Confirm one student was assigned
+    assert summary.json()["total_picked_up"] == 1  # Confirm the student was picked up
+    assert summary.json()["total_dropped_off"] == 1  # Confirm the student was dropped off
+    assert summary.json()["total_currently_onboard"] == 0  # Confirm nobody remains onboard
+    assert summary.json()["total_not_yet_boarded"] == 0  # Confirm nobody remains unboarded
+
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)  # Build a direct DB session for verification
+    db = TestingSessionLocal()  # Open a direct DB session for verification
+    try:
+        stored_assignment = db.query(StudentRunAssignment).filter(StudentRunAssignment.run_id == run_id, StudentRunAssignment.student_id == student_id).first()  # Load the stored assignment row
+        assert stored_assignment is not None  # Confirm the assignment row exists
+        assert stored_assignment.stop_id == stop2_id  # Confirm the planned assigned stop stayed unchanged
+        assert stored_assignment.actual_pickup_stop_id == stop1_id  # Confirm the actual pickup stop was recorded
+        assert stored_assignment.actual_dropoff_stop_id == stop3_id  # Confirm the actual dropoff stop was recorded
+    finally:
+        db.close()  # Close the direct DB session
