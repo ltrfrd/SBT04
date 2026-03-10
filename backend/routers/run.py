@@ -29,6 +29,7 @@ from backend.models import run as run_model
 from backend.models import driver as driver_model
 from backend.models import route as route_model
 from backend.models import stop as stop_model
+from backend.models.run import Run                     # Run model
 from backend.models.associations import StudentRunAssignment  # Runtime rider assignments
 from backend.schemas.run import RunStart, RunOut
 from backend.schemas.stop import StopOut
@@ -44,6 +45,7 @@ from backend.schemas.run import (
     DropoffStudentResponse,
     OnboardStudentsResponse,
     OnboardStudentItem,
+    RunOccupancySummaryResponse,
 )
 router = APIRouter(prefix="/runs", tags=["Runs"])
 
@@ -899,6 +901,87 @@ def get_onboard_students(
         students=students,
     )
 
+
+# =============================================================================
+# Get Run Occupancy Summary
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Return a quick student occupancy summary for one run.
+#
+# Summary includes:
+#   - total assigned students
+#   - total picked up
+#   - total dropped off
+#   - total currently onboard
+#   - total not yet boarded
+#
+# Notes:
+#   Runtime state is derived from StudentRunAssignment.
+#   This keeps summary logic aligned with pickup/dropoff/onboard endpoints.
+# =============================================================================
+@router.get(
+    "/{run_id}/occupancy_summary",
+    response_model=RunOccupancySummaryResponse,
+    summary="Get run occupancy summary",
+)
+def get_run_occupancy_summary(
+    run_id: int,
+    db: Session = Depends(get_db),
+):
+    # -------------------------------------------------------------------------
+    # Validate run exists
+    # -------------------------------------------------------------------------
+    run = db.query(Run).filter(Run.id == run_id).first()
+
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Run not found.",
+        )
+
+    # -------------------------------------------------------------------------
+    # Load all runtime student assignments for this run
+    # -------------------------------------------------------------------------
+    assignments = (
+        db.query(StudentRunAssignment)
+        .filter(StudentRunAssignment.run_id == run_id)
+        .all()
+    )
+
+    # -------------------------------------------------------------------------
+    # Calculate occupancy counts from runtime assignment flags
+    # -------------------------------------------------------------------------
+    total_assigned_students = len(assignments)  # All students assigned to this run
+
+    total_picked_up = sum(
+        1 for assignment in assignments if assignment.picked_up
+    )  # Picked up at least once
+
+    total_dropped_off = sum(
+        1 for assignment in assignments if assignment.dropped_off
+    )  # Dropped off
+
+    total_currently_onboard = sum(
+        1 for assignment in assignments if assignment.is_onboard
+    )  # Currently on the bus
+
+    total_not_yet_boarded = sum(
+        1 for assignment in assignments if not assignment.picked_up
+    )  # Assigned but not picked up yet
+
+    # -------------------------------------------------------------------------
+    # Return occupancy summary
+    # -------------------------------------------------------------------------
+    return RunOccupancySummaryResponse(
+        run_id=run.id,
+        route_id=run.route_id,
+        run_type=run.run_type,
+        total_assigned_students=total_assigned_students,
+        total_picked_up=total_picked_up,
+        total_dropped_off=total_dropped_off,
+        total_currently_onboard=total_currently_onboard,
+        total_not_yet_boarded=total_not_yet_boarded,
+    )
 # =============================================================================
 # GET /runs/{run_id}
 # Return one run by ID with enriched display fields

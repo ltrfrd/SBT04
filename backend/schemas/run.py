@@ -294,3 +294,37 @@ class OnboardStudentsResponse(BaseModel):
     total_onboard_students: int  # Count of onboard students
 
     students: list[OnboardStudentItem]  # Students currently onboard
+
+
+# =============================================================================
+# Run Occupancy Summary Schema
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Response model for GET /runs/{run_id}/occupancy_summary
+#
+#   Provides a quick overview of student occupancy for a run.
+#   This summary is used for:
+#       - driver dashboard
+#       - dispatch monitoring
+#       - future safety alerts
+#
+#   Counts are derived from StudentRunAssignment runtime fields:
+#       picked_up
+#       dropped_off
+#       is_onboard
+# =============================================================================
+
+class RunOccupancySummaryResponse(BaseModel):
+    """
+    Response model representing the occupancy state of a run.
+    """
+
+    run_id: int                     # ID of the run
+    route_id: int                   # Route associated with the run
+    run_type: str                   # AM / PM / Charter etc.
+
+    total_assigned_students: int    # All runtime student assignments for this run
+    total_picked_up: int            # Students picked up at least once
+    total_dropped_off: int          # Students dropped off
+    total_currently_onboard: int    # Students currently on the bus
+    total_not_yet_boarded: int      # Assigned students who have not been picked up yet

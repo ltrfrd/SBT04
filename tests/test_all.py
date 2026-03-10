@@ -1,7 +1,12 @@
 import pytest
-
+from backend.models.run import Run  # Run model for direct test DB setup
+from backend.models.associations import StudentRunAssignment  # Runtime student assignment model
 from tests.conftest import client
-
+from sqlalchemy.orm import sessionmaker  # Create local DB session for tests
+from datetime import datetime, timezone  # UTC timestamps for runtime fields
+# =============================================================================
+# Project Models (used directly in tests)
+# =============================================================================
 
 def test_root(client):
     r = client.get("/")
@@ -1172,3 +1177,130 @@ def test_get_onboard_students_run_not_found(client):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Run not found"
+
+def test_get_occupancy_summary_success(client, db_engine):
+    """
+    Verify occupancy summary returns correct counts for a run.
+    """
+
+    # -------------------------------------------------------------------------
+    # Create local DB session from the existing test engine
+    # -------------------------------------------------------------------------
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+    db = TestingSessionLocal()
+
+    try:
+        # ---------------------------------------------------------------------
+        # Create run directly in test DB
+        # ---------------------------------------------------------------------
+        run = Run(
+            driver_id=1,                # Existing seeded driver
+            route_id=1,                 # Existing seeded route
+            run_type="AM",              # Valid run type
+        )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+
+        # ---------------------------------------------------------------------
+        # Create two runtime student assignments with mixed occupancy state
+        # ---------------------------------------------------------------------
+        assignment_1 = StudentRunAssignment(
+            run_id=run.id,                                  # Link to created run
+            student_id=1,                                   # Existing seeded student
+            stop_id=1,                                      # Existing seeded stop
+            picked_up=True,                                 # Student was picked up
+            picked_up_at=datetime.now(timezone.utc),        # Pickup timestamp
+            dropped_off=False,                              # Not dropped off yet
+            dropped_off_at=None,                            # No dropoff timestamp yet
+            is_onboard=True,                                # Currently onboard
+        )
+
+        assignment_2 = StudentRunAssignment(
+            run_id=run.id,                                  # Link to created run
+            student_id=2,                                   # Existing seeded student
+            stop_id=2,                                      # Existing seeded stop
+            picked_up=False,                                # Not picked up yet
+            picked_up_at=None,                              # No pickup timestamp
+            dropped_off=False,                              # Not dropped off
+            dropped_off_at=None,                            # No dropoff timestamp
+            is_onboard=False,                               # Not onboard
+        )
+
+        db.add_all([assignment_1, assignment_2])
+        db.commit()
+
+    finally:
+        db.close()
+
+    # -------------------------------------------------------------------------
+    # Call occupancy summary endpoint
+    # -------------------------------------------------------------------------
+    response = client.get(f"/runs/{run.id}/occupancy_summary")
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["run_id"] == run.id
+    assert data["route_id"] == 1
+    assert data["run_type"] == "AM"
+    assert data["total_assigned_students"] == 2
+    assert data["total_picked_up"] == 1
+    assert data["total_dropped_off"] == 0
+    assert data["total_currently_onboard"] == 1
+    assert data["total_not_yet_boarded"] == 1
+
+
+def test_get_occupancy_summary_empty_assignments(client, db_engine):
+    """
+    Verify summary works when a run has no student assignments.
+    """
+
+    # -------------------------------------------------------------------------
+    # Create local DB session from the existing test engine
+    # -------------------------------------------------------------------------
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+    db = TestingSessionLocal()
+
+    try:
+        # ---------------------------------------------------------------------
+        # Create run with no assignments
+        # ---------------------------------------------------------------------
+        run = Run(
+            driver_id=1,                # Existing seeded driver
+            route_id=1,                 # Existing seeded route
+            run_type="AM",              # Valid run type
+        )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+
+    finally:
+        db.close()
+
+    # -------------------------------------------------------------------------
+    # Call occupancy summary endpoint
+    # -------------------------------------------------------------------------
+    response = client.get(f"/runs/{run.id}/occupancy_summary")
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["run_id"] == run.id
+    assert data["route_id"] == 1
+    assert data["run_type"] == "AM"
+    assert data["total_assigned_students"] == 0
+    assert data["total_picked_up"] == 0
+    assert data["total_dropped_off"] == 0
+    assert data["total_currently_onboard"] == 0
+    assert data["total_not_yet_boarded"] == 0
+
+def test_get_occupancy_summary_run_not_found(client):
+    """
+    Verify endpoint returns 404 when run does not exist.
+    """
+
+    response = client.get("/runs/9999/occupancy_summary")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Run not found."
