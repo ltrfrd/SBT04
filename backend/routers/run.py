@@ -80,7 +80,7 @@ def _get_run_or_404(run_id: int, db: Session) -> Run:
     if not run:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Run not found.",
+            detail="Run not found",
         )
     return run
 
@@ -887,6 +887,13 @@ def dropoff_student(
 # Run View Endpoints
 # - Read/present live run state, summaries, and history views
 # -----------------------------------------------------------
+# -----------------------------------------------------------
+# Run State Endpoint
+# - Returns the current operational snapshot of a run
+# - Does not mutate state
+# - Progress is derived from ARRIVE events because the
+#   run engine allows flexible stop movement and revisits
+# -----------------------------------------------------------
 # =============================================================================
 # GET /runs/{run_id}/state
 # ---------------------------------------------------------------------------
@@ -957,6 +964,7 @@ def get_run_state(
         progress_percent = 0.0  # Avoid division by zero for runs with no stops
     else:
         progress_percent = round((completed_stops / total_stops) * 100, 1)  # Stable % from distinct arrivals
+    progress_percent = max(0.0, min(100.0, progress_percent))  # Keep progress within valid bounds
 
     current_stop = stops_by_id.get(run.current_stop_id) if run.current_stop_id is not None else None
 

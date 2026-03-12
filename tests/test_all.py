@@ -1296,7 +1296,7 @@ def test_get_occupancy_summary_run_not_found(client):
     response = client.get("/runs/9999/occupancy_summary")
 
     assert response.status_code == 404
-    assert response.json()["detail"] == "Run not found."
+    assert response.json()["detail"] == "Run not found"
 
 
 def test_get_run_state_snapshot(client):
