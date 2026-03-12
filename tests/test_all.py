@@ -1370,3 +1370,363 @@ def test_flexible_pickup_dropoff_records_actual_stops_and_keeps_occupancy_correc
         assert stored_assignment.actual_dropoff_stop_id == stop3_id  # Confirm the actual dropoff stop was recorded
     finally:
         db.close()  # Close the direct DB session
+
+# ============================================================
+# Test Run Timeline
+# - verifies ARRIVE, PICKUP, DROPOFF events are recorded
+# ============================================================
+
+def test_run_timeline(client):
+
+    # -------------------------------------------------------
+    # Create driver
+    # -------------------------------------------------------
+    driver = client.post(
+        "/drivers/",
+        json={
+            "name": "Timeline Driver",
+            "email": "timeline@driver.com",
+            "phone": "1112223333",
+        },
+    )
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]  # Save driver ID
+
+    # -------------------------------------------------------
+    # Create school
+    # -------------------------------------------------------
+    school = client.post(
+        "/schools/",
+        json={
+            "name": "Timeline School",
+            "address": "123 Timeline St",
+        },
+    )
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]  # Save school ID
+
+    # -------------------------------------------------------
+    # Create route
+    # -------------------------------------------------------
+    route = client.post(
+        "/routes/",
+        json={
+            "route_number": "TL-1",
+            "unit_number": "Bus-TL",
+            "driver_id": driver_id,
+        },
+    )
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]  # Save route ID
+
+    # -------------------------------------------------------
+    # Create run
+    # -------------------------------------------------------
+    run = client.post(
+        "/runs/",
+        json={
+            "driver_id": driver_id,
+            "route_id": route_id,
+            "run_type": "AM",
+        },
+    )
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]  # Save run ID
+
+    # -------------------------------------------------------
+    # Add stops to run
+    # -------------------------------------------------------
+    stop1 = client.post(
+        "/stops/",
+        json={
+            "name": "Stop 1",
+            "latitude": 53.5461,
+            "longitude": -113.4938,
+            "type": "pickup",
+            "run_id": run_id,
+            "sequence": 1,
+        },
+    )
+    assert stop1.status_code in (200, 201)
+    stop1_id = stop1.json()["id"]  # Save first stop ID
+
+    stop2 = client.post(
+        "/stops/",
+        json={
+            "name": "Stop 2",
+            "latitude": 53.5561,
+            "longitude": -113.4838,
+            "type": "pickup",
+            "run_id": run_id,
+            "sequence": 2,
+        },
+    )
+    assert stop2.status_code in (200, 201)
+    stop2_id = stop2.json()["id"]  # Save second stop ID
+
+    # -------------------------------------------------------
+    # Create student
+    # -------------------------------------------------------
+    student = client.post(
+        "/students/",
+        json={
+            "name": "Timeline Student",
+            "grade": "5",
+            "school_id": school_id,
+            "route_id": route_id,
+            "stop_id": stop1_id,
+        },
+    )
+    assert student.status_code in (200, 201)
+    student_id = student.json()["id"]  # Save student ID
+
+    # -------------------------------------------------------
+    # Create runtime assignment
+    # -------------------------------------------------------
+    assignment = client.post(
+        "/student-run-assignments/",
+        json={
+            "student_id": student_id,
+            "run_id": run_id,
+            "stop_id": stop1_id,
+        },
+    )
+    assert assignment.status_code == 201
+
+    # -------------------------------------------------------
+    # ARRIVE stop 1
+    # -------------------------------------------------------
+    arrive1 = client.post(f"/runs/{run_id}/arrive_stop?stop_sequence=1")
+    assert arrive1.status_code == 200
+
+    # -------------------------------------------------------
+    # PICKUP student
+    # -------------------------------------------------------
+    pickup = client.post(
+        f"/runs/{run_id}/pickup_student",
+        json={"student_id": student_id},
+    )
+    assert pickup.status_code == 200
+
+    # -------------------------------------------------------
+    # ARRIVE stop 2
+    # -------------------------------------------------------
+    arrive2 = client.post(f"/runs/{run_id}/arrive_stop?stop_sequence=2")
+    assert arrive2.status_code == 200
+
+    # -------------------------------------------------------
+    # DROPOFF student
+    # -------------------------------------------------------
+    dropoff = client.post(
+        f"/runs/{run_id}/dropoff_student",
+        json={"student_id": student_id},
+    )
+    assert dropoff.status_code == 200
+
+    # -------------------------------------------------------
+    # Get timeline
+    # -------------------------------------------------------
+    timeline = client.get(f"/runs/{run_id}/timeline")
+    assert timeline.status_code == 200
+
+    data = timeline.json()
+
+    assert len(data["events"]) == 4
+    assert data["events"][0]["event_type"] == "ARRIVE"
+    assert data["events"][1]["event_type"] == "PICKUP"
+    assert data["events"][2]["event_type"] == "ARRIVE"
+    assert data["events"][3]["event_type"] == "DROPOFF"
+
+    # ============================================================
+# Test Run Replay
+# - verifies replay output includes readable messages and summary
+# ============================================================
+
+def test_run_replay(client):
+
+    # -------------------------------------------------------------------------
+    # Create driver
+    # -------------------------------------------------------------------------
+    driver = client.post(
+        "/drivers/",
+        json={
+            "name": "Replay Driver",
+            "email": "replay@driver.com",
+            "phone": "2223334444",
+        },
+    )
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]  # Save driver ID
+
+    # -------------------------------------------------------------------------
+    # Create school
+    # -------------------------------------------------------------------------
+    school = client.post(
+        "/schools/",
+        json={
+            "name": "Replay School",
+            "address": "456 Replay Ave",
+        },
+    )
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]  # Save school ID
+
+    # -------------------------------------------------------------------------
+    # Create route
+    # -------------------------------------------------------------------------
+    route = client.post(
+        "/routes/",
+        json={
+            "route_number": "RP-1",
+            "unit_number": "Bus-RP",
+            "driver_id": driver_id,
+        },
+    )
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]  # Save route ID
+
+    # -------------------------------------------------------------------------
+    # Create run
+    # -------------------------------------------------------------------------
+    run = client.post(
+        "/runs/",
+        json={
+            "driver_id": driver_id,
+            "route_id": route_id,
+            "run_type": "AM",
+        },
+    )
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]  # Save run ID
+
+    # -------------------------------------------------------------------------
+    # Add stops to run
+    # -------------------------------------------------------------------------
+    stop1 = client.post(
+        "/stops/",
+        json={
+            "name": "Stop 1",
+            "latitude": 53.5461,
+            "longitude": -113.4938,
+            "type": "pickup",
+            "run_id": run_id,
+            "sequence": 1,
+        },
+    )
+    assert stop1.status_code in (200, 201)
+    stop1_id = stop1.json()["id"]  # Save first stop ID
+
+    stop2 = client.post(
+        "/stops/",
+        json={
+            "name": "Stop 2",
+            "latitude": 53.5561,
+            "longitude": -113.4838,
+            "type": "pickup",
+            "run_id": run_id,
+            "sequence": 2,
+        },
+    )
+    assert stop2.status_code in (200, 201)
+    stop2_id = stop2.json()["id"]  # Save second stop ID
+
+    # -------------------------------------------------------------------------
+    # Create student
+    # -------------------------------------------------------------------------
+    student = client.post(
+        "/students/",
+        json={
+            "name": "Replay Student",
+            "grade": "6",
+            "school_id": school_id,
+            "route_id": route_id,
+            "stop_id": stop1_id,
+        },
+    )
+    assert student.status_code in (200, 201)
+    student_id = student.json()["id"]  # Save student ID
+
+    # -------------------------------------------------------------------------
+    # Create runtime assignment
+    # -------------------------------------------------------------------------
+    assignment = client.post(
+        "/student-run-assignments/",
+        json={
+            "student_id": student_id,
+            "run_id": run_id,
+            "stop_id": stop1_id,
+        },
+    )
+    assert assignment.status_code == 201
+
+    # -------------------------------------------------------------------------
+    # ARRIVE stop 1
+    # -------------------------------------------------------------------------
+    arrive1 = client.post(f"/runs/{run_id}/arrive_stop?stop_sequence=1")
+    assert arrive1.status_code == 200
+
+    # -------------------------------------------------------------------------
+    # PICKUP student
+    # -------------------------------------------------------------------------
+    pickup = client.post(
+        f"/runs/{run_id}/pickup_student",
+        json={"student_id": student_id},
+    )
+    assert pickup.status_code == 200
+
+    # -------------------------------------------------------------------------
+    # ARRIVE stop 2
+    # -------------------------------------------------------------------------
+    arrive2 = client.post(f"/runs/{run_id}/arrive_stop?stop_sequence=2")
+    assert arrive2.status_code == 200
+
+    # -------------------------------------------------------------------------
+    # DROPOFF student
+    # -------------------------------------------------------------------------
+    dropoff = client.post(
+        f"/runs/{run_id}/dropoff_student",
+        json={"student_id": student_id},
+    )
+    assert dropoff.status_code == 200
+
+    # -------------------------------------------------------------------------
+    # Get replay
+    # -------------------------------------------------------------------------
+    replay = client.get(f"/runs/{run_id}/replay")
+    assert replay.status_code == 200
+
+    data = replay.json()
+
+    # -------------------------------------------------------------------------
+    # Validate top-level structure
+    # -------------------------------------------------------------------------
+    assert data["run_id"] == run_id
+    assert data["summary"]["total_events"] == 4
+    assert data["summary"]["total_arrivals"] == 2
+    assert data["summary"]["total_pickups"] == 1
+    assert data["summary"]["total_dropoffs"] == 1
+
+    # -------------------------------------------------------------------------
+    # Validate replay event order
+    # -------------------------------------------------------------------------
+    assert len(data["events"]) == 4
+    assert data["events"][0]["event_type"] == "ARRIVE"
+    assert data["events"][1]["event_type"] == "PICKUP"
+    assert data["events"][2]["event_type"] == "ARRIVE"
+    assert data["events"][3]["event_type"] == "DROPOFF"
+
+    # -------------------------------------------------------------------------
+    # Validate readable replay messages
+    # -------------------------------------------------------------------------
+    assert "Bus arrived at Stop 1" == data["events"][0]["message"]
+    assert "Replay Student picked up at Stop 1" == data["events"][1]["message"]
+    assert "Bus arrived at Stop 2" == data["events"][2]["message"]
+    assert "Replay Student dropped off at Stop 2" == data["events"][3]["message"]
+
+    # -------------------------------------------------------------------------
+    # Validate onboard counts
+    # -------------------------------------------------------------------------
+    assert data["events"][0]["onboard_count"] == 0
+    assert data["events"][1]["onboard_count"] == 1
+    assert data["events"][2]["onboard_count"] == 1
+    assert data["events"][3]["onboard_count"] == 0

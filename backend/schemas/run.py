@@ -180,3 +180,35 @@ class RunTimelineOut(BaseModel):
     run_id: int                                                          # Parent run
     total_events: int                                                    # Number of timeline events
     events: list[RunEventOut]                                            # Ordered event rows
+
+ # -----------------------------------------------------------
+# Run Replay Output Schemas
+# - Human-readable replay entries for admin/debug/report use
+# -----------------------------------------------------------
+
+class RunReplayEventOut(BaseModel):
+    id: int
+    event_type: str
+    timestamp: datetime
+
+    stop_id: int | None = None
+    stop_name: str | None = None
+
+    student_id: int | None = None
+    student_name: str | None = None
+
+    onboard_count: int | None = None  # Bus occupancy after this event
+    message: str  # Human-readable replay line
+
+
+class RunReplaySummaryOut(BaseModel):
+    total_events: int
+    total_arrivals: int
+    total_pickups: int
+    total_dropoffs: int
+
+
+class RunReplayOut(BaseModel):
+    run_id: int
+    events: list[RunReplayEventOut]
+    summary: RunReplaySummaryOut   
