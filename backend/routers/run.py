@@ -66,8 +66,53 @@ from backend.schemas.run import (
     OnboardStudentsResponse,
     OnboardStudentItem,
     RunOccupancySummaryResponse,
+    RunStateOut,
 )
 router = APIRouter(prefix="/runs", tags=["Runs"])
+
+
+# -----------------------------------------------------------
+# Run state helpers
+# - Shared read-only summary logic for occupancy and state views
+# -----------------------------------------------------------
+def _get_run_or_404(run_id: int, db: Session) -> Run:
+    run = db.query(Run).filter(Run.id == run_id).first()  # Load run by ID
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Run not found.",
+        )
+    return run
+
+
+def _get_run_assignments(run_id: int, db: Session) -> list[StudentRunAssignment]:
+    return (
+        db.query(StudentRunAssignment)
+        .filter(StudentRunAssignment.run_id == run_id)
+        .all()
+    )
+
+
+def _build_run_occupancy_counts(assignments: list[StudentRunAssignment]) -> dict[str, int]:
+    total_assigned_students = len(assignments)  # All students assigned to this run
+    total_picked_up = sum(1 for assignment in assignments if assignment.picked_up)  # Picked up at least once
+    total_dropped_off = sum(1 for assignment in assignments if assignment.dropped_off)  # Dropped off
+    total_currently_onboard = sum(1 for assignment in assignments if assignment.is_onboard)  # Current bus load
+    total_not_yet_boarded = sum(1 for assignment in assignments if not assignment.picked_up)  # Assigned but not picked up
+    total_remaining_dropoffs = sum(
+        1
+        for assignment in assignments
+        if assignment.picked_up and not assignment.dropped_off
+    )  # Picked up already but still onboard / awaiting dropoff
+
+    return {
+        "total_assigned_students": total_assigned_students,
+        "total_picked_up": total_picked_up,
+        "total_dropped_off": total_dropped_off,
+        "total_currently_onboard": total_currently_onboard,
+        "total_not_yet_boarded": total_not_yet_boarded,
+        "total_remaining_dropoffs": total_remaining_dropoffs,
+    }
 
 
 # =============================================================================
@@ -446,6 +491,10 @@ def get_run_stops(run_id: int, db: Session = Depends(get_db)):
     return stops  # Return ordered stop list
 
 
+# -----------------------------------------------------------
+# Run Action Endpoints
+# - Mutate live run state and runtime rider execution data
+# -----------------------------------------------------------
 # =============================================================================
 # POST /runs/{run_id}/arrive_stop
 # Mark the driver as arrived at a specific stop in the run
@@ -834,160 +883,104 @@ def dropoff_student(
         dropped_off_at=assignment.dropped_off_at,
     )
 
-# -------------------------------------------------------------------------
-# GET /runs/{run_id}/timeline
-# - Returns ordered ARRIVE / PICKUP / DROPOFF events for a run
-# - Oldest first so the full run can be replayed in order
-# -------------------------------------------------------------------------
-@router.get("/{run_id}/timeline", response_model=RunTimelineOut)
-def get_run_timeline(run_id: int, db: Session = Depends(get_db)):
-
-    run = db.get(run_model.Run, run_id)                                   # Load run by ID
-    if not run:                                                           # If run does not exist
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Run not found",
-        )
-
-    events = (
-        db.query(RunEvent)                                                # Query run events
-        .filter(RunEvent.run_id == run_id)                                # Only this run
-        .order_by(RunEvent.timestamp.asc(), RunEvent.id.asc())            # Stable oldest-first ordering
-        .all()                                                            # Materialize list
-    )
-
-    return RunTimelineOut(                                                # Build timeline response
-        run_id=run_id,                                                    # Parent run ID
-        total_events=len(events),                                         # Event count
-        events=events,                                                    # Ordered event rows
-    )
-
+# -----------------------------------------------------------
+# Run View Endpoints
+# - Read/present live run state, summaries, and history views
+# -----------------------------------------------------------
 # =============================================================================
-# GET /runs/{run_id}/replay
-# Return a human-readable replay stream for a specific run
-#
+# GET /runs/{run_id}/state
+# ---------------------------------------------------------------------------
 # Purpose:
-# - Converts raw run events into readable admin/debug output
-# - Includes stop names, student names, onboard count, and summary totals
+#   Return a current operational snapshot for the run "now".
+#
+# View separation:
+#   - state    -> current snapshot
+#   - timeline -> raw event history
+#   - replay   -> interpreted human-readable history
+#
+# Flexible movement note:
+#   completed_stops uses distinct ARRIVE events instead of assuming a strict
+#   forward-only sequence. This respects revisits/backtracking while keeping
+#   progress stable and non-negative.
 # =============================================================================
-@router.get("/{run_id}/replay", response_model=RunReplayOut)
-def get_run_replay(run_id: int, db: Session = Depends(get_db)):
+@router.get("/{run_id}/state", response_model=RunStateOut)
+def get_run_state(
+    run_id: int,
+    db: Session = Depends(get_db),
+):
     # -------------------------------------------------------------------------
     # Validate run exists
     # -------------------------------------------------------------------------
-    run = db.get(run_model.Run, run_id)  # Load run by ID
-    if not run:  # If run does not exist
-        raise HTTPException(status_code=404, detail="Run not found")
+    run = _get_run_or_404(run_id, db)
 
     # -------------------------------------------------------------------------
-    # Load all run events in stable chronological order
+    # Load stops in stable order for current-stop and progress context
     # -------------------------------------------------------------------------
-    raw_events = (
-        db.query(RunEvent)
-        .filter(RunEvent.run_id == run_id)  # Only events for this run
-        .order_by(RunEvent.timestamp.asc(), RunEvent.id.asc())  # Stable time order
+    stops = (
+        db.query(stop_model.Stop)
+        .filter(stop_model.Stop.run_id == run_id)
+        .order_by(
+            stop_model.Stop.sequence.asc(),
+            stop_model.Stop.id.asc(),
+        )
         .all()
     )
+    stops_by_id = {stop.id: stop for stop in stops}  # Fast lookup by actual current stop ID
 
     # -------------------------------------------------------------------------
-    # Build replay rows with readable context
+    # Load runtime assignments and reuse shared occupancy interpretation
     # -------------------------------------------------------------------------
-    replay_events: list[RunReplayEventOut] = []  # Final replay rows
-    onboard_count = 0  # Live bus occupancy during replay
-
-    total_arrivals = 0  # Summary counter
-    total_pickups = 0  # Summary counter
-    total_dropoffs = 0  # Summary counter
-
-    for event in raw_events:
-        stop_name = None  # Default when stop is missing
-        student_name = None  # Default when student is missing
-
-        # ---------------------------------------------------------------------
-        # Resolve stop context
-        # ---------------------------------------------------------------------
-        if event.stop_id is not None:
-            stop = db.get(stop_model.Stop, event.stop_id)  # Load stop by ID
-            stop_name = stop.name if stop else None  # Safe stop name
-
-        # ---------------------------------------------------------------------
-        # Resolve student context
-        # ---------------------------------------------------------------------
-        if event.student_id is not None:
-            student = db.get(student_model.Student, event.student_id)  # Load student
-            student_name = student.name if student else None  # Safe student name
-
-        # ---------------------------------------------------------------------
-        # Convert raw event into readable replay message
-        # ---------------------------------------------------------------------
-        if event.event_type == "ARRIVE":
-            total_arrivals += 1  # Count arrival events
-
-            if stop_name:
-                message = f"Bus arrived at {stop_name}"  # Human-readable arrival
-            elif event.stop_id is not None:
-                message = f"Bus arrived at Stop {event.stop_id}"  # Fallback arrival
-            else:
-                message = "Bus arrived at an unknown stop"  # Safety fallback
-
-        elif event.event_type == "PICKUP":
-            total_pickups += 1  # Count pickup events
-            onboard_count += 1  # Occupancy increases after pickup
-
-            if student_name and stop_name:
-                message = f"{student_name} picked up at {stop_name}"  # Full pickup message
-            elif event.student_id is not None and stop_name:
-                message = f"Student {event.student_id} picked up at {stop_name}"  # Partial fallback
-            elif student_name and event.stop_id is not None:
-                message = f"{student_name} picked up at Stop {event.stop_id}"  # Partial fallback
-            else:
-                message = "Student picked up"  # Safety fallback
-
-        elif event.event_type == "DROPOFF":
-            total_dropoffs += 1  # Count dropoff events
-            onboard_count = max(0, onboard_count - 1)  # Never allow negative occupancy
-
-            if student_name and stop_name:
-                message = f"{student_name} dropped off at {stop_name}"  # Full dropoff message
-            elif event.student_id is not None and stop_name:
-                message = f"Student {event.student_id} dropped off at {stop_name}"  # Partial fallback
-            elif student_name and event.stop_id is not None:
-                message = f"{student_name} dropped off at Stop {event.stop_id}"  # Partial fallback
-            else:
-                message = "Student dropped off"  # Safety fallback
-
-        else:
-            message = f"Run event: {event.event_type}"  # Unknown/future event fallback
-
-        # ---------------------------------------------------------------------
-        # Save replay event row
-        # ---------------------------------------------------------------------
-        replay_events.append(
-            RunReplayEventOut(
-                id=event.id,
-                event_type=event.event_type,
-                timestamp=event.timestamp,
-                stop_id=event.stop_id,
-                stop_name=stop_name,
-                student_id=event.student_id,
-                student_name=student_name,
-                onboard_count=onboard_count,
-                message=message,
-            )
-        )
+    assignments = _get_run_assignments(run_id, db)
+    occupancy_counts = _build_run_occupancy_counts(assignments)
 
     # -------------------------------------------------------------------------
-    # Return replay response with summary
+    # Determine distinct arrived stops for flexible-progress reporting
     # -------------------------------------------------------------------------
-    return RunReplayOut(
+    arrive_events = (
+        db.query(RunEvent)
+        .filter(RunEvent.run_id == run_id)
+        .filter(RunEvent.event_type == "ARRIVE")
+        .order_by(RunEvent.timestamp.asc(), RunEvent.id.asc())
+        .all()
+    )
+    arrived_stop_ids = {
+        event.stop_id
+        for event in arrive_events
+        if event.stop_id is not None
+    }  # Distinct actual stop visits, even if the bus revisits a stop later
+
+    total_stops = len(stops)
+    completed_stops = min(total_stops, len(arrived_stop_ids))  # Cap to configured stops for safety
+    remaining_stops = max(0, total_stops - completed_stops)  # Never allow negative remaining stops
+
+    if total_stops == 0:
+        progress_percent = 0.0  # Avoid division by zero for runs with no stops
+    else:
+        progress_percent = round((completed_stops / total_stops) * 100, 1)  # Stable % from distinct arrivals
+
+    current_stop = stops_by_id.get(run.current_stop_id) if run.current_stop_id is not None else None
+
+    # -------------------------------------------------------------------------
+    # Return current run snapshot
+    # -------------------------------------------------------------------------
+    return RunStateOut(
         run_id=run.id,
-        events=replay_events,
-        summary=RunReplaySummaryOut(
-            total_events=len(replay_events),
-            total_arrivals=total_arrivals,
-            total_pickups=total_pickups,
-            total_dropoffs=total_dropoffs,
-        ),
+        route_id=run.route_id,
+        driver_id=run.driver_id,
+        run_type=run.run_type,
+        current_stop_id=run.current_stop_id,
+        current_stop_sequence=run.current_stop_sequence,
+        current_stop_name=current_stop.name if current_stop else None,
+        total_stops=total_stops,
+        completed_stops=completed_stops,
+        remaining_stops=remaining_stops,
+        progress_percent=progress_percent,
+        total_assigned_students=occupancy_counts["total_assigned_students"],
+        picked_up_students=occupancy_counts["total_picked_up"],
+        dropped_off_students=occupancy_counts["total_dropped_off"],
+        students_onboard=occupancy_counts["total_currently_onboard"],
+        remaining_pickups=occupancy_counts["total_not_yet_boarded"],
+        remaining_dropoffs=occupancy_counts["total_remaining_dropoffs"],
     )
 # =============================================================================
 # GET /runs/{run_id}/onboard_students
@@ -1111,43 +1104,13 @@ def get_run_occupancy_summary(
     # -------------------------------------------------------------------------
     # Validate run exists
     # -------------------------------------------------------------------------
-    run = db.query(Run).filter(Run.id == run_id).first()
-
-    if not run:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Run not found.",
-        )
+    run = _get_run_or_404(run_id, db)
 
     # -------------------------------------------------------------------------
     # Load all runtime student assignments for this run
     # -------------------------------------------------------------------------
-    assignments = (
-        db.query(StudentRunAssignment)
-        .filter(StudentRunAssignment.run_id == run_id)
-        .all()
-    )
-
-    # -------------------------------------------------------------------------
-    # Calculate occupancy counts from runtime assignment flags
-    # -------------------------------------------------------------------------
-    total_assigned_students = len(assignments)  # All students assigned to this run
-
-    total_picked_up = sum(
-        1 for assignment in assignments if assignment.picked_up
-    )  # Picked up at least once
-
-    total_dropped_off = sum(
-        1 for assignment in assignments if assignment.dropped_off
-    )  # Dropped off
-
-    total_currently_onboard = sum(
-        1 for assignment in assignments if assignment.is_onboard
-    )  # Currently on the bus
-
-    total_not_yet_boarded = sum(
-        1 for assignment in assignments if not assignment.picked_up
-    )  # Assigned but not picked up yet
+    assignments = _get_run_assignments(run_id, db)
+    occupancy_counts = _build_run_occupancy_counts(assignments)
 
     # -------------------------------------------------------------------------
     # Return occupancy summary
@@ -1156,11 +1119,176 @@ def get_run_occupancy_summary(
         run_id=run.id,
         route_id=run.route_id,
         run_type=run.run_type,
-        total_assigned_students=total_assigned_students,
-        total_picked_up=total_picked_up,
-        total_dropped_off=total_dropped_off,
-        total_currently_onboard=total_currently_onboard,
-        total_not_yet_boarded=total_not_yet_boarded,
+        total_assigned_students=occupancy_counts["total_assigned_students"],
+        total_picked_up=occupancy_counts["total_picked_up"],
+        total_dropped_off=occupancy_counts["total_dropped_off"],
+        total_currently_onboard=occupancy_counts["total_currently_onboard"],
+        total_not_yet_boarded=occupancy_counts["total_not_yet_boarded"],
+    )
+
+
+# =============================================================================
+# GET /runs/{run_id}/timeline
+# ---------------------------------------------------------------------------
+# Purpose:
+#   Return raw ordered ARRIVE / PICKUP / DROPOFF history for the run.
+#
+# Notes:
+#   This stays separate from /state because timeline is a lossless event log,
+#   not a current snapshot or interpreted admin view.
+# =============================================================================
+@router.get("/{run_id}/timeline", response_model=RunTimelineOut)
+def get_run_timeline(run_id: int, db: Session = Depends(get_db)):
+
+    run = db.get(run_model.Run, run_id)                                   # Load run by ID
+    if not run:                                                           # If run does not exist
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Run not found",
+        )
+
+    events = (
+        db.query(RunEvent)                                                # Query run events
+        .filter(RunEvent.run_id == run_id)                                # Only this run
+        .order_by(RunEvent.timestamp.asc(), RunEvent.id.asc())            # Stable oldest-first ordering
+        .all()                                                            # Materialize list
+    )
+
+    return RunTimelineOut(                                                # Build timeline response
+        run_id=run_id,                                                    # Parent run ID
+        total_events=len(events),                                         # Event count
+        events=events,                                                    # Ordered event rows
+    )
+
+
+# =============================================================================
+# GET /runs/{run_id}/replay
+# ---------------------------------------------------------------------------
+# Purpose:
+#   Return an interpreted human-readable history for admin/debug/report use.
+#
+# Notes:
+#   This stays separate from /timeline because replay adds names, messages,
+#   and occupancy interpretation on top of the raw event log.
+# =============================================================================
+@router.get("/{run_id}/replay", response_model=RunReplayOut)
+def get_run_replay(run_id: int, db: Session = Depends(get_db)):
+    # -------------------------------------------------------------------------
+    # Validate run exists
+    # -------------------------------------------------------------------------
+    run = db.get(run_model.Run, run_id)  # Load run by ID
+    if not run:  # If run does not exist
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    # -------------------------------------------------------------------------
+    # Load all run events in stable chronological order
+    # -------------------------------------------------------------------------
+    raw_events = (
+        db.query(RunEvent)
+        .filter(RunEvent.run_id == run_id)  # Only events for this run
+        .order_by(RunEvent.timestamp.asc(), RunEvent.id.asc())  # Stable time order
+        .all()
+    )
+
+    # -------------------------------------------------------------------------
+    # Build replay rows with readable context
+    # -------------------------------------------------------------------------
+    replay_events: list[RunReplayEventOut] = []  # Final replay rows
+    onboard_count = 0  # Live bus occupancy during replay
+
+    total_arrivals = 0  # Summary counter
+    total_pickups = 0  # Summary counter
+    total_dropoffs = 0  # Summary counter
+
+    for event in raw_events:
+        stop_name = None  # Default when stop is missing
+        student_name = None  # Default when student is missing
+
+        # ---------------------------------------------------------------------
+        # Resolve stop context
+        # ---------------------------------------------------------------------
+        if event.stop_id is not None:
+            stop = db.get(stop_model.Stop, event.stop_id)  # Load stop by ID
+            stop_name = stop.name if stop else None  # Safe stop name
+
+        # ---------------------------------------------------------------------
+        # Resolve student context
+        # ---------------------------------------------------------------------
+        if event.student_id is not None:
+            student = db.get(student_model.Student, event.student_id)  # Load student
+            student_name = student.name if student else None  # Safe student name
+
+        # ---------------------------------------------------------------------
+        # Convert raw event into readable replay message
+        # ---------------------------------------------------------------------
+        if event.event_type == "ARRIVE":
+            total_arrivals += 1  # Count arrival events
+
+            if stop_name:
+                message = f"Bus arrived at {stop_name}"  # Human-readable arrival
+            elif event.stop_id is not None:
+                message = f"Bus arrived at Stop {event.stop_id}"  # Fallback arrival
+            else:
+                message = "Bus arrived at an unknown stop"  # Safety fallback
+
+        elif event.event_type == "PICKUP":
+            total_pickups += 1  # Count pickup events
+            onboard_count += 1  # Occupancy increases after pickup
+
+            if student_name and stop_name:
+                message = f"{student_name} picked up at {stop_name}"  # Full pickup message
+            elif event.student_id is not None and stop_name:
+                message = f"Student {event.student_id} picked up at {stop_name}"  # Partial fallback
+            elif student_name and event.stop_id is not None:
+                message = f"{student_name} picked up at Stop {event.stop_id}"  # Partial fallback
+            else:
+                message = "Student picked up"  # Safety fallback
+
+        elif event.event_type == "DROPOFF":
+            total_dropoffs += 1  # Count dropoff events
+            onboard_count = max(0, onboard_count - 1)  # Never allow negative occupancy
+
+            if student_name and stop_name:
+                message = f"{student_name} dropped off at {stop_name}"  # Full dropoff message
+            elif event.student_id is not None and stop_name:
+                message = f"Student {event.student_id} dropped off at {stop_name}"  # Partial fallback
+            elif student_name and event.stop_id is not None:
+                message = f"{student_name} dropped off at Stop {event.stop_id}"  # Partial fallback
+            else:
+                message = "Student dropped off"  # Safety fallback
+
+        else:
+            message = f"Run event: {event.event_type}"  # Unknown/future event fallback
+
+        # ---------------------------------------------------------------------
+        # Save replay event row
+        # ---------------------------------------------------------------------
+        replay_events.append(
+            RunReplayEventOut(
+                id=event.id,
+                event_type=event.event_type,
+                timestamp=event.timestamp,
+                stop_id=event.stop_id,
+                stop_name=stop_name,
+                student_id=event.student_id,
+                student_name=student_name,
+                onboard_count=onboard_count,
+                message=message,
+            )
+        )
+
+    # -------------------------------------------------------------------------
+    # Return replay response with summary
+    # -------------------------------------------------------------------------
+    return RunReplayOut(
+        run_id=run.id,
+        events=replay_events,
+        summary=RunReplaySummaryOut(
+            total_events=len(replay_events),
+            total_arrivals=total_arrivals,
+            total_pickups=total_pickups,
+            total_dropoffs=total_dropoffs,
+        ),
     )
 # =============================================================================
 # GET /runs/{run_id}
@@ -1585,4 +1713,3 @@ def get_run_progress(
         next_stop_sequence=next_stop.sequence if next_stop else None,
         next_stop_planned_time=next_stop.planned_time if next_stop else None,
     )
-

@@ -157,6 +157,30 @@ class RunOccupancySummaryResponse(BaseModel):
     total_currently_onboard: int  # Students currently on the bus
     total_not_yet_boarded: int  # Assigned students who have not been picked up yet
 
+
+# -----------------------------------------------------------
+# Run state snapshot output
+# - Current operational view without exposing raw event history
+# -----------------------------------------------------------
+class RunStateOut(BaseModel):
+    run_id: int  # Current run ID
+    route_id: int  # Parent route ID
+    driver_id: int  # Assigned driver ID
+    run_type: RunType  # AM / PM / etc.
+    current_stop_id: int | None = None  # Latest known bus location stop ID
+    current_stop_sequence: int | None = None  # Latest known bus location sequence
+    current_stop_name: str | None = None  # Latest known bus location name
+    total_stops: int  # Stops configured on the run
+    completed_stops: int  # Distinct stops with at least one ARRIVE event
+    remaining_stops: int  # Stops not yet arrived at, never below zero
+    progress_percent: float  # Distinct arrived stops / total stops
+    total_assigned_students: int  # Runtime assignments on the run
+    picked_up_students: int  # Students picked up at least once
+    dropped_off_students: int  # Students dropped off
+    students_onboard: int  # Students currently onboard
+    remaining_pickups: int  # Assigned students not yet picked up
+    remaining_dropoffs: int  # Students picked up but not yet dropped off
+
 # -----------------------------------------------------------
 # Run timeline event output
 # - One row per logged ARRIVE / PICKUP / DROPOFF event

@@ -1299,6 +1299,204 @@ def test_get_occupancy_summary_run_not_found(client):
     assert response.json()["detail"] == "Run not found."
 
 
+def test_get_run_state_snapshot(client):
+    # -------------------------------------------------------------------------
+    # Create driver
+    # -------------------------------------------------------------------------
+    driver = client.post(
+        "/drivers/",
+        json={
+            "name": "State Driver",
+            "email": "state@driver.com",
+            "phone": "55555",
+        },
+    )
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]
+
+    # -------------------------------------------------------------------------
+    # Create school
+    # -------------------------------------------------------------------------
+    school = client.post(
+        "/schools/",
+        json={
+            "name": "State School",
+            "address": "789 State St",
+        },
+    )
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]
+
+    # -------------------------------------------------------------------------
+    # Create route
+    # -------------------------------------------------------------------------
+    route = client.post(
+        "/routes/",
+        json={
+            "route_number": "STATE-1",
+            "unit_number": "Bus-State",
+            "driver_id": driver_id,
+        },
+    )
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    # -------------------------------------------------------------------------
+    # Create run
+    # -------------------------------------------------------------------------
+    run = client.post(
+        "/runs/",
+        json={
+            "driver_id": driver_id,
+            "route_id": route_id,
+            "run_type": "AM",
+        },
+    )
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    # -------------------------------------------------------------------------
+    # Create stops
+    # -------------------------------------------------------------------------
+    stop1 = client.post(
+        "/stops/",
+        json={
+            "name": "State Stop 1",
+            "latitude": 53.5461,
+            "longitude": -113.4938,
+            "type": "pickup",
+            "run_id": run_id,
+            "sequence": 1,
+        },
+    )
+    assert stop1.status_code in (200, 201)
+    stop1_id = stop1.json()["id"]
+
+    stop2 = client.post(
+        "/stops/",
+        json={
+            "name": "State Stop 2",
+            "latitude": 53.5561,
+            "longitude": -113.4838,
+            "type": "dropoff",
+            "run_id": run_id,
+            "sequence": 2,
+        },
+    )
+    assert stop2.status_code in (200, 201)
+    stop2_id = stop2.json()["id"]
+
+    # -------------------------------------------------------------------------
+    # Create student and runtime assignment
+    # -------------------------------------------------------------------------
+    student = client.post(
+        "/students/",
+        json={
+            "name": "State Student",
+            "grade": "4",
+            "school_id": school_id,
+            "route_id": route_id,
+            "stop_id": stop1_id,
+        },
+    )
+    assert student.status_code in (200, 201)
+    student_id = student.json()["id"]
+
+    assignment = client.post(
+        "/student-run-assignments/",
+        json={
+            "student_id": student_id,
+            "run_id": run_id,
+            "stop_id": stop1_id,
+        },
+    )
+    assert assignment.status_code == 201
+
+    # -------------------------------------------------------------------------
+    # Read initial state before any actions
+    # -------------------------------------------------------------------------
+    initial_state = client.get(f"/runs/{run_id}/state")
+    assert initial_state.status_code == 200
+
+    initial_data = initial_state.json()
+    assert initial_data["run_id"] == run_id
+    assert initial_data["route_id"] == route_id
+    assert initial_data["driver_id"] == driver_id
+    assert initial_data["run_type"] == "AM"
+    assert initial_data["current_stop_id"] is None
+    assert initial_data["current_stop_sequence"] is None
+    assert initial_data["current_stop_name"] is None
+    assert initial_data["total_stops"] == 2
+    assert initial_data["completed_stops"] == 0
+    assert initial_data["remaining_stops"] == 2
+    assert initial_data["progress_percent"] == 0.0
+    assert initial_data["total_assigned_students"] == 1
+    assert initial_data["picked_up_students"] == 0
+    assert initial_data["dropped_off_students"] == 0
+    assert initial_data["students_onboard"] == 0
+    assert initial_data["remaining_pickups"] == 1
+    assert initial_data["remaining_dropoffs"] == 0
+
+    # -------------------------------------------------------------------------
+    # Arrive at stop 1 and pick up student
+    # -------------------------------------------------------------------------
+    arrive_stop_1 = client.post(f"/runs/{run_id}/arrive_stop?stop_sequence=1")
+    assert arrive_stop_1.status_code == 200
+
+    pickup = client.post(
+        f"/runs/{run_id}/pickup_student",
+        json={"student_id": student_id},
+    )
+    assert pickup.status_code == 200
+
+    pickup_state = client.get(f"/runs/{run_id}/state")
+    assert pickup_state.status_code == 200
+
+    pickup_data = pickup_state.json()
+    assert pickup_data["current_stop_id"] == stop1_id
+    assert pickup_data["current_stop_sequence"] == 1
+    assert pickup_data["current_stop_name"] == "State Stop 1"
+    assert pickup_data["completed_stops"] == 1
+    assert pickup_data["remaining_stops"] == 1
+    assert pickup_data["progress_percent"] == 50.0
+    assert pickup_data["total_assigned_students"] == 1
+    assert pickup_data["picked_up_students"] == 1
+    assert pickup_data["dropped_off_students"] == 0
+    assert pickup_data["students_onboard"] == 1
+    assert pickup_data["remaining_pickups"] == 0
+    assert pickup_data["remaining_dropoffs"] == 1
+
+    # -------------------------------------------------------------------------
+    # Arrive at stop 2 and drop off student
+    # -------------------------------------------------------------------------
+    arrive_stop_2 = client.post(f"/runs/{run_id}/arrive_stop?stop_sequence=2")
+    assert arrive_stop_2.status_code == 200
+
+    dropoff = client.post(
+        f"/runs/{run_id}/dropoff_student",
+        json={"student_id": student_id},
+    )
+    assert dropoff.status_code == 200
+
+    dropoff_state = client.get(f"/runs/{run_id}/state")
+    assert dropoff_state.status_code == 200
+
+    dropoff_data = dropoff_state.json()
+    assert dropoff_data["current_stop_id"] == stop2_id
+    assert dropoff_data["current_stop_sequence"] == 2
+    assert dropoff_data["current_stop_name"] == "State Stop 2"
+    assert dropoff_data["total_stops"] == 2
+    assert dropoff_data["completed_stops"] == 2
+    assert dropoff_data["remaining_stops"] == 0
+    assert dropoff_data["progress_percent"] == 100.0
+    assert dropoff_data["total_assigned_students"] == 1
+    assert dropoff_data["picked_up_students"] == 1
+    assert dropoff_data["dropped_off_students"] == 1
+    assert dropoff_data["students_onboard"] == 0
+    assert dropoff_data["remaining_pickups"] == 0
+    assert dropoff_data["remaining_dropoffs"] == 0
+
+
 def test_arrive_stop_allows_backward_movement(client):
     driver = client.post("/drivers/", json={"name": "Driver Move", "email": "move@test.com", "phone": "33333"})  # Create driver
     driver_id = driver.json()["id"]  # Extract driver ID from API response
