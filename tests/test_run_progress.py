@@ -149,148 +149,140 @@ def test_start_run_copies_stops_from_latest_route_run(client):
     assert new_stops[1]["latitude"] == 53.5561
     assert new_stops[1]["longitude"] == -113.5038
 
-# =============================================================================
-# tests/test_run_progress.py — Run Progress Tests
-# -----------------------------------------------------------------------------
-# Responsibilities:
-#   - Verify run progress endpoints
-#   - Verify stop-copy behavior when starting a new run
-#   - Verify by-driver progress fallback uses stored run progress
-# =============================================================================
 
+# =============================================================================
+# Test: state reflects stored current stop after arrive_stop
+# =============================================================================
+def test_run_state_uses_stored_current_stop_sequence(client):
 
-def test_get_run_progress_by_driver_uses_stored_current_stop_sequence(client):
     # -------------------------------------------------------------------------
-    # Create a driver
+    # Create driver
     # -------------------------------------------------------------------------
     driver_res = client.post(
         "/drivers/",
         json={
-            "name": "Driver Progress Stored",                         # Driver display name
-            "email": "driver_progress_stored@example.com",            # Unique driver email
-            "phone": "780-555-1101",                                  # Driver phone
+            "name": "Driver State Stored",
+            "email": "driver_state_stored@example.com",
+            "phone": "780-555-1101",
         },
     )
-    assert driver_res.status_code in (200, 201)                       # Driver should be created
-    driver_id = driver_res.json()["id"]                               # Created driver ID
+    assert driver_res.status_code in (200, 201)
+    driver_id = driver_res.json()["id"]  # Created driver ID
 
     # -------------------------------------------------------------------------
-    # Create a route
+    # Create route
     # -------------------------------------------------------------------------
     route_res = client.post(
         "/routes/",
         json={
-            "route_number": "R-PROGRESS-STORED",                      # Unique route number
-            "unit_number": "BUS-PROGRESS-01",                         # Required unit number
-            "driver_id": driver_id,                                   # Required assigned driver
+            "route_number": "R-STATE-STORED",
+            "unit_number": "BUS-STATE-01",
+            "driver_id": driver_id,
         },
     )
-    assert route_res.status_code in (200, 201)                        # Route should be created
-    route_id = route_res.json()["id"]                                 # Created route ID
+    assert route_res.status_code in (200, 201)
+    route_id = route_res.json()["id"]  # Created route ID
 
     # -------------------------------------------------------------------------
-    # Create a source run that will provide stops for copy-forward logic
+    # Create source run with ordered stops
     # -------------------------------------------------------------------------
     seed_run_res = client.post(
         "/runs/",
         json={
-            "driver_id": driver_id,                                   # Same driver
-            "route_id": route_id,                                     # Same route
-            "run_type": "AM",                                         # Run type
+            "driver_id": driver_id,
+            "route_id": route_id,
+            "run_type": "AM",
         },
     )
-    assert seed_run_res.status_code in (200, 201)                     # Seed run should be created
-    seed_run_id = seed_run_res.json()["id"]                           # Seed run ID
+    assert seed_run_res.status_code in (200, 201)
+    seed_run_id = seed_run_res.json()["id"]  # Seed run ID
 
-    # -------------------------------------------------------------------------
-    # Add ordered stops to the seed run
-    # -------------------------------------------------------------------------
     stop_1_res = client.post(
         "/stops/",
         json={
-            "run_id": seed_run_id,                                    # Parent run ID
-            "sequence": 1,                                            # First stop
-            "type": "pickup",                                         # Stop type
-            "name": "Stop 1",                                         # Stop name
-            "address": "100 First St",                                # Stop address
-            "planned_time": "07:10:00",                               # Planned time
-            "latitude": 53.5461,                                      # Latitude
-            "longitude": -113.4938,                                   # Longitude
+            "run_id": seed_run_id,
+            "sequence": 1,
+            "type": "pickup",
+            "name": "Stop 1",
+            "address": "100 First St",
+            "planned_time": "07:10:00",
+            "latitude": 53.5461,
+            "longitude": -113.4938,
         },
     )
-    assert stop_1_res.status_code in (200, 201)                       # First stop should be created
+    assert stop_1_res.status_code in (200, 201)
 
     stop_2_res = client.post(
         "/stops/",
         json={
-            "run_id": seed_run_id,                                    # Parent run ID
-            "sequence": 2,                                            # Second stop
-            "type": "pickup",                                         # Stop type
-            "name": "Stop 2",                                         # Stop name
-            "address": "200 Second St",                               # Stop address
-            "planned_time": "07:20:00",                               # Planned time
-            "latitude": 53.5561,                                      # Latitude
-            "longitude": -113.4838,                                   # Longitude
+            "run_id": seed_run_id,
+            "sequence": 2,
+            "type": "pickup",
+            "name": "Stop 2",
+            "address": "200 Second St",
+            "planned_time": "07:20:00",
+            "latitude": 53.5561,
+            "longitude": -113.4838,
         },
     )
-    assert stop_2_res.status_code in (200, 201)                       # Second stop should be created
+    assert stop_2_res.status_code in (200, 201)
 
     stop_3_res = client.post(
         "/stops/",
         json={
-            "run_id": seed_run_id,                                    # Parent run ID
-            "sequence": 3,                                            # Third stop
-            "type": "pickup",                                         # Stop type
-            "name": "Stop 3",                                         # Stop name
-            "address": "300 Third St",                                # Stop address
-            "planned_time": "07:30:00",                               # Planned time
-            "latitude": 53.5661,                                      # Latitude
-            "longitude": -113.4738,                                   # Longitude
+            "run_id": seed_run_id,
+            "sequence": 3,
+            "type": "pickup",
+            "name": "Stop 3",
+            "address": "300 Third St",
+            "planned_time": "07:30:00",
+            "latitude": 53.5661,
+            "longitude": -113.4738,
         },
     )
-    assert stop_3_res.status_code in (200, 201)                       # Third stop should be created
+    assert stop_3_res.status_code in (200, 201)
 
     # -------------------------------------------------------------------------
-    # End the seed run so the driver can start a new active run
+    # End the seed run and start the copied active run
     # -------------------------------------------------------------------------
     end_res = client.post(f"/runs/end?run_id={seed_run_id}")
-    assert end_res.status_code == 200                                 # Seed run should end cleanly
+    assert end_res.status_code == 200
 
-    # -------------------------------------------------------------------------
-    # Start a new active run for the same driver/route
-    # The endpoint should copy stops from the latest same-route run with stops
-    # -------------------------------------------------------------------------
     active_run_res = client.post(
         "/runs/start",
         json={
-            "driver_id": driver_id,                                   # Same driver
-            "route_id": route_id,                                     # Same route
-            "run_type": "AM",                                         # Run type
+            "driver_id": driver_id,
+            "route_id": route_id,
+            "run_type": "AM",
         },
     )
-    assert active_run_res.status_code in (200, 201)                   # Active run should start
-    active_run_id = active_run_res.json()["id"]                       # New active run ID
+    assert active_run_res.status_code in (200, 201)
+    active_run_id = active_run_res.json()["id"]  # New active run ID
+    active_stops_res = client.get(f"/runs/{active_run_id}/stops")
+    assert active_stops_res.status_code == 200
+    active_stop_2_id = active_stops_res.json()[1]["id"]  # Copied stop 2 ID for the active run
 
     # -------------------------------------------------------------------------
-    # Persist driver progress at stop sequence 2
+    # Store live location at stop sequence 2
     # -------------------------------------------------------------------------
     arrive_res = client.post(f"/runs/{active_run_id}/arrive_stop?stop_sequence=2")
-    assert arrive_res.status_code == 200                              # Stop arrival should succeed
+    assert arrive_res.status_code == 200
 
     # -------------------------------------------------------------------------
-    # Call by-driver progress without current_stop_sequence
-    # It should use stored run.current_stop_sequence instead of defaulting to 1
+    # Read the current run snapshot
     # -------------------------------------------------------------------------
-    progress_res = client.get(f"/runs/progress/by_driver?driver_id={driver_id}")
-    assert progress_res.status_code == 200                            # Progress lookup should succeed
+    state_res = client.get(f"/runs/{active_run_id}/state")
+    assert state_res.status_code == 200
 
-    data = progress_res.json()                                        # Response payload
+    data = state_res.json()
 
-       # -------------------------------------------------------------------------
-    # Verify stored progress was used
     # -------------------------------------------------------------------------
-    assert data["current_stop_sequence"] == 2                         # Current stop should be stored stop
-    assert data["current_stop_index"] == 2                            # Stop index should reflect sequence 2
-    assert data["total_stops"] == 3                                   # Three copied stops should exist
-    assert data["remaining_stops"] == 2                               # Remaining includes current stop and later stops
-    assert data["next_stop_sequence"] == 3                            # Next stop should be stop 3
+    # Verify current run snapshot reflects stored location
+    # -------------------------------------------------------------------------
+    assert data["current_stop_id"] == active_stop_2_id
+    assert data["current_stop_sequence"] == 2
+    assert data["current_stop_name"] == "Stop 2"
+    assert data["total_stops"] == 3
+    assert data["completed_stops"] == 1
+    assert data["remaining_stops"] == 2
+    assert data["progress_percent"] == 33.3
