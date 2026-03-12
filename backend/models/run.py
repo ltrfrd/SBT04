@@ -42,3 +42,4 @@ class Run(Base):
     route = relationship("Route", back_populates="runs")  # Load assigned route
     stops = relationship("Stop", back_populates="run", cascade="all, delete-orphan", passive_deletes=True, foreign_keys="Stop.run_id")  # Load stops that belong to this run
     student_assignments = relationship("StudentRunAssignment", back_populates="run", cascade="all, delete-orphan", passive_deletes=True)  # Load runtime student assignments
+    events = relationship("RunEvent", back_populates="run", cascade="all, delete")

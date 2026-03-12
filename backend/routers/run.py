@@ -48,6 +48,8 @@ from backend.models import stop as stop_model
 from backend.models.run import Run                     # Run model
 from backend.models.associations import StudentRunAssignment  # Runtime rider assignments
 from backend.schemas.run import RunStart, RunOut
+from backend.models.run_event import RunEvent                            # Run timeline event model
+from backend.schemas.run import RunTimelineOut                           # Timeline response schema
 from backend.schemas.stop import StopOut
 from backend.schemas.run import (  # Running board response schemas
     RunningBoardResponse,
@@ -490,7 +492,17 @@ def arrive_at_stop(
     # -------------------------------------------------------------------------
     run.current_stop_id = stop.id                   # Save the actual current stop ID
     run.current_stop_sequence = stop.sequence       # Save the actual current stop sequence
-
+    # -----------------------------------------------------------
+    # Log ARRIVE event
+    # - Records the bus's latest stop visit
+    # -----------------------------------------------------------
+    event = RunEvent(                                                        # Build arrive event
+        run_id=run.id,                                                       # Parent run
+        stop_id=stop.id,                                                     # Current stop
+        event_type="ARRIVE",                                                 # Event type
+    )
+    db.add(event)                                                            # Add event to current transaction
+    
     db.commit()                                     # Save updated run
     db.refresh(run)                                 # Reload updated run
 
@@ -655,6 +667,18 @@ def pickup_student(
     assignment.is_onboard = True  # Student is now physically on the bus
     assignment.actual_pickup_stop_id = run.current_stop_id  # Record the actual boarding stop
 
+    # -----------------------------------------------------------
+    # Log DROPOFF event
+    # - Records actual stop used for dropoff
+    # -----------------------------------------------------------
+    event = RunEvent(
+        run_id=run.id,
+        stop_id=run.current_stop_id,
+        student_id=assignment.student_id,
+        event_type="PICKUP",
+    )
+
+    db.add(event)                                                           # Add event to current transaction
     # -------------------------------------------------------------------------
     # Save changes
     # -------------------------------------------------------------------------
@@ -778,6 +802,18 @@ def dropoff_student(
     assignment.is_onboard = False  # Student is no longer on the bus
     assignment.actual_dropoff_stop_id = run.current_stop_id  # Record the actual drop-off stop
 
+    # -----------------------------------------------------------
+    # Log DROPOFF event
+    # - Records actual stop used for dropoff
+    # -----------------------------------------------------------
+    event = RunEvent(                                                        # Build dropoff event
+        run_id=run.id,                                                       # Parent run
+        stop_id=run.current_stop_id,                                         # Actual dropoff stop
+        student_id=assignment.student_id,                                               # Dropped-off student
+        event_type="DROPOFF",                                                # Event type
+    )
+    db.add(event)                                                            # Add event to current transaction
+    
     # -------------------------------------------------------------------------
     # Save changes
     # -------------------------------------------------------------------------
@@ -796,6 +832,33 @@ def dropoff_student(
         dropped_off_at=assignment.dropped_off_at,
     )
 
+# -------------------------------------------------------------------------
+# GET /runs/{run_id}/timeline
+# - Returns ordered ARRIVE / PICKUP / DROPOFF events for a run
+# - Oldest first so the full run can be replayed in order
+# -------------------------------------------------------------------------
+@router.get("/{run_id}/timeline", response_model=RunTimelineOut)
+def get_run_timeline(run_id: int, db: Session = Depends(get_db)):
+
+    run = db.get(run_model.Run, run_id)                                   # Load run by ID
+    if not run:                                                           # If run does not exist
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Run not found",
+        )
+
+    events = (
+        db.query(RunEvent)                                                # Query run events
+        .filter(RunEvent.run_id == run_id)                                # Only this run
+        .order_by(RunEvent.timestamp.asc(), RunEvent.id.asc())            # Stable oldest-first ordering
+        .all()                                                            # Materialize list
+    )
+
+    return RunTimelineOut(                                                # Build timeline response
+        run_id=run_id,                                                    # Parent run ID
+        total_events=len(events),                                         # Event count
+        events=events,                                                    # Ordered event rows
+    )
 # =============================================================================
 # GET /runs/{run_id}/onboard_students
 # -----------------------------------------------------------------------------

@@ -156,3 +156,27 @@ class RunOccupancySummaryResponse(BaseModel):
     total_dropped_off: int  # Students dropped off
     total_currently_onboard: int  # Students currently on the bus
     total_not_yet_boarded: int  # Assigned students who have not been picked up yet
+
+# -----------------------------------------------------------
+# Run timeline event output
+# - One row per logged ARRIVE / PICKUP / DROPOFF event
+# -----------------------------------------------------------
+class RunEventOut(BaseModel):
+    id: int                                                              # Event ID
+    run_id: int                                                          # Parent run
+    stop_id: int | None = None                                           # Stop involved in the event
+    student_id: int | None = None                                        # Student involved in the event
+    event_type: str                                                      # ARRIVE | PICKUP | DROPOFF
+    timestamp: datetime                                                  # Event timestamp
+
+    model_config = ConfigDict(from_attributes=True)                      # Enable ORM -> schema conversion
+
+
+# -----------------------------------------------------------
+# Run timeline response
+# - Ordered event list for a single run
+# -----------------------------------------------------------
+class RunTimelineOut(BaseModel):
+    run_id: int                                                          # Parent run
+    total_events: int                                                    # Number of timeline events
+    events: list[RunEventOut]                                            # Ordered event rows

@@ -5,6 +5,7 @@ from .route import Route
 from .stop import Stop, StopType
 from .run import Run
 from .payroll import Payroll
+from .run_event import RunEvent
 from .associations import route_schools, StudentRunAssignment
 
 __all__ = [
