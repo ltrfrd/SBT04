@@ -67,3 +67,11 @@ alembic/**/__pycache__/
 # -----------------------------------------------------------
 venv/
 .venv/
+# -----------------------------------------------------------
+# Pytest cache / temp directories
+# -----------------------------------------------------------
+.pytest_cache/
+.pytest_tmp/
+pytest_tmp*
+pytest_cache*
+tests/pytest*
