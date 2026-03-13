@@ -106,6 +106,22 @@ def get_driver_work_summary(start: date, end: date, db: Session = Depends(get_db
         "records": attendance,  # Summary payload
     }  # Preserve existing response payload shape
 
+# -----------------------------------------------------------  # Attendance report by date
+# Attendance report by date                                   # Dispatch daily attendance dashboard
+# - Dispatch daily attendance dashboard                       # Read-only attendance aggregation
+# -----------------------------------------------------------  # Section separator
+
+@router.get("/date/{target_date}")                            # Daily attendance endpoint
+def get_date_attendance(                                      # Return attendance for one date
+    target_date: date,                                        # Requested attendance date
+    db: Session = Depends(get_db),                            # Database session
+):
+    return attendance_generator.generate_attendance(          # Delegate to attendance generator
+        db=db,                                                # Pass DB session
+        attendance_type="date",                               # Request date attendance mode
+        start=target_date,                                    # Start date = target date
+        end=target_date,                                      # End date = target date
+    )  # Daily attendance summary                             # Return one-day attendance data
 
 student_bus_absence_router = student_bus_absence.router  # Keep absence under attendance module ownership
 

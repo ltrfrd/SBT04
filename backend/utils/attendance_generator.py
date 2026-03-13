@@ -3,7 +3,7 @@
 # - Provide attendance-layer summaries using the existing report logic
 # -----------------------------------------------------------
 from sqlalchemy.orm import Session  # Database session type
-from datetime import date  # Date filter type
+from datetime import date, datetime, time # Date filter type
 from backend.models import (  # Existing summary data sources
     driver as driver_model,
     route as route_model,
@@ -20,7 +20,6 @@ from backend.utils.student_bus_absence import has_student_bus_absence  # Absence
 from backend.utils import attendance_generator  # Attendance utility functions
 from fastapi import APIRouter, Depends, HTTPException, status  # FastAPI components
 from sqlalchemy.orm import Session  # Database session type
-from datetime import date  # Date filter type
 
 from database import get_db  # Shared DB dependency
 from backend.utils import attendance_generator  # Attendance utility functions
@@ -169,8 +168,12 @@ def generate_attendance(
         return route_summary(db, ref_id)  # Return route attendance summary
     if attendance_type == "payroll" and start and end:
         return payroll_summary(db, start, end)  # Return payroll attendance summary
+    if attendance_type == "run" and ref_id:
+        return run_attendance_summary(db, ref_id)  # Run-level attendance summary
+    if attendance_type == "date" and start and end:               # Date-based attendance request
+        return date_summary(db, start, end)                       # Generate daily attendance summary
     return {"error": "Invalid attendance type or parameters"}  # Preserve error-style contract
-
+    
 
 generate_report = generate_attendance  # Backward-compatible alias during the rename phase
 
@@ -260,6 +263,33 @@ def run_attendance_summary(db, run, assignments, events, absence_lookup):
         "totals": totals,  # Run totals
         "stop_totals": stop_totals,  # Stop-level totals
     } 
+
+# -----------------------------------------------------------  # Attendance summary by date
+# Date attendance summary                                     # Dispatch daily attendance view
+# -----------------------------------------------------------  # Section separator
+
+def date_summary(db: Session, start: date, end: date):        # Build attendance for a specific date
+    day_start = datetime.combine(start, time.min)             # Start of requested day
+    day_end = datetime.combine(end, time.max)                 # End of requested day
+
+    runs = (                                                  # Query runs within full-day range
+        db.query(Run)                                         # Select runs
+        .filter(Run.start_time >= day_start)                  # Lower datetime boundary
+        .filter(Run.start_time <= day_end)                    # Upper datetime boundary
+        .all()                                                # Execute query
+    )
+
+    results = []                                              # Collect run attendance summaries
+
+    for run in runs:                                          # Iterate through runs
+        summary = run_attendance_summary(db, run.id)          # Reuse run attendance logic
+        if summary and "error" not in summary:                # Skip invalid summaries
+            results.append(summary)                           # Add valid run summary
+    return {
+        "date_range": {"start": str(start), "end": str(end)},     # Requested date window
+        "total_runs": len(results),                               # Number of runs returned
+        "run_ids": [run.id for run in runs],                      # Matched run IDs
+    }
 
 # -----------------------------------------------------------
 # Run Attendance Report
