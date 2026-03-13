@@ -39,8 +39,8 @@ from backend.models import (                # Import model modules for ORM bindi
 # ---------- ROUTERS ----------
 # Import each router module (each exposes a .router object)
 from backend.routers import (
-    driver, school, student, route, stop, run, dispatch, attendance, student_run_assignment, student_bus_absence
-)
+    driver, school, student, route, stop, run, dispatch, attendance, student_run_assignment
+)  # Import active routers through attendance ownership
 
 # ---------- UTILS ----------
 # Custom utilities: GPS tools and authentication helpers
@@ -84,17 +84,16 @@ templates = Jinja2Templates(directory="backend/templates")
 # ROUTERS REGISTRATION
 # -----------------------------------------------------------
 # Each router defines its own endpoints (CRUD APIs)
-app.include_router(driver.router)
-app.include_router(school.router)
-app.include_router(student.router)
-app.include_router(route.router)
-app.include_router(stop.router)
-app.include_router(run.router)
-app.include_router(dispatch.router)
-app.include_router(attendance.router)
-app.include_router(student_run_assignment.router)
-app.include_router(student_bus_absence.router)
-
+app.include_router(driver.router)  # Register driver endpoints
+app.include_router(school.router)  # Register school endpoints
+app.include_router(student.router)  # Register student endpoints
+app.include_router(route.router)  # Register route endpoints
+app.include_router(stop.router)  # Register stop endpoints
+app.include_router(run.router)  # Register run endpoints
+app.include_router(dispatch.router)  # Register dispatch endpoints
+app.include_router(attendance.router)  # Register attendance layer endpoints
+app.include_router(student_run_assignment.router)  # Register student run assignment endpoints
+app.include_router(attendance.student_bus_absence_router)  # Register absence endpoints through attendance ownership
 
 # -----------------------------------------------------------
 # WEBSOCKET: GPS + ALERTS

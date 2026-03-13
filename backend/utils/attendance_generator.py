@@ -13,6 +13,23 @@ from backend.models import (  # Existing summary data sources
     student as student_model,
 )
 
+from backend.models.run import Run  # Import locally to avoid circular dependency
+from backend.models.run_event import RunEvent  # Run event history
+from backend.models.associations import StudentRunAssignment  # Runtime assignments
+from backend.utils.student_bus_absence import has_student_bus_absence  # Absence check
+from backend.utils import attendance_generator  # Attendance utility functions
+from fastapi import APIRouter, Depends, HTTPException, status  # FastAPI components
+from sqlalchemy.orm import Session  # Database session type
+from datetime import date  # Date filter type
+
+from database import get_db  # Shared DB dependency
+from backend.utils import attendance_generator  # Attendance utility functions
+from backend.routers import student_bus_absence  # Re-export planned absence router through attendance layer
+
+router = APIRouter(
+    prefix="/reports",  # Keep existing path stable during the rename phase
+    tags=["Attendance"],  # Rename outward-facing API label
+)
 
 def driver_summary(db: Session, driver_id: int) -> dict:
     drv = db.get(driver_model.Driver, driver_id)  # Load driver
@@ -156,3 +173,141 @@ def generate_attendance(
 
 
 generate_report = generate_attendance  # Backward-compatible alias during the rename phase
+
+# -----------------------------------------------------------
+# Student Attendance Status
+# - Derive unified attendance state from run events and absence
+# -----------------------------------------------------------
+
+def classify_student_attendance(assignment, events, absence_lookup):
+    """Return attendance status for a student assignment."""  # Unified attendance state
+
+    student_id = assignment.student_id  # Student identifier
+
+    if absence_lookup.get(student_id):
+        return "planned_absent"  # Student planned not to ride
+
+    if assignment.picked_up and assignment.dropped_off:
+        return "dropped_off"  # Student completed ride
+
+    if assignment.picked_up:
+        return "picked_up"  # Student boarded but dropoff not yet recorded
+
+    for event in events:
+        if event.student_id == student_id and event.event_type == "STUDENT_NO_SHOW":
+            return "no_show"  # Automatically generated no-show
+
+    return "expected"  # Student expected but no event yet
+
+
+
+# -----------------------------------------------------------
+# Run Attendance Summary
+# - Build student and stop attendance view for a run
+# -----------------------------------------------------------
+def run_attendance_summary(db, run, assignments, events, absence_lookup):
+    """Return attendance status for each student in a run."""  # Attendance-layer computation
+
+    results = []  # Output list
+
+    for assignment in assignments:
+        status = classify_student_attendance(assignment, events, absence_lookup)  # Determine status
+
+        results.append(
+            {
+                "student_id": assignment.student_id,  # Student identifier
+                "student_name": assignment.student.name if assignment.student else None,  # Student display name
+                "stop_id": assignment.stop_id,  # Assigned stop identifier
+                "stop_name": assignment.stop.name if assignment.stop else None,  # Stop display name
+                "status": status,  # Attendance status
+            }
+        )
+
+    # -----------------------------------------------------------
+    # Stop Attendance Totals
+    # - Aggregate attendance by stop
+    # -----------------------------------------------------------
+    stop_totals = {}  # Stop-level counters
+
+    for r in results:
+        stop_id = r["stop_id"]  # Current stop identifier
+
+        if stop_id not in stop_totals:
+            stop_totals[stop_id] = {
+                "stop_name": r["stop_name"],  # Stop display name
+                "planned_absent": 0,
+                "picked_up": 0,
+                "dropped_off": 0,
+                "no_show": 0,
+                "expected": 0,
+            }
+
+        stop_totals[stop_id][r["status"]] += 1  # Increment stop counter
+
+    totals = {
+        "planned_absent": 0,
+        "picked_up": 0,
+        "dropped_off": 0,
+        "no_show": 0,
+        "expected": 0,
+    }  # Attendance counters
+
+    for r in results:
+        totals[r["status"]] += 1  # Increment status count
+
+    return {
+        "students": results,  # Student-level attendance
+        "totals": totals,  # Run totals
+        "stop_totals": stop_totals,  # Stop-level totals
+    } 
+
+# -----------------------------------------------------------
+# Run Attendance Report
+# - Return attendance status for each student in a run
+# -----------------------------------------------------------
+@router.get("/run/{run_id}", status_code=status.HTTP_200_OK)
+def get_run_attendance(run_id: int, db: Session = Depends(get_db)):
+    """Return student attendance status for a specific run."""  # Attendance-layer view
+
+    run = db.query(Run).filter(Run.id == run_id).first()  # Load run
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")  # Preserve missing behavior
+
+    assignments = (
+        db.query(StudentRunAssignment)
+        .filter(StudentRunAssignment.run_id == run_id)
+        .all()
+    )  # Load run assignments
+
+    events = (
+        db.query(RunEvent)
+        .filter(RunEvent.run_id == run_id)
+        .all()
+    )  # Load run events
+
+    absence_lookup = {}  # Cache planned absences
+
+    run_date = run.start_time.date()  # Authoritative run date
+
+    for a in assignments:
+        absence_lookup[a.student_id] = has_student_bus_absence(
+            db,
+            a.student_id,
+            run_date,
+            run.run_type,
+        )  # Determine planned absence
+
+    attendance = attendance_generator.run_attendance_summary(
+        db,
+        run,
+        assignments,
+        events,
+        absence_lookup,
+    )  # Build attendance list
+
+    return {
+        "run_id": run_id,  # Run identifier
+        "run_type": run.run_type,  # AM/PM
+        "student_count": len(attendance),  # Total students considered
+        "students": attendance,  # Student attendance status list
+    }

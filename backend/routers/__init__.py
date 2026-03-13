@@ -1,25 +1,28 @@
-from .driver import router as driver_router
-from .school import router as school_router
-from .student import router as student_router
-from .route import router as route_router
-from .stop import router as stop_router
-from .run import router as run_router
-from .dispatch import router as dispatch_router
-from .attendance import router as attendance_router
-report_router = attendance_router  # Backward-compatible alias during the rename phase
-from .student_run_assignment import router as student_run_assignment_router
-from .student_bus_absence import router as student_bus_absence_router
+# -----------------------------------------------------------
+# Routers Package Export
+# - Centralized router imports and outward exports
+# - Attendance layer owns planned absence router
+# -----------------------------------------------------------
+
+from .driver import router as driver_router                      # Driver management endpoints
+from .school import router as school_router                      # School management endpoints
+from .student import router as student_router                    # Student management endpoints
+from .route import router as route_router                        # Route management endpoints
+from .stop import router as stop_router                          # Stop management endpoints
+from .run import router as run_router                            # Run operation endpoints
+from .dispatch import router as dispatch_router                  # Dispatch/business endpoints
+from .attendance import router as attendance_router              # Attendance reporting endpoints
+from .student_run_assignment import router as student_run_assignment_router  # Run assignment endpoints
+
 
 __all__ = [
-    "driver_router",
-    "school_router",
-    "student_router",
-    "route_router",
-    "stop_router",
-    "run_router",
-    "dispatch_router",
-    "attendance_router",
-    "report_router",
-    "student_run_assignment_router",
-    "student_bus_absence_router",
+    "driver_router",                     # Export driver router
+    "school_router",                     # Export school router
+    "student_router",                    # Export student router
+    "route_router",                      # Export route router
+    "stop_router",                       # Export stop router
+    "run_router",                        # Export run router
+    "dispatch_router",                   # Export dispatch router
+    "attendance_router",                 # Export attendance router
+    "student_run_assignment_router",     # Export run assignment router
 ]
