@@ -12,6 +12,7 @@ from datetime import timedelta # Date arithmetic
 # FastAPI
 # -----------------------------------------------------------
 from fastapi import APIRouter, Depends, HTTPException, status  # FastAPI components
+from fastapi.responses import Response                                       # Raw PDF response
 
 # -----------------------------------------------------------
 # Database
@@ -29,7 +30,7 @@ from backend.routers import student_bus_absence  # Re-export planned absence rou
 # -----------------------------------------------------------
 from backend.utils import attendance_generator  # Attendance utility functions
 from backend.utils.student_bus_absence import has_student_bus_absence  # Planned absence check
-
+from backend.utils.school_report_pdf import build_school_attendance_pdf      # School PDF builder
 # -----------------------------------------------------------
 # Models
 # -----------------------------------------------------------
@@ -163,7 +164,31 @@ def get_school_attendance(                                    # Return attendanc
         attendance_type="school",                             # Request school attendance mode
         ref_id=school_id,                                     # School reference ID
     )  # School attendance summary                            # Return school attendance data
+# -----------------------------------------------------------
+# Download School Attendance Report (PDF)
+# -----------------------------------------------------------
+@router.get("/reports/school/{school_id}/pdf")
+def download_school_attendance_pdf(
+    school_id: int,
+    db: Session = Depends(get_db),
+):
+    """Return printable school attendance PDF."""                              # School export endpoint
 
+    report_data = attendance_generator.generate_attendance(
+        db=db,
+        attendance_type="school",
+        ref_id=school_id,
+    )                                                                          # Build school report payload
+
+    pdf_bytes = build_school_attendance_pdf(report_data)                       # Generate PDF file
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="school_attendance_{school_id}.pdf"'
+        },
+    )
 
 # -----------------------------------------------------------
 # Absence report by date

@@ -1995,3 +1995,60 @@ def test_run_complete(client):
 
     assert blocked.status_code == 400
     assert blocked.json()["detail"] == "Run is already completed"
+
+
+    # =============================================================================
+# Test school attendance report returns data for one school
+# =============================================================================
+def test_get_school_attendance_report(client):
+
+    # -------------------------------------------------------------------------
+    # Create school
+    # -------------------------------------------------------------------------
+    school = client.post(
+        "/schools/",
+        json={
+            "name": "Attendance School",
+            "address": "123 Attendance St",
+        },
+    )
+    assert school.status_code == 201
+    school_id = school.json()["id"]
+
+    # -------------------------------------------------------------------------
+    # Request school attendance report
+    # -------------------------------------------------------------------------
+    response = client.get(f"/reports/school/{school_id}")
+    assert response.status_code == 200
+
+    body = response.json()
+
+           # -------------------------------------------------------------------------
+    # Validate school attendance report shape
+    # -------------------------------------------------------------------------
+    assert isinstance(body, dict)
+    assert body["school_id"] == school_id
+    assert body["school_name"] == "Attendance School"
+    assert "total_routes" in body
+    assert "routes" in body
+    assert isinstance(body["routes"], list)
+
+    if body["routes"]:
+        first_route = body["routes"][0]                                       # First grouped route
+        assert "route_number" in first_route
+        assert "total_runs" in first_route
+        assert "runs" in first_route
+        assert isinstance(first_route["runs"], list)
+
+        if first_route["runs"]:
+            first_run = first_route["runs"][0]                                # First grouped run
+            assert "run_type" in first_run
+            assert "date" in first_run
+            assert "students" in first_run
+            assert isinstance(first_run["students"], list)
+
+            if first_run["students"]:
+                first_student = first_run["students"][0]                      # First school-facing student row
+                assert set(first_student.keys()) == {"student_name", "status"}
+                assert first_student["status"] in {"present", "absent"}
+                assert "student_id" not in first_student                                   # School view must not expose internal IDs

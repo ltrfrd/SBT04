@@ -316,6 +316,17 @@ def date_summary(db: Session, start: date, end: date):        # Build attendance
         "total_runs": len(results),                            # Number of runs returned
         "runs": results,                                       # Run attendance payloads
     }
+# -----------------------------------------------------------
+# School Status Normalizer
+# Convert operational attendance states into school-facing states
+# -----------------------------------------------------------
+def normalize_school_status(status: str) -> str:
+    """Convert detailed attendance state to present/absent for schools."""  # School-safe status view
+
+    if status in {"picked_up", "dropped_off"}:
+        return "present"                                                     # Student rode the bus
+
+    return "absent"                                                          # Hide operational absence reason
 
 # -----------------------------------------------------------  # Attendance summary by school
 # School attendance summary                                   # School-level attendance view
@@ -353,39 +364,57 @@ def school_summary(db: Session, school_id: int):              # Build attendance
 
             absence_lookup = {}                               # Placeholder absence lookup
 
-            summary = run_attendance_summary(                 # Reuse run summary logic
-                db,
-                run,
-                assignments,
-                events,
-                absence_lookup,
+            summary = run_attendance_summary(
+                db, run, assignments, events, absence_lookup,
             )
+            if summary and "error" not in summary:                            # Skip invalid summaries
 
-    results.append(summary)                                   # Collect summary
+                school_students = []                                          # School-facing student rows
 
-    routes = {}                                               # Group runs by route number
+                for student in summary["students"]:                           # Convert operational rows
+                    status = student.get("status")                            # Current runtime status
 
-    for run_data in results:                                  # Iterate through run attendance results
-        route_number = run_data.get("route_number")           # Extract route identifier
+                    school_students.append(
+                        {
+                            "student_name": student.get("student_name"),      # Student name only
+                            "status": "present" if status in {"picked_up", "dropped_off"} else "absent",
+                        }
+                    )
+                school_students.sort(key=lambda s: s["student_name"])        # Stable alphabetical order for school view
+                results.append(
+                    {
+                        "route_number": summary.get("route_number"),          # Route identifier
+                        "run_type": str(summary.get("run_type", "")).split(".")[-1].upper() if summary.get("run_type") else "",  # Keep only AM / PM
+                        "date": run.start_time.date() if run.start_time else None,  # Run date
+                        "students": school_students,                          # Simplified school view
+                    }
+                )
+    routes_map = {}                                                           # Group runs by route number
 
-        if route_number not in routes:                        # Initialize route bucket if first time seen
-            routes[route_number] = {
-                "route_number": route_number,                 # Route identifier
-                "total_runs": 0,                              # Counter for runs under this route
-                "runs": [],                                   # Runs belonging to this route
+    for run_data in results:                                                  # Iterate through run attendance results
+        route_number = run_data.get("route_number")                           # Extract route identifier
+
+        if route_number not in routes_map:                                    # Initialize route bucket if first time seen
+            routes_map[route_number] = {
+                "route_number": route_number,                                 # Route identifier
+                "total_runs": 0,                                              # Counter for runs under this route
+                "runs": [],                                                   # Runs belonging to this route
             }
 
-        run_entry = dict(run_data)                            # Copy run payload
-        run_entry.pop("route_number", None)                   # Remove duplicate route number
+        run_entry = dict(run_data)                                            # Copy run payload
+        run_entry.pop("route_number", None)                                   # Remove duplicate route number
 
-        routes[route_number]["runs"].append(run_entry)        # Attach run to its route
-        routes[route_number]["total_runs"] += 1               # Increment route run count
-
+        routes_map[route_number]["runs"].append(run_entry)                    # Attach run to its route
+        routes_map[route_number]["total_runs"] += 1                           # Increment route run count
+    
+    for route_data in routes_map.values():                                     # Sort runs inside each route group
+        route_data["runs"].sort(key=lambda run: (run.get("date") or "", run.get("run_type") or ""))  # Stable order
+    
     return {
-        "school_id": school_id,                               # School identifier
-        "school_name": school.name if school else None,       # School name
-        "total_routes": len(routes),                          # Number of routes serving this school
-        "routes": list(routes.values()),                      # Route-grouped run data
+        "school_id": school_id,                                               # School identifier
+        "school_name": school.name if school else None,                       # School name
+        "total_routes": len(routes_map),                                      # Number of routes serving this school
+        "routes": sorted(routes_map.values(), key=lambda route: route.get("route_number") or ""),  # Stable route order
     }
 # -----------------------------------------------------------
 # - Run Attendance Report
