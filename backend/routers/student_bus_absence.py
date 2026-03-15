@@ -14,7 +14,7 @@ from backend.schemas.run import RunType  # Reuse existing run type convention
 from backend.models import student as student_model  # Student validation model
 from backend.models.student_bus_absence import StudentBusAbsence  # Planned absence model
 from backend.utils.db_errors import raise_conflict_if_unique  # Shared unique-conflict helper
-
+from backend.models import student_bus_absence as student_bus_absence_model  # Student planned absence model
 
 router = APIRouter(prefix="/students", tags=["StudentBusAbsences"])  # Student-scoped planned absence routes
 
@@ -55,6 +55,35 @@ def create_student_bus_absence(
         )
         raise HTTPException(status_code=400, detail="Integrity error")  # Fallback for non-unique integrity failures
 
+# -----------------------------------------------------------
+# - Get Student Bus Absences
+# - Retrieve all planned no-ride dates for a specific student
+# -----------------------------------------------------------
+@router.get("/{student_id}/bus_absence")                      # Retrieve planned absences for a student
+def get_student_bus_absences(                                 # List student bus absences
+    student_id: int,
+    db: Session = Depends(get_db),
+):
+
+    student = db.query(student_model.Student).filter(
+        student_model.Student.id == student_id
+    ).first()                                                 # Validate student exists
+
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    absences = (
+        db.query(student_bus_absence_model.StudentBusAbsence)
+        .filter(student_bus_absence_model.StudentBusAbsence.student_id == student_id)
+        .order_by(student_bus_absence_model.StudentBusAbsence.date.asc())  # Order absences by date
+        .all()
+    )                                                         # Load absences ordered by date
+
+    return {
+        "student_id": student_id,                             # Student identifier
+        "total_absences": len(absences),                      # Number of absence records
+        "absences": absences                                  # Absence objects
+    }
 
 @router.delete("/{student_id}/bus_absence", status_code=status.HTTP_204_NO_CONTENT)
 def delete_student_bus_absence(

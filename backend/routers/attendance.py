@@ -86,11 +86,11 @@ def get_run_attendance(run_id: int, db: Session = Depends(get_db)):
     )  # Build attendance payload
 
     return {
-        "run_id": run.id,  # Run identifier
-        "run_type": run.run_type,  # AM / PM
-        "totals": attendance_data["totals"],  # Run-level attendance totals
-        "stop_totals": attendance_data["stop_totals"],  # Stop-level attendance totals
-        "students": attendance_data["students"],  # Student attendance list
+        "route_number": run.route.route_number if run.route else None,  # Operational route identifier
+        "run_type": run.run_type,                                       # AM / PM
+        "students": attendance_data["students"],                        # Student attendance list
+        "totals": attendance_data["totals"],                            # Run-level attendance totals
+        "stop_totals": attendance_data["stop_totals"],                  # Stop-level attendance totals
     }
 
 
@@ -122,6 +122,22 @@ def get_date_attendance(                                      # Return attendanc
         start=target_date,                                    # Start date = target date
         end=target_date,                                      # End date = target date
     )  # Daily attendance summary                             # Return one-day attendance data
+
+# -----------------------------------------------------------  # Attendance report by school
+# Attendance report by school                                 # School-level attendance dashboard
+# - School-level attendance dashboard                         # Read-only attendance aggregation
+# -----------------------------------------------------------  # Section separator
+
+@router.get("/school/{school_id}")                            # School attendance endpoint
+def get_school_attendance(                                    # Return attendance for one school
+    school_id: int,                                           # Requested school ID
+    db: Session = Depends(get_db),                            # Database session
+):
+    return attendance_generator.generate_attendance(          # Delegate to attendance generator
+        db=db,                                                # Pass DB session
+        attendance_type="school",                             # Request school attendance mode
+        ref_id=school_id,                                     # School reference ID
+    )  # School attendance summary                            # Return school attendance data
 
 student_bus_absence_router = student_bus_absence.router  # Keep absence under attendance module ownership
 

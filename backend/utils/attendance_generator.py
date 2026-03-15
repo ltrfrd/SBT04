@@ -18,6 +18,7 @@ from backend.models.run_event import RunEvent  # Run event history
 from backend.models.associations import StudentRunAssignment  # Runtime assignments
 from backend.utils.student_bus_absence import has_student_bus_absence  # Absence check
 from backend.utils import attendance_generator  # Attendance utility functions
+from backend.models import school as school_model  # School model
 from fastapi import APIRouter, Depends, HTTPException, status  # FastAPI components
 from sqlalchemy.orm import Session  # Database session type
 
@@ -172,6 +173,8 @@ def generate_attendance(
         return run_attendance_summary(db, ref_id)  # Run-level attendance summary
     if attendance_type == "date" and start and end:               # Date-based attendance request
         return date_summary(db, start, end)                       # Generate daily attendance summary
+    if attendance_type == "school" and ref_id:                   # School-based attendance request
+        return school_summary(db, ref_id)                        # Generate school attendance summary
     return {"error": "Invalid attendance type or parameters"}  # Preserve error-style contract
     
 
@@ -259,10 +262,12 @@ def run_attendance_summary(db, run, assignments, events, absence_lookup):
         totals[r["status"]] += 1  # Increment status count
 
     return {
-        "students": results,  # Student-level attendance
-        "totals": totals,  # Run totals
-        "stop_totals": stop_totals,  # Stop-level totals
-    } 
+        "route_number": run.route.route_number if run.route else None,  # Operational route identifier
+        "run_type": run.run_type,                                       # AM / PM run
+        "students": results,                                            # Student-level attendance
+        "totals": totals,                                               # Run totals
+        "stop_totals": stop_totals,                                     # Stop-level totals
+    }
 
 # -----------------------------------------------------------  # Attendance summary by date
 # Date attendance summary                                     # Dispatch daily attendance view
@@ -282,17 +287,108 @@ def date_summary(db: Session, start: date, end: date):        # Build attendance
     results = []                                              # Collect run attendance summaries
 
     for run in runs:                                          # Iterate through runs
-        summary = run_attendance_summary(db, run.id)          # Reuse run attendance logic
+        assignments = (                                               # Load run assignments
+            db.query(StudentRunAssignment)                            # Query runtime assignments
+            .filter(StudentRunAssignment.run_id == run.id)            # Match current run
+            .all()                                                    # Execute query
+        )
+
+        events = (                                                    # Load run events
+            db.query(RunEvent)                                        # Query run events
+            .filter(RunEvent.run_id == run.id)                        # Match current run
+            .all()                                                    # Execute query
+        )
+
+        absence_lookup = {}                                           # Placeholder absence lookup for now
+
+        summary = run_attendance_summary(                             # Build run attendance summary
+            db,                                                       # Database session
+            run,                                                      # Current run object
+            assignments,                                              # Run assignments
+            events,                                                   # Run events
+            absence_lookup,                                           # Planned absence lookup
+        )
+        
         if summary and "error" not in summary:                # Skip invalid summaries
             results.append(summary)                           # Add valid run summary
     return {
-        "date_range": {"start": str(start), "end": str(end)},     # Requested date window
-        "total_runs": len(results),                               # Number of runs returned
-        "run_ids": [run.id for run in runs],                      # Matched run IDs
+        "date_range": {"start": str(start), "end": str(end)},  # Requested date window
+        "total_runs": len(results),                            # Number of runs returned
+        "runs": results,                                       # Run attendance payloads
     }
 
+# -----------------------------------------------------------  # Attendance summary by school
+# School attendance summary                                   # School-level attendance view
+# -----------------------------------------------------------  # Section separator
+
+def school_summary(db: Session, school_id: int):              # Build attendance for a school
+    routes = (                                                # Load routes serving the school
+        db.query(route_model.Route)                           # Query routes
+        .join(route_model.route_schools)                      # Join route-school association
+        .filter(route_model.route_schools.c.school_id == school_id)
+        .all()                                                # Execute query
+    )
+    school = db.query(school_model.School).filter(school_model.School.id == school_id).first()  # Load school
+    results = []                                              # Collect run attendance summaries
+
+    for route in routes:                                      # Iterate through routes
+        runs = (                                              # Load runs for route
+            db.query(Run)                                     # Query runs
+            .filter(Run.route_id == route.id)                 # Match route
+            .all()                                            # Execute query
+        )
+
+        for run in runs:                                      # Iterate runs
+            assignments = (                                   # Load run assignments
+                db.query(StudentRunAssignment)
+                .filter(StudentRunAssignment.run_id == run.id)
+                .all()
+            )
+
+            events = (                                        # Load run events
+                db.query(RunEvent)
+                .filter(RunEvent.run_id == run.id)
+                .all()
+            )
+
+            absence_lookup = {}                               # Placeholder absence lookup
+
+            summary = run_attendance_summary(                 # Reuse run summary logic
+                db,
+                run,
+                assignments,
+                events,
+                absence_lookup,
+            )
+
+    results.append(summary)                                   # Collect summary
+
+    routes = {}                                               # Group runs by route number
+
+    for run_data in results:                                  # Iterate through run attendance results
+        route_number = run_data.get("route_number")           # Extract route identifier
+
+        if route_number not in routes:                        # Initialize route bucket if first time seen
+            routes[route_number] = {
+                "route_number": route_number,                 # Route identifier
+                "total_runs": 0,                              # Counter for runs under this route
+                "runs": [],                                   # Runs belonging to this route
+            }
+
+        run_entry = dict(run_data)                            # Copy run payload
+        run_entry.pop("route_number", None)                   # Remove duplicate route number
+
+        routes[route_number]["runs"].append(run_entry)        # Attach run to its route
+        routes[route_number]["total_runs"] += 1               # Increment route run count
+
+    return {
+        "school_id": school_id,                               # School identifier
+        "school_name": school.name if school else None,       # School name
+        "total_routes": len(routes),                          # Number of routes serving this school
+        "routes": list(routes.values()),                      # Route-grouped run data
+    }
 # -----------------------------------------------------------
-# Run Attendance Report
+# - Run Attendance Report
 # - Return attendance status for each student in a run
 # -----------------------------------------------------------
 @router.get("/run/{run_id}", status_code=status.HTTP_200_OK)
