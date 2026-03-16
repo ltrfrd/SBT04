@@ -46,6 +46,8 @@ from backend.models import driver as driver_model
 from backend.models import route as route_model
 from backend.models import stop as stop_model
 from backend.models.run import Run                            # Run model
+from backend.models.student import Student                      # Student model
+from backend.models.stop import Stop                            # Stop model
 from backend.models.associations import StudentRunAssignment  # Runtime rider assignments
 from backend.schemas.run import RunStart, RunOut
 from backend.models.run_event import RunEvent                  # Run timeline event model
@@ -213,7 +215,7 @@ def start_run(run: RunStart, db: Session = Depends(get_db)):
         .first()
     )
 
-    # -------------------------------------------------------------------------
+        # -------------------------------------------------------------------------
     # Copy stops from source run into the new run
     # -------------------------------------------------------------------------
     if source_run:
@@ -241,10 +243,62 @@ def start_run(run: RunStart, db: Session = Depends(get_db)):
                 )
             )
 
-    db.commit()  # Save run and copied stops
-    db.refresh(new_run)  # Reload saved object
-    return new_run  # Return started run
+    db.flush()  # Save copied stops so they can be queried for assignment mapping
 
+    # -------------------------------------------------------------------------
+    # Auto-create StudentRunAssignment rows for this run
+    # - Ensures every route student is inserted into runtime table
+    # - School and report views depend on these rows
+    # -------------------------------------------------------------------------
+    route_students = (
+        db.query(student_model.Student)
+        .filter(student_model.Student.route_id == new_run.route_id)
+        .all()
+    )  # Load all students assigned to this route
+
+    run_stops = (
+        db.query(stop_model.Stop)
+        .filter(stop_model.Stop.run_id == new_run.id)
+        .order_by(stop_model.Stop.sequence.asc(), stop_model.Stop.id.asc())
+        .all()
+    )  # Load runtime stops copied into this run
+
+    run_stop_by_sequence = {
+        stop.sequence: stop
+        for stop in run_stops
+    }  # Map copied run stops by sequence for fallback matching
+
+    for student in route_students:
+        existing_assignment = (
+            db.query(StudentRunAssignment)
+            .filter(
+                StudentRunAssignment.run_id == new_run.id,
+                StudentRunAssignment.student_id == student.id,
+            )
+            .first()
+        )  # Prevent duplicate runtime assignment rows
+
+        if existing_assignment:
+            continue  # Skip student if already assigned to this run
+
+        assigned_run_stop = None  # Default to no mapped runtime stop
+
+        if getattr(student, "stop", None) and getattr(student.stop, "sequence", None) in run_stop_by_sequence:
+            assigned_run_stop = run_stop_by_sequence[student.stop.sequence]  # Match student stop to copied run stop by sequence
+
+        assignment = StudentRunAssignment(
+            student_id=student.id,  # Student assigned to runtime run
+            run_id=new_run.id,  # Current run id
+            stop_id=assigned_run_stop.id if assigned_run_stop else None,  # Copied runtime stop if matched
+            planned_absent=False,  # Student expected by default
+        )
+
+        db.add(assignment)  # Stage runtime assignment row
+
+    db.flush()  # Validate and insert all assignment rows before final commit
+    db.commit()  # Save run, copied stops, and student assignments
+    db.refresh(new_run)  # Reload saved run
+    return new_run  # Return started run
 
 # =============================================================================
 # POST /runs/end
