@@ -13,7 +13,8 @@ from datetime import timedelta # Date arithmetic
 # -----------------------------------------------------------
 from fastapi import APIRouter, Depends, HTTPException, status  # FastAPI components
 from fastapi.responses import Response                                       # Raw PDF response
-
+from fastapi import Request                              # FastAPI request object for templates
+from fastapi.templating import Jinja2Templates           # Template rendering system
 # -----------------------------------------------------------
 # Database
 # -----------------------------------------------------------
@@ -41,6 +42,8 @@ from backend.models.school import School                        # School model
 from backend.models.student_bus_absence import StudentBusAbsence  # Planned absence model
 from backend.models.associations import StudentRunAssignment       # Runtime student assignments
 from backend.models.route import Route                                    # Route model
+
+templates = Jinja2Templates(directory="backend/templates")   # Templates directory
 
 router = APIRouter(
     prefix="/reports",  # Keep existing path stable during the rename phase
@@ -372,6 +375,33 @@ def get_school_attendance_by_date(
         "total_students": len(results),                                         # Total students evaluated
         "students": results,                                                    # Student attendance list
     }
+
+# -----------------------------------------------------------
+# School mobile attendance checklist
+# - Mobile friendly page for school drop-off verification
+# - Allows optional second confirmation of student arrival
+# -----------------------------------------------------------
+@router.get("/school/{school_id}/mobile")                     # Mobile school attendance page
+def get_school_mobile_attendance(
+    school_id: int,                                           # Requested school
+    request: Request,                                         # FastAPI request object
+    db: Session = Depends(get_db),                            # Database session
+):
+
+    report_data = attendance_generator.generate_attendance(   # Generate school attendance data
+        db=db,                                                 # Pass DB session
+        attendance_type="school",                              # School attendance mode
+        ref_id=school_id,                                      # School reference
+    )                                                          # Attendance payload
+
+    return templates.TemplateResponse(                        # Render mobile HTML template
+        "school_mobile_report.html",                           # Mobile template file
+        {
+            "request": request,                                # Required by Jinja templates
+            "report": report_data,                             # School attendance data
+        },
+    )                                                          # Return rendered page
+    
 
 student_bus_absence_router = student_bus_absence.router  # Keep absence under attendance module ownership
 
