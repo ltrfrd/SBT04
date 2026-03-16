@@ -102,8 +102,8 @@
 
   <script>
     let map, marker, ws;
-    const runId = {{ run.id if run else 'null' }};
-
+    const isActiveRun = "{{ run_status }}" === "active";   // Active run flag from template
+    const runId = Number("{{ run.id if run else '' }}") || null;   // Active run ID or null
     function initMap(lat = 40.7128, lng = -74.0060) {
       map = L.map('map').setView([lat, lng], 15);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -146,36 +146,36 @@
       new bootstrap.Toast(toast, { delay: 5000 }).show();
     }
 
-    {% if run_status == 'active' %}
-    document.addEventListener("DOMContentLoaded", () => {
-      initMap();
+    if (isActiveRun) {
+      document.addEventListener("DOMContentLoaded", () => {
+        initMap();
 
-      ws = new WebSocket(`ws://${window.location.host}/ws/gps/${runId}`);
+        ws = new WebSocket(`ws://${window.location.host}/ws/gps/${runId}`);
 
-      ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.run_id == runId) {
-          updateUI(data);
-          if (data.alerts) {
-            data.alerts.forEach(alert => {
-              showAlert(`${alert.message} (${alert.distance_meters}m)`);
+        ws.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          if (data.run_id == runId) {
+            updateUI(data);
+            if (data.alerts) {
+              data.alerts.forEach(alert => {
+                showAlert(`${alert.message} (${alert.distance_meters}m)`);
+              });
+            }
+          }
+        };
+
+        setInterval(() => {
+          if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(pos => {
+              ws.send(JSON.stringify({
+                lat: pos.coords.latitude,
+                lng: pos.coords.longitude
+              }));
             });
           }
-        }
-      };
-
-      setInterval(() => {
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(pos => {
-            ws.send(JSON.stringify({
-              lat: pos.coords.latitude,
-              lng: pos.coords.longitude
-            }));
-          });
-        }
-      }, 3000);
-    });
-    {% endif %}
+        }, 3000);
+      });
+    }
   </script>
 </body>
 </html>

@@ -221,8 +221,30 @@
                                     </td>
                                     <td>
                                         <div class="school-check">
-                                            <button class="check-btn present-btn">✓</button>
-                                            <button class="check-btn absent-btn">✕</button>
+
+                                            <input
+                                                type="hidden"
+                                                class="school-status-input"
+                                                data-student-id="{{ student.student_id }}"
+                                                value=""
+                                            > <!-- Stores school confirmation value -->
+
+                                            <button
+                                                type="button"
+                                                class="check-btn present-btn"
+                                                data-value="present"
+                                            >
+                                                ✓
+                                            </button>
+
+                                            <button
+                                                type="button"
+                                                class="check-btn absent-btn"
+                                                data-value="absent"
+                                            >
+                                                ✕
+                                            </button>
+
                                         </div>
                                     </td>
                                 </tr>
