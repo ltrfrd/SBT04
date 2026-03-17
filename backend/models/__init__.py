@@ -8,7 +8,7 @@ from .dispatch import Payroll
 from .run_event import RunEvent
 from .associations import route_schools, StudentRunAssignment
 from .student_bus_absence import StudentBusAbsence, StudentBusAbsenceSource
-
+from .school_attendance_verification import SchoolAttendanceVerification  # New school confirmation model
 __all__ = [
     "Driver",
     "School",
@@ -23,4 +23,5 @@ __all__ = [
     "RunEvent",
     "StudentBusAbsence",
     "StudentBusAbsenceSource",
+    "SchoolAttendanceVerification",  # Export new model
 ]

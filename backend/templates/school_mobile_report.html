@@ -2,15 +2,12 @@
 <html>
 <head>
     <meta charset="utf-8">
-
     <title>School Bus Attendance Report</title>
-
     <meta name="viewport" content="width=device-width, initial-scale=1">
-
     <style>
-
-    
-
+        /* ------------------------------------------------------- */
+        /* Report Styles                                           */
+        /* ------------------------------------------------------- */
         body {
             font-family: Arial, sans-serif;
             margin: 0;
@@ -38,10 +35,25 @@
             font-size: 26px;
         }
 
+        /* --------------------------------------------------
+        Report meta header layout
+        -------------------------------------------------- */
         .report-meta {
-            margin-bottom: 14px;
-            line-height: 1.8;
-            font-size: 16px;
+            display: flex;
+            justify-content: space-between;
+            gap: 24px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+
+        .meta-column {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .meta-column-right {
+            text-align: right;                       /* Align right-side values neatly */
         }
 
         .section-title {
@@ -91,6 +103,7 @@
             display: flex;
             gap: 10px;
             flex-wrap: wrap;
+            align-items: center;
         }
 
         .check-btn {
@@ -99,7 +112,7 @@
             padding: 8px 14px;
             border: none;
             border-radius: 8px;
-            font-size: 20px;
+            font-size: 16px;
             font-weight: bold;
             cursor: pointer;
         }
@@ -113,7 +126,8 @@
             background: #e74c3c;
             color: white;
         }
-                .selected-present {
+
+        .selected-present {
             outline: 3px solid #1f8f4e;
             outline-offset: 4px;
             box-shadow: 0 0 0 3px rgba(31, 143, 78, 0.18);
@@ -123,6 +137,13 @@
             outline: 3px solid #c0392b;
             outline-offset: 4px;
             box-shadow: 0 0 0 3px rgba(192, 57, 43, 0.18);
+        }
+
+        .print-check-line {
+            display: none;
+            min-width: 140px;
+            min-height: 24px;
+            border-bottom: 1px solid #222;
         }
 
         .totals-box {
@@ -173,30 +194,121 @@
 
             .school-check {
                 flex-direction: column;
+                align-items: stretch;
             }
         }
 
+        @media print {
+            body {
+                padding: 0;
+                background: #ffffff;
+                color: #000000;
+            }
+
+            .page {
+                max-width: none;
+            }
+
+            .report-card {
+                margin: 0 0 18px 0;
+                padding: 0;
+                border-radius: 0;
+                box-shadow: none;
+                break-inside: avoid;
+            }
+
+            .check-btn {
+                display: none;
+            }
+
+            .print-check-line {
+                display: inline-block;
+            }
+
+            .table-wrap {
+                overflow: visible;
+            }
+
+            table,
+            th,
+            td {
+                background: #ffffff;
+            }
+
+            .attendance-btn {
+                display: none;         /* Hide present/absent buttons */
+            }
+
+            .print-button {
+                display: none;         /* Hide print button on paper */
+            }
+
+            thead {
+                display: table-header-group;   /* Repeat table header on each printed page */
+            }
+
+            tr {
+                break-inside: avoid;           /* Prevent row split across pages */
+            }
+        }
+
+        /* --------------------------------------------------
+        Print button styling
+        -------------------------------------------------- */
+        .report-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .print-button {
+            padding: 8px 14px;
+            font-size: 14px;
+            border: none;
+            background: #2c7be5;
+            color: white;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .print-button:hover {
+            background: #1a5fd0;
+        }
+        
+    
     </style>
 </head>
 
 <body>
+    <!-- ------------------------------------------------------- -->
+    <!-- Report Content                                           -->
+    <!-- ------------------------------------------------------- -->
     <div class="page">
-
         {% if report.routes %}
             {% for route in report.routes %}
                 {% for run in route.runs %}
-
                 <div class="report-card">
-                    <h1 class="report-title">School Bus Attendance Report</h1>
-
-                    <div class="report-meta">
-                        <div><strong>School:</strong> {{ report.school_name }}</div>
-                        <div><strong>Route:</strong> {{ route.route_number }}</div>
-                        <div><strong>Run:</strong> {{ run.run_type }}</div>
-                        <div><strong>Date:</strong> {{ run.date }}</div>
+                    <div class="report-header">
+                        <h1 class="report-title">School Bus Attendance Report</h1>
+                        <button class="print-button" onclick="window.print()">Print Report</button>
                     </div>
 
-                    <h2 class="section-title">Student Attendance</h2>
+                    <div class="report-meta">
+                        <div class="meta-column">
+                            <div><strong>School:</strong> {{ report.school_name }}</div>
+                            <div><strong>Driver:</strong> {{ run.driver_name or "Unassigned" }}</div>
+                            <div><strong>Route:</strong> {{ route.route_number }}</div>
+                        </div>
+
+                        <div class="meta-column meta-column-right">
+                            <div><strong>Run:</strong> {{ run.run_type }}</div>
+                            <div><strong>Date:</strong> {{ run.date }}</div>
+                            <div><strong>Total Students:</strong> {{ run.students | length }}</div>
+                        </div>
+                    </div>
+
 
                     {% if run.students %}
                     <div class="table-wrap">
@@ -221,20 +333,12 @@
                                     </td>
                                     <td>
                                         <div class="school-check">
-
-                                            <input
-                                                type="hidden"
-                                                class="school-status-input"
-                                                data-student-id="{{ student.student_id }}"
-                                                value=""
-                                            > <!-- Stores school confirmation value -->
-
                                             <button
                                                 type="button"
                                                 class="check-btn present-btn"
                                                 data-value="present"
                                             >
-                                                ✓
+                                                Present
                                             </button>
 
                                             <button
@@ -242,9 +346,10 @@
                                                 class="check-btn absent-btn"
                                                 data-value="absent"
                                             >
-                                                ✕
+                                                Absent
                                             </button>
 
+                                            <span class="print-check-line" aria-hidden="true"></span>
                                         </div>
                                     </td>
                                 </tr>
@@ -262,7 +367,6 @@
                     <p class="empty-note">No students found for this run.</p>
                     {% endif %}
                 </div>
-
                 {% endfor %}
             {% endfor %}
         {% else %}
@@ -270,41 +374,33 @@
                 <p class="empty-note">No routes found for this school.</p>
             </div>
         {% endif %}
-
     </div>
-<script>
-document.addEventListener("DOMContentLoaded", function () {
 
-    document.querySelectorAll(".present-btn").forEach(function (btn) {
+    <!-- ------------------------------------------------------- -->
+    <!-- Report Interactions                                      -->
+    <!-- ------------------------------------------------------- -->
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            document.querySelectorAll(".present-btn").forEach(function (btn) {
+                btn.addEventListener("click", function () {
+                    const cell = btn.closest(".school-check")             // Button container
+                    const absent = cell.querySelector(".absent-btn")      // Opposite button
 
-        btn.addEventListener("click", function () {
+                    btn.classList.toggle("selected-present")              // Toggle present state
+                    absent.classList.remove("selected-absent")            // Clear absent state
+                })
+            })
 
-            const cell = btn.closest(".school-check")             // Button container
-            const absent = cell.querySelector(".absent-btn")      // Opposite button
+            document.querySelectorAll(".absent-btn").forEach(function (btn) {
+                btn.addEventListener("click", function () {
+                    const cell = btn.closest(".school-check")             // Button container
+                    const present = cell.querySelector(".present-btn")    // Opposite button
 
-            btn.classList.toggle("selected-present")              // Toggle present state
-            absent.classList.remove("selected-absent")            // Clear absent state
-
+                    btn.classList.toggle("selected-absent")               // Toggle absent state
+                    present.classList.remove("selected-present")          // Clear present state
+                })
+            })
         })
-
-    })
-
-    document.querySelectorAll(".absent-btn").forEach(function (btn) {
-
-        btn.addEventListener("click", function () {
-
-            const cell = btn.closest(".school-check")             // Button container
-            const present = cell.querySelector(".present-btn")    // Opposite button
-
-            btn.classList.toggle("selected-absent")               // Toggle absent state
-            present.classList.remove("selected-present")          // Clear present state
-
-        })
-
-    })
-
-})
-</script>
-
+    </script>
 </body>
 </html>

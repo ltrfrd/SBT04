@@ -2052,3 +2052,174 @@ def test_get_school_attendance_report(client):
                 assert set(first_student.keys()) == {"student_name", "status"}
                 assert first_student["status"] in {"present", "absent"}
                 assert "student_id" not in first_student                                   # School view must not expose internal IDs
+
+
+# =============================================================================
+# Test school mobile attendance report renders printable school layout
+# =============================================================================
+def test_get_school_mobile_attendance_report(client):
+
+    # -------------------------------------------------------------------------
+    # Create driver
+    # -------------------------------------------------------------------------
+    driver = client.post(
+        "/drivers/",
+        json={
+            "name": "School Report Driver",
+            "email": "school.report.driver@test.com",
+            "phone": "3035551212",
+        },
+    )
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]  # Save driver ID
+
+    # -------------------------------------------------------------------------
+    # Create school
+    # -------------------------------------------------------------------------
+    school = client.post(
+        "/schools/",
+        json={
+            "name": "Rendered Attendance School",
+            "address": "456 Rendered St",
+        },
+    )
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]  # Save school ID
+
+    # -------------------------------------------------------------------------
+    # Create route assigned to the school
+    # -------------------------------------------------------------------------
+    route = client.post(
+        "/routes/",
+        json={
+            "route_number": "R-MOBILE",
+            "unit_number": "Bus-HTML",
+            "driver_id": driver_id,
+            "school_ids": [school_id],
+        },
+    )
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]  # Save route ID
+
+    # -------------------------------------------------------------------------
+    # Create run
+    # -------------------------------------------------------------------------
+    run = client.post(
+        "/runs/",
+        json={
+            "driver_id": driver_id,
+            "route_id": route_id,
+            "run_type": "AM",
+        },
+    )
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]  # Save run ID
+
+    # -------------------------------------------------------------------------
+    # Add stop to run
+    # -------------------------------------------------------------------------
+    stop = client.post(
+        "/stops/",
+        json={
+            "name": "School Stop",
+            "latitude": 53.5461,
+            "longitude": -113.4938,
+            "type": "pickup",
+            "run_id": run_id,
+            "sequence": 1,
+        },
+    )
+    assert stop.status_code in (200, 201)
+    stop_id = stop.json()["id"]  # Save stop ID
+
+    # -------------------------------------------------------------------------
+    # Create first student
+    # -------------------------------------------------------------------------
+    first_student = client.post(
+        "/students/",
+        json={
+            "name": "Present Student",
+            "grade": "4",
+            "school_id": school_id,
+            "route_id": route_id,
+            "stop_id": stop_id,
+        },
+    )
+    assert first_student.status_code in (200, 201)
+    first_student_id = first_student.json()["id"]  # Save first student ID
+
+    # -------------------------------------------------------------------------
+    # Create second student
+    # -------------------------------------------------------------------------
+    second_student = client.post(
+        "/students/",
+        json={
+            "name": "Absent Student",
+            "grade": "5",
+            "school_id": school_id,
+            "route_id": route_id,
+            "stop_id": stop_id,
+        },
+    )
+    assert second_student.status_code in (200, 201)
+    second_student_id = second_student.json()["id"]  # Save second student ID
+
+    # -------------------------------------------------------------------------
+    # Create runtime assignments
+    # -------------------------------------------------------------------------
+    first_assignment = client.post(
+        "/student-run-assignments/",
+        json={
+            "student_id": first_student_id,
+            "run_id": run_id,
+            "stop_id": stop_id,
+        },
+    )
+    assert first_assignment.status_code == 201
+
+    second_assignment = client.post(
+        "/student-run-assignments/",
+        json={
+            "student_id": second_student_id,
+            "run_id": run_id,
+            "stop_id": stop_id,
+        },
+    )
+    assert second_assignment.status_code == 201
+
+    # -------------------------------------------------------------------------
+    # Mark one student present
+    # -------------------------------------------------------------------------
+    arrive = client.post(f"/runs/{run_id}/arrive_stop?stop_sequence=1")
+    assert arrive.status_code == 200
+
+    pickup = client.post(
+        f"/runs/{run_id}/pickup_student",
+        json={"student_id": first_student_id},
+    )
+    assert pickup.status_code == 200
+
+    # -------------------------------------------------------------------------
+    # Request rendered mobile report
+    # -------------------------------------------------------------------------
+    response = client.get(f"/reports/school/{school_id}/mobile")
+    assert response.status_code == 200
+
+    body = response.text  # Rendered HTML
+
+    # -------------------------------------------------------------------------
+    # Validate rendered report contents
+    # -------------------------------------------------------------------------
+    assert "School Bus Attendance Report" in body
+    assert "Rendered Attendance School" in body
+    assert "School Report Driver" in body
+    assert "R-MOBILE" in body
+    assert "AM" in body
+    assert "Total Students:" in body
+    assert "Present Student" in body
+    assert "Absent Student" in body
+    assert "Present" in body
+    assert "Absent" in body
+    assert "@media print" in body
+    assert ".check-btn" in body
+    assert ".print-check-line" in body

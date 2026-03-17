@@ -333,6 +333,7 @@ def normalize_school_status(status: str) -> str:
 # School attendance summary
 # School-level attendance view
 # -----------------------------------------------------------
+# Section separator
 def school_summary(db: Session, school_id: int):  # Build attendance for a school
     routes = (  # Load routes serving the school
         db.query(route_model.Route)  # Query routes
@@ -341,23 +342,23 @@ def school_summary(db: Session, school_id: int):  # Build attendance for a schoo
         .all()  # Execute query
     )
 
-    school = (  # Load requested school
-        db.query(school_model.School)  # Query schools
+    school = (  # Load school once for final payload
+        db.query(school_model.School)  # Query school table
         .filter(school_model.School.id == school_id)  # Match requested school
         .first()  # Execute query
     )
 
-    results = []  # Collect school-facing run summaries
+    results = []  # Collect run attendance summaries
 
     for route in routes:  # Iterate through routes serving this school
         runs = (  # Load runs for this route
             db.query(Run)  # Query runs
-            .filter(Run.route_id == route.id)  # Keep only current route runs
+            .filter(Run.route_id == route.id)  # Match current route
             .all()  # Execute query
         )
 
         for run in runs:  # Iterate through route runs
-            school_students = (  # Load all students from this school on this route
+            school_students = (  # Load full school roster for this route
                 db.query(student_model.Student)  # Query students
                 .filter(student_model.Student.school_id == school_id)  # Keep only this school
                 .filter(student_model.Student.route_id == route.id)  # Keep only this route
@@ -376,66 +377,79 @@ def school_summary(db: Session, school_id: int):  # Build attendance for a schoo
                 .all()  # Execute query
             )
 
+            absence_lookup = {}  # Planned absence cache for current run
+
+            if run.start_time:  # Only resolve absences when run date exists
+                run_date = run.start_time.date()  # Authoritative run date
+
+                for student in school_students:  # Preload planned absence for all school students on this run
+                    absence_lookup[student.id] = has_student_bus_absence(
+                        student.id,  # Student identifier
+                        run,  # Current run object
+                        db,  # Database session
+                    )
+
             assignment_by_student_id = {
                 assignment.student_id: assignment
                 for assignment in assignments
             }  # Map runtime assignments by student id
 
-            school_students_rows = []  # Final present/absent rows for this run
+            school_students_rows = []  # Final school-facing rows
 
-            for student in school_students:  # Always build from full school roster on this route
-                assignment = assignment_by_student_id.get(student.id)  # Runtime row if it exists
+            for student in school_students:  # Always build from full school roster
+                assignment = assignment_by_student_id.get(student.id)  # Runtime assignment if present
 
-                if assignment:
-                    status = classify_student_attendance(
+                if assignment:  # Use runtime state when assignment exists
+                    operational_status = classify_student_attendance(
                         assignment,  # Runtime assignment
-                        events,  # Run events
-                        {},  # No absence lookup needed for this safe step
-                    )  # Get operational status from runtime data
+                        events,  # Runtime event history
+                        absence_lookup,  # Planned absence lookup
+                    )
                 else:
-                    status = "expected"  # Missing runtime row should still display as absent
+                    operational_status = "planned_absent" if absence_lookup.get(student.id) else "expected"  # Missing runtime row still shows as absent
 
                 school_students_rows.append(
                     {
                         "student_name": student.name,  # School-facing student name
-                        "status": normalize_school_status(status),  # Collapse to present / absent
+                        "status": normalize_school_status(operational_status),  # Collapse to present / absent
                     }
                 )
 
             school_students_rows.sort(
                 key=lambda s: (s.get("student_name") or "").lower()
-            )  # Stable alphabetical order
+            )  # Stable safe alphabetical order
 
             results.append(
                 {
                     "route_number": route.route_number,  # Route identifier
+                    "driver_name": run.driver.name if run.driver else None,  # Driver assigned to this run
                     "run_type": str(run.run_type).split(".")[-1].upper() if run.run_type else "",  # AM / PM
                     "date": run.start_time.date() if run.start_time else None,  # Run date
-                    "students": school_students_rows,  # Full school-facing student list
+                    "students": school_students_rows,  # School-facing student list
                 }
             )
 
-    routes_map = {}  # Group runs under route number
+    routes_map = {}  # Group runs by route number
 
-    for run_data in results:  # Iterate through run payloads
-        route_number = run_data.get("route_number")  # Extract route number
+    for run_data in results:  # Iterate through run attendance results
+        route_number = run_data.get("route_number")  # Extract route identifier
 
-        if route_number not in routes_map:
+        if route_number not in routes_map:  # Initialize route bucket if first time seen
             routes_map[route_number] = {
                 "route_number": route_number,  # Route identifier
-                "total_runs": 0,  # Number of runs under this route
-                "runs": [],  # Child runs
+                "total_runs": 0,  # Counter for runs under this route
+                "runs": [],  # Runs belonging to this route
             }
 
         run_entry = dict(run_data)  # Copy run payload
         run_entry.pop("route_number", None)  # Remove duplicate route number
-        routes_map[route_number]["runs"].append(run_entry)  # Attach run to route group
-        routes_map[route_number]["total_runs"] += 1  # Increment route run counter
+        routes_map[route_number]["runs"].append(run_entry)  # Attach run to its route group
+        routes_map[route_number]["total_runs"] += 1  # Increment route run count
 
-    for route_data in routes_map.values():  # Sort runs under each route
+    for route_data in routes_map.values():  # Sort runs inside each route group
         route_data["runs"].sort(
             key=lambda run: (run.get("date") or "", run.get("run_type") or "")
-        )  # Stable run order
+        )  # Stable order
 
     return {
         "school_id": school_id,  # School identifier
