@@ -5,7 +5,7 @@
 # -----------------------------------------------------------
 # Standard library
 # -----------------------------------------------------------
-from datetime import date  # Date filter type
+from datetime import date, datetime, timezone   # Date filter type # UTC timestamp for confirmation save
 from datetime import timedelta # Date arithmetic
 
 # -----------------------------------------------------------
@@ -40,6 +40,9 @@ from backend.models.school import School                        # School model
 from backend.models.student_bus_absence import StudentBusAbsence  # Planned absence model
 from backend.models.associations import StudentRunAssignment       # Runtime student assignments
 from backend.models.route import Route                                    # Route model
+from backend.models.school_attendance_verification import SchoolAttendanceVerification  # Confirmation model
+
+from pydantic import BaseModel  # Small request body schema
 
 templates = Jinja2Templates(directory="backend/templates")   # Templates directory
 
@@ -47,7 +50,11 @@ router = APIRouter(
     prefix="/reports",  # Keep existing path stable during the rename phase
     tags=["Attendance"],  # Rename outward-facing API label
 )
-
+# -----------------------------------------------------------
+# School confirmation request body
+# -----------------------------------------------------------
+class SchoolConfirmationRequest(BaseModel):
+    confirmed_by: str | None = None  # Optional school staff name
 
 @router.get("/driver/{driver_id}", status_code=status.HTTP_200_OK)
 def get_driver_attendance(driver_id: int, db: Session = Depends(get_db)):
@@ -166,11 +173,86 @@ def get_school_attendance(                                    # Return attendanc
         ref_id=school_id,                                     # School reference ID
     )  # School attendance summary                            # Return school attendance data
 
+
+# -----------------------------------------------------------
+# School attendance confirmation
+# - Persist school-side confirmation for one run
+# -----------------------------------------------------------
+@router.post("/school/{school_id}/confirm/{run_id}", status_code=status.HTTP_200_OK)
+def confirm_school_attendance(
+    school_id: int,  # Requested school ID
+    run_id: int,  # Requested run ID
+    payload: SchoolConfirmationRequest,  # Optional confirmer
+    db: Session = Depends(get_db),  # Database session
+):
+    school = (
+        db.query(School)
+        .filter(School.id == school_id)
+        .first()
+    )
+    if not school:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="School not found",
+        )
+
+    run = (
+        db.query(Run)
+        .options(joinedload(Run.route).joinedload(Route.schools))
+        .filter(Run.id == run_id)
+        .first()
+    )
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Run not found",
+        )
+
+    route_school_ids = {s.id for s in run.route.schools} if run.route else set()
+    if school_id not in route_school_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="School is not assigned to this run route",
+        )
+
+    verification = (
+        db.query(SchoolAttendanceVerification)
+        .filter(
+            SchoolAttendanceVerification.school_id == school_id,
+            SchoolAttendanceVerification.run_id == run_id,
+        )
+        .first()
+    )
+
+    now = datetime.now(timezone.utc)  # Save UTC confirmation time
+
+    if verification:
+        verification.confirmed_at = now  # Refresh confirmation time
+        verification.confirmed_by = payload.confirmed_by  # Update confirmer
+    else:
+        verification = SchoolAttendanceVerification(
+            school_id=school_id,  # Save school reference
+            run_id=run_id,  # Save run reference
+            confirmed_at=now,  # Save timestamp
+            confirmed_by=payload.confirmed_by,  # Save optional confirmer
+        )
+        db.add(verification)
+
+    db.commit()
+    db.refresh(verification)
+
+    return {
+        "message": "School attendance confirmed",
+        "school_id": verification.school_id,
+        "run_id": verification.run_id,
+        "confirmed_at": verification.confirmed_at,
+        "confirmed_by": verification.confirmed_by,
+    }
 # -----------------------------------------------------------
 # Absence report by date
 # - Returns planned bus absences for a given date
 # -----------------------------------------------------------
-@router.get("/reports/absences/date/{target_date}")                                   # Absence visibility endpoint
+@router.get("/absences/date/{target_date}")                                   # Absence visibility endpoint
 def get_absences_by_date(
     target_date: date,                                                                # Requested date
     db: Session = Depends(get_db),                                                    # Database session
@@ -205,11 +287,13 @@ def get_absences_by_date(
         "absences": results,                                                          # Absence list
     }
 
+
+
 # -----------------------------------------------------------
 # Absence report by school
 # - Returns planned absences for students of a given school
 # -----------------------------------------------------------
-@router.get("/reports/absences/school/{school_id}")                               # School absence visibility
+@router.get("/absences/school/{school_id}")                               # School absence visibility
 def get_absences_by_school(
     school_id: int,                                                                # Requested school
     db: Session = Depends(get_db),                                                 # Database session
@@ -245,7 +329,7 @@ def get_absences_by_school(
 # - Absence report by run
 # - Returns planned absences for students assigned to a run
 # -----------------------------------------------------------
-@router.get("/reports/absences/run/{run_id}")                                    # Driver run absence visibility
+@router.get("/absences/run/{run_id}")                                    # Driver run absence visibility
 def get_absences_by_run(
     run_id: int,                                                                  # Requested run
     db: Session = Depends(get_db),                                                # Database session

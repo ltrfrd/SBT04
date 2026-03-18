@@ -276,6 +276,52 @@
         .print-button:hover {
             background: #1a5fd0;
         }
+
+        .confirmation-badge {                      /* Badge wrapper */
+            margin-top: 8px;                      /* Small spacing under run meta */
+            font-size: 14px;                      /* Readable mobile size */
+            font-weight: 700;                     /* Strong emphasis */
+        }
+
+        .confirmed {                              /* Confirmed state */
+            color: #15803d;                       /* Green text */
+        }
+
+        .not-confirmed {                          /* Pending state */
+            color: #b91c1c;                       /* Red text */
+        }
+
+        /* -------------------------------------------------- */
+        /* Confirm attendance button                          */
+        /* -------------------------------------------------- */
+        .confirm-btn {                            /* Confirm button base style */
+            margin-top: 8px;                      /* Space above button */
+            padding: 6px 12px;                    /* Button size and spacing */
+            font-size: 14px;                      /* Readable text size */
+            font-weight: 600;                     /* Slight emphasis */
+            background-color: #2563eb;            /* Blue background */
+            color: white;                         /* White text color */
+            border: none;                         /* Remove default border */
+            border-radius: 6px;                   /* Rounded corners */
+            cursor: pointer;                      /* Pointer cursor on hover */
+        }
+
+        .confirm-btn:hover {                      /* Hover effect */
+            background-color: #1d4ed8;            /* Darker blue on hover */
+        }
+
+        .confirm-action {                         /* Button container wrapper */
+            margin-top: 8px;                      /* Space below confirmation badge */
+        }
+
+        .confirm-input {                         /* Input for confirmer name */
+            margin-top: 6px;
+            margin-right: 6px;
+            padding: 6px 10px;
+            font-size: 14px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+        }
         
     
     </style>
@@ -308,7 +354,36 @@
                             <div><strong>Total Students:</strong> {{ run.students | length }}</div>
                         </div>
                     </div>
+                    <div class="confirmation-badge">                                                         <!-- School-specific confirmation for this run -->
+                        {% set confirmation = run.get("confirmation", {}) %}                                 <!-- Safe fallback when confirmation is missing -->
+                        {% if confirmation.get("is_confirmed") %}                                            <!-- Confirmed state -->
+                            <span class="confirmation-text confirmed">                                       <!-- Badge text target -->
+                                Confirmed{% if confirmation.get("confirmed_by") %} by {{ confirmation.get("confirmed_by") }}{% endif %}  <!-- Optional confirmer -->
+                            </span>
+                        {% else %}                                                                           <!-- Not confirmed state -->
+                            <span class="confirmation-text not-confirmed">Not Confirmed</span>               <!-- Badge text target -->
+                        {% endif %}
+                    </div>
 
+                    <div class="confirm-action">                                           <!-- Wrapper for confirm action -->
+                        {% if not confirmation.get("is_confirmed") %}                     <!-- Show only if this school has NOT confirmed this run -->
+
+                            <input 
+                                type="text" 
+                                class="confirm-input" 
+                                placeholder="Enter name"                                  <!-- Staff name input -->
+                            >
+
+                            <button 
+                                class="confirm-btn" 
+                                data-school-id="{{ report.school_id }}"                  <!-- School identifier -->
+                                data-run-id="{{ run.id }}"                               <!-- Run identifier -->
+                            >
+                                Confirm Attendance
+                            </button>
+
+                        {% endif %}                                                        <!-- End conditional -->
+                    </div>
 
                     {% if run.students %}
                     <div class="table-wrap">
@@ -376,31 +451,91 @@
         {% endif %}
     </div>
 
+    <script>
+    document.addEventListener("DOMContentLoaded", function () {                     // Wait until page is fully loaded
+
+        document.querySelectorAll(".present-btn").forEach(function (btn) {          // Loop present buttons
+            btn.addEventListener("click", function () {                             // Handle present click
+                const cell = btn.closest(".school-check");                          // Current button group
+                const absent = cell.querySelector(".absent-btn");                   // Opposite button
+
+                btn.classList.toggle("selected-present");                           // Toggle present state
+                absent.classList.remove("selected-absent");                         // Clear absent state
+            });
+        });
+
+        document.querySelectorAll(".absent-btn").forEach(function (btn) {           // Loop absent buttons
+            btn.addEventListener("click", function () {                             // Handle absent click
+                const cell = btn.closest(".school-check");                          // Current button group
+                const present = cell.querySelector(".present-btn");                 // Opposite button
+
+                btn.classList.toggle("selected-absent");                            // Toggle absent state
+                present.classList.remove("selected-present");                       // Clear present state
+            });
+        });
+
+    });
+    </script>
+    
     <!-- ------------------------------------------------------- -->
     <!-- Report Interactions                                      -->
     <!-- ------------------------------------------------------- -->
     <script>
-        document.addEventListener("DOMContentLoaded", function () {
-            document.querySelectorAll(".present-btn").forEach(function (btn) {
-                btn.addEventListener("click", function () {
-                    const cell = btn.closest(".school-check")             // Button container
-                    const absent = cell.querySelector(".absent-btn")      // Opposite button
+    document.addEventListener("DOMContentLoaded", function () {                     // Wait until page is fully loaded
 
-                    btn.classList.toggle("selected-present")              // Toggle present state
-                    absent.classList.remove("selected-absent")            // Clear absent state
-                })
-            })
+        document.querySelectorAll(".confirm-btn").forEach(button => {               // Loop all confirm buttons
+            button.addEventListener("click", async () => {                          // Handle click
 
-            document.querySelectorAll(".absent-btn").forEach(function (btn) {
-                btn.addEventListener("click", function () {
-                    const cell = btn.closest(".school-check")             // Button container
-                    const present = cell.querySelector(".present-btn")    // Opposite button
+                const schoolId = button.dataset.schoolId;                           // Read school id from button
+                const runId = button.dataset.runId;                                 // Read run id from button
+                const card = button.closest(".report-card");                        // Find the current run card
+                const input = card ? card.querySelector(".confirm-input") : null;   // Find confirmer input safely
+                const confirmedBy = input && input.value.trim() 
+                    ? input.value.trim() 
+                    : "front desk";                                                 // Use typed name or fallback
 
-                    btn.classList.toggle("selected-absent")               // Toggle absent state
-                    present.classList.remove("selected-present")          // Clear present state
-                })
-            })
-        })
+                try {
+                    const response = await fetch(
+                        `/reports/school/${schoolId}/confirm/${runId}`,             // Confirmation endpoint
+                        {
+                            method: "POST",                                         // Send POST request
+                            headers: {
+                                "Content-Type": "application/json"                  // JSON request body
+                            },
+                            body: JSON.stringify({
+                                confirmed_by: confirmedBy                           // Send confirmer name
+                            })
+                        }
+                    );
+
+                    const data = await response.json();                             // Read backend response body
+
+                    if (!response.ok) {                                             // Stop if backend returned error
+                        throw new Error(data.detail || "Confirmation failed");      // Show exact backend error
+                    }
+
+                    const badge = card ? card.querySelector(".confirmation-text") : null;  // Find badge text safely
+
+                    if (badge) {                                                    // Update badge only if found
+                        badge.textContent = `Confirmed by ${data.confirmed_by}`;    // Update confirmation label
+                        badge.classList.remove("not-confirmed");                    // Remove red state
+                        badge.classList.add("confirmed");                           // Add green state
+                    }
+
+                    if (card) {
+                        const action = card.querySelector(".confirm-action");     // Find full confirm section
+                        if (action) {
+                            action.style.display = "none";                        // Hide button + input together
+                        }
+                    }
+                } catch (error) {
+                    console.error(error);                                           // Log error in console
+                    alert(error.message);                                           // Show error message
+                }
+
+            });
+        });
+    });
     </script>
-</body>
-</html>
+    </body>
+    </html>

@@ -2207,19 +2207,20 @@ def test_get_school_mobile_attendance_report(client):
 
     body = response.text  # Rendered HTML
 
-    # -------------------------------------------------------------------------
     # Validate rendered report contents
     # -------------------------------------------------------------------------
-    assert "School Bus Attendance Report" in body
-    assert "Rendered Attendance School" in body
-    assert "School Report Driver" in body
-    assert "R-MOBILE" in body
-    assert "AM" in body
-    assert "Total Students:" in body
-    assert "Present Student" in body
-    assert "Absent Student" in body
-    assert "Present" in body
-    assert "Absent" in body
-    assert "@media print" in body
-    assert ".check-btn" in body
-    assert ".print-check-line" in body
+    assert "School Bus Attendance Report" in body  # Main page title
+    assert "Rendered Attendance School" in body    # School name rendered in report
+    assert "School:" in body                       # School meta label
+    assert "Driver:" in body                       # Driver meta label
+    assert "Route:" in body                        # Route meta label
+    assert "R-MOBILE" in body                      # Route number rendered
+    assert "AM" in body                            # Run type rendered
+    assert "Total Students:" in body               # Total students label
+    assert "Present Student" in body               # Present student row rendered
+    assert "Absent Student" in body                # Absent student row rendered
+    assert "Present" in body                       # Present status text rendered
+    assert "Absent" in body                        # Absent status text rendered
+    assert "@media print" in body                  # Print CSS exists
+    assert ".check-btn" in body                    # Check button CSS exists
+    assert ".print-check-line" in body             # Print check line CSS exists

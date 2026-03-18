@@ -21,7 +21,7 @@ from backend.utils import attendance_generator  # Attendance utility functions
 from backend.models import school as school_model  # School model
 from fastapi import APIRouter, Depends, HTTPException, status  # FastAPI components
 from sqlalchemy.orm import Session  # Database session type
-
+from backend.models.school_attendance_verification import SchoolAttendanceVerification  # Read confirmation state
 from database import get_db  # Shared DB dependency
 from backend.utils import attendance_generator  # Attendance utility functions
 from backend.routers import student_bus_absence  # Re-export planned absence router through attendance layer
@@ -419,13 +419,29 @@ def school_summary(db: Session, school_id: int):  # Build attendance for a schoo
                 key=lambda s: (s.get("student_name") or "").lower()
             )  # Stable safe alphabetical order
 
+            verification = (
+                db.query(SchoolAttendanceVerification)
+                .filter(
+                    SchoolAttendanceVerification.school_id == school_id,
+                    SchoolAttendanceVerification.run_id == run.id,
+                )
+                .first()
+            )  # Load confirmation for this specific school/run pair
+
+            confirmation = {
+                "is_confirmed": verification is not None,  # True when school confirmed this run
+                "confirmed_at": verification.confirmed_at if verification else None,  # Confirmation timestamp
+                "confirmed_by": verification.confirmed_by if verification else None,  # Optional confirmer name
+            }
+
             results.append(
                 {
+                    "id": run.id,  # Run identifier needed by frontend confirm button
                     "route_number": route.route_number,  # Route identifier
-                    "driver_name": run.driver.name if run.driver else None,  # Driver assigned to this run
                     "run_type": str(run.run_type).split(".")[-1].upper() if run.run_type else "",  # AM / PM
                     "date": run.start_time.date() if run.start_time else None,  # Run date
-                    "students": school_students_rows,  # School-facing student list
+                    "students": school_students_rows,  # Full school-facing student list
+                    "confirmation": confirmation,  # Confirmation state for this run
                 }
             )
 
@@ -451,6 +467,7 @@ def school_summary(db: Session, school_id: int):  # Build attendance for a schoo
             key=lambda run: (run.get("date") or "", run.get("run_type") or "")
         )  # Stable order
 
+    
     return {
         "school_id": school_id,  # School identifier
         "school_name": school.name if school else None,  # School name
