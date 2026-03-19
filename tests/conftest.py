@@ -30,8 +30,8 @@ from sqlalchemy.orm import sessionmaker  # Session factory
 
 from database import Base  # SQLAlchemy Base (root database.py)
 from app import app, get_db  # FastAPI app + DB dependency
-
-
+from backend.models import driver, school, student, route, run, dispatch          # Core models used by app
+from backend.models import associations                                            # Ensure StudentRunAssignment is registered
 # =============================================================================
 # Database engine fixture (isolated per test)
 # =============================================================================
@@ -53,7 +53,7 @@ def db_engine(tmp_path):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
-
+    
     Base.metadata.create_all(bind=engine)  # Create tables
     yield engine  # Provide engine to tests
     Base.metadata.drop_all(bind=engine)  # Drop tables after test

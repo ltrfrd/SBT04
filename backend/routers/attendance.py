@@ -458,7 +458,40 @@ def get_school_mobile_attendance(
             "report": report_data,                             # School attendance data
         },
     )                                                          # Return rendered page
-    
+
+# -------------------------------------------------------  
+# School updates student status (layered, non-driver)  
+# -------------------------------------------------------  
+@router.post("/school/student-status")                                     # Endpoint for school-side status updates  
+def update_school_status(                                                           # Handler function  
+    payload: dict,                                                                 # Incoming JSON body  
+    db: Session = Depends(get_db)                                                  # Database session dependency  
+):  
+    student_id = payload.get("student_id")                                         # Extract student id  
+    run_id = payload.get("run_id")                                                 # Extract run id  
+    status_value = payload.get("status")                                           # Extract status ("present" / "absent")  
+
+    if not student_id or not run_id or status_value not in ["present", "absent"]:   # Validate required fields and allowed values  
+        raise HTTPException(status_code=400, detail="Invalid payload")             # Reject bad request  
+
+    assignment = db.query(StudentRunAssignment).filter(                            # Query assignment record  
+        StudentRunAssignment.student_id == student_id,                             # Match student  
+        StudentRunAssignment.run_id == run_id                                      # Match run  
+    ).first()                                                                      # Get first match  
+
+    if not assignment:                                                             # If no record found  
+        raise HTTPException(status_code=404, detail="Assignment not found")        # Return not found  
+
+    assignment.school_status = status_value                                        # Save school-layer status  
+
+    db.commit()                                                                    # Persist change  
+
+    return {                                                                       # Response payload  
+        "message": "Status updated",                                               # Confirmation message  
+        "student_id": student_id,                                                  # Return student id  
+        "run_id": run_id,                                                          # Return run id  
+        "school_status": status_value                                              # Return saved status  
+    }    
 
 student_bus_absence_router = student_bus_absence.router  # Keep absence under attendance module ownership
 

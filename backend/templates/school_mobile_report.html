@@ -461,6 +461,7 @@
                         <div class="totals-line">
                             <strong>Total Absent:</strong> <span class="total-absent-value">{{ run.students | selectattr("status", "equalto", "absent") | list | length }}</span>
                         </div>
+                    </div>
                     {% else %}
                     <p class="empty-note">No students found for this run.</p>
                     {% endif %}
@@ -637,3 +638,5 @@
         });
     });
     </script>
+</body>
+</html>

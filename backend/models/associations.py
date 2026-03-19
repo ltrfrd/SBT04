@@ -5,7 +5,7 @@
 # -----------------------------
 # Imports
 # -----------------------------
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, Table, UniqueConstraint  # SQLAlchemy column types
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Table, UniqueConstraint  # SQLAlchemy column types
 from sqlalchemy.orm import relationship  # ORM relationship helpers
 
 from database import Base  # Shared declarative base
@@ -48,3 +48,5 @@ class StudentRunAssignment(Base):
     dropped_off = Column(Boolean, default=False, nullable=False)  # Track whether exit happened
     dropped_off_at = Column(DateTime, nullable=True)  # Track when exit happened
     is_onboard = Column(Boolean, default=False, nullable=False)  # Track current onboard state
+    # School-side verification status (set by school, not driver)
+    school_status = Column(String, nullable=True)  # "present" or "absent"

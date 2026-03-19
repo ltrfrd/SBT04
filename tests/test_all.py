@@ -12,11 +12,11 @@
 
 # -----------------------------
 # Logic
-# -----------------------------
-
-from datetime import datetime, timezone  # UTC timestamps for runtime fields
-from sqlalchemy.orm import sessionmaker  # Create local DB session for tests
-from backend.models.associations import StudentRunAssignment  # Runtime student assignment model
+import pytest                                                      # Pytest framework
+from datetime import datetime, timezone                            # Time utilities
+from sqlalchemy.orm import Session, sessionmaker                   # DB session tools
+from backend.models.associations import StudentRunAssignment       # Runtime assignment model
+from database import engine                                        # DB engine
 # =============================================================================
 # Project Models (used directly in tests)
 # =============================================================================
@@ -2312,3 +2312,143 @@ def test_school_confirmation_persists_after_refresh(client):
     report = client.get(f"/reports/school/{school_id}")
     assert report.status_code == 200
     body = report.json()
+
+## =============================================================================
+# Test school status update endpoint
+# -----------------------------------------------------------------------------
+# Verifies:
+# - school-side status can be saved for one student on one run
+# - value is persisted to StudentRunAssignment
+# =============================================================================
+def test_update_school_status(client, db_engine):                              # Use pytest temp DB engine
+    
+    # -------------------------------------------------------------------------
+    # Create school
+    # -------------------------------------------------------------------------
+    school = client.post(
+        "/schools/",
+        json={
+            "name": "Test School",
+            "address": "123 Test St",
+        },
+    )
+    assert school.status_code in (200, 201)                                    # Confirm school created
+    school_id = school.json()["id"]                                            # Save school ID
+
+    # -------------------------------------------------------------------------
+    # Create driver
+    # -------------------------------------------------------------------------
+    driver = client.post(
+        "/drivers/",
+        json={
+            "name": "Driver One",
+            "email": "driver1@test.com",
+            "phone": "11111",
+        },
+    )
+    assert driver.status_code in (200, 201)                                    # Confirm driver created
+    driver_id = driver.json()["id"]                                            # Save driver ID
+
+    # -------------------------------------------------------------------------
+    # Create route linked to school
+    # -------------------------------------------------------------------------
+    route = client.post(
+        "/routes/",
+        json={
+            "route_number": "R1",
+            "unit_number": "Bus-01",
+            "driver_id": driver_id,
+            "school_ids": [school_id],
+        },
+    )
+    assert route.status_code in (200, 201)                                     # Confirm route created
+    route_id = route.json()["id"]                                              # Save route ID
+
+    # -------------------------------------------------------------------------
+    # Create run
+    # -------------------------------------------------------------------------
+    run = client.post(
+        "/runs/",
+        json={
+            "driver_id": driver_id,
+            "route_id": route_id,
+            "run_type": "AM",
+        },
+    )
+    assert run.status_code in (200, 201)                                       # Confirm run created
+    run_id = run.json()["id"]                                                  # Save run ID
+
+    # -------------------------------------------------------------------------
+    # Add stop to run
+    # -------------------------------------------------------------------------
+    stop = client.post(
+        "/stops/",
+        json={
+            "name": "Stop 1",
+            "latitude": 53.5461,
+            "longitude": -113.4938,
+            "type": "pickup",
+            "run_id": run_id,
+            "sequence": 1,
+        },
+    )
+    assert stop.status_code in (200, 201)                                      # Confirm stop created
+    stop_id = stop.json()["id"]                                                # Save stop ID
+
+    # -------------------------------------------------------------------------
+    # Create student
+    # -------------------------------------------------------------------------
+    student = client.post(
+        "/students/",
+        json={
+            "name": "Student One",
+            "grade": "5",
+            "school_id": school_id,
+            "route_id": route_id,
+            "stop_id": stop_id,
+        },
+    )
+    assert student.status_code in (200, 201)                                   # Confirm student created
+    student_id = student.json()["id"]                                          # Save student ID
+
+    # -------------------------------------------------------------------------
+    # Create runtime assignment
+    # -------------------------------------------------------------------------
+    assignment = client.post(
+        "/student-run-assignments/",
+        json={
+            "student_id": student_id,
+            "run_id": run_id,
+            "stop_id": stop_id,
+        },
+    )
+    assert assignment.status_code == 201                                       # Confirm assignment created
+
+    # -------------------------------------------------------------------------
+    # Call school status update endpoint
+    # -------------------------------------------------------------------------
+    response = client.post(
+        "/reports/school/student-status",
+        json={
+            "student_id": student_id,
+            "run_id": run_id,
+            "status": "present",
+        },
+    )
+
+    assert response.status_code == 200                                         # Confirm endpoint succeeded
+    body = response.json()                                                     # Parse response body
+
+    assert body["message"] == "Status updated"                                 # Confirm message
+    assert body["student_id"] == student_id                                    # Confirm student echoed
+    assert body["run_id"] == run_id                                            # Confirm run echoed
+    assert body["school_status"] == "present"                                  # Confirm saved value
+
+    # -------------------------------------------------------------------------
+    # Verify DB persistence
+    # -------------------------------------------------------------------------
+    with Session(db_engine) as db:                                             # Open session on pytest temp DB
+        stored_assignment = db.query(StudentRunAssignment).filter(
+        StudentRunAssignment.student_id == student_id,
+        StudentRunAssignment.run_id == run_id,
+    ).first()
