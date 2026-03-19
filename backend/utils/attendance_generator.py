@@ -434,16 +434,21 @@ def school_summary(db: Session, school_id: int):  # Build attendance for a schoo
                 "confirmed_by": verification.confirmed_by if verification else None,  # Optional confirmer name
             }
 
+            # -------------------------------------------------------------------------
+            # Build school-facing run payload                                     # include driver name
+            # -------------------------------------------------------------------------
             results.append(
                 {
-                    "id": run.id,  # Run identifier needed by frontend confirm button
-                    "route_number": route.route_number,  # Route identifier
+                    "id": run.id,                                                       # Run identifier needed by frontend
+                    "route_number": route.route_number,                                 # Route identifier
+                    "driver_name": run.driver.name if run.driver else "Unassigned",     # Driver for this run
                     "run_type": str(run.run_type).split(".")[-1].upper() if run.run_type else "",  # AM / PM
-                    "date": run.start_time.date() if run.start_time else None,  # Run date
-                    "students": school_students_rows,  # Full school-facing student list
-                    "confirmation": confirmation,  # Confirmation state for this run
+                    "date": run.start_time.date() if run.start_time else None,          # Run date
+                    "students": school_students_rows,                                   # Full school-facing student list
+                    "confirmation": confirmation,                                       # Confirmation state for this run
                 }
             )
+            
 
     routes_map = {}  # Group runs by route number
 

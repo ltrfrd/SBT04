@@ -365,24 +365,29 @@
                         {% endif %}
                     </div>
 
-                    <div class="confirm-action">                                           <!-- Wrapper for confirm action -->
-                        {% if not confirmation.get("is_confirmed") %}                     <!-- Show only if this school has NOT confirmed this run -->
+                    <!-- ------------------------------------------------------- -->
+                    <!-- Confirm Action                                           -->
+                    <!-- ------------------------------------------------------- -->
+                    <div class="confirm-action">                                                    <!-- Wrapper for confirm action -->
+                        {% if not confirmation.get("is_confirmed") %}                               <!-- Show only if not confirmed -->
 
-                            <input 
-                                type="text" 
-                                class="confirm-input" 
-                                placeholder="Enter name"                                  <!-- Staff name input -->
+                            <!-- Staff name input -->
+                            <input
+                                type="text"
+                                class="confirm-input"
+                                placeholder="Enter name"
                             >
 
-                            <button 
-                                class="confirm-btn" 
-                                data-school-id="{{ report.school_id }}"                  <!-- School identifier -->
-                                data-run-id="{{ run.id }}"                               <!-- Run identifier -->
+                            <!-- Confirm button with required ids -->
+                            <button
+                                class="confirm-btn"
+                                data-school-id="{{ report.school_id }}"
+                                data-run-id="{{ run.id }}"
                             >
                                 Confirm Attendance
                             </button>
 
-                        {% endif %}                                                        <!-- End conditional -->
+                        {% endif %}                                                                  <!-- End conditional -->
                     </div>
 
                     {% if run.students %}
@@ -399,32 +404,44 @@
                                 {% for student in run.students %}
                                 <tr>
                                     <td>{{ student.student_name }}</td>
+                                    <!-- ------------------------------------------------------- -->
+                                    <!-- Student Status Cell                                     -->
+                                    <!-- ------------------------------------------------------- -->
                                     <td>
                                         {% if student.status == "present" %}
-                                            <span class="status-present">Present</span>
+                                            <span class="status-value status-present" data-status="present">Present</span>
                                         {% else %}
-                                            <span class="status-absent">Absent</span>
+                                            <span class="status-value status-absent" data-status="absent">Absent</span>
                                         {% endif %}
                                     </td>
+                                    <!-- ------------------------------------------------------- -->
+                                    <!-- School Check Actions                                     -->
+                                    <!-- ------------------------------------------------------- -->
                                     <td>
-                                        <div class="school-check">
-                                            <button
-                                                type="button"
-                                                class="check-btn present-btn"
-                                                data-value="present"
-                                            >
-                                                Present
-                                            </button>
+                                        <div class="school-check">                                                     <!-- Student action wrapper -->
 
-                                            <button
-                                                type="button"
-                                                class="check-btn absent-btn"
-                                                data-value="absent"
-                                            >
-                                                Absent
-                                            </button>
+                                            {% if confirmation.get("is_confirmed") %}                                  <!-- Lock after confirmation -->
+                                                <span class="confirmation-text confirmed">Locked after confirmation</span>
+                                            {% else %}                                                                  <!-- Editable before confirmation -->
 
-                                            <span class="print-check-line" aria-hidden="true"></span>
+                                                <button
+                                                    type="button"
+                                                    class="check-btn present-btn"
+                                                    data-value="present"
+                                                >
+                                                    Present
+                                                </button>
+
+                                                <button
+                                                    type="button"
+                                                    class="check-btn absent-btn"
+                                                    data-value="absent"
+                                                >
+                                                    Absent
+                                                </button>
+
+                                            {% endif %}                                                                 <!-- End confirmation check -->
+
                                         </div>
                                     </td>
                                 </tr>
@@ -435,9 +452,15 @@
 
                     <div class="totals-box">
                         <h3 class="totals-title">Totals</h3>
-                        <div class="totals-line"><strong>Total Present:</strong> {{ run.students | selectattr("status", "equalto", "present") | list | length }}</div>
-                        <div class="totals-line"><strong>Total Absent:</strong> {{ run.students | selectattr("status", "equalto", "absent") | list | length }}</div>
-                    </div>
+                        <!-- ------------------------------------------------------- -->
+                        <!-- Totals Display                                          -->
+                        <!-- ------------------------------------------------------- -->
+                        <div class="totals-line">
+                            <strong>Total Present:</strong> <span class="total-present-value">{{ run.students | selectattr("status", "equalto", "present") | list | length }}</span>
+                        </div>
+                        <div class="totals-line">
+                            <strong>Total Absent:</strong> <span class="total-absent-value">{{ run.students | selectattr("status", "equalto", "absent") | list | length }}</span>
+                        </div>
                     {% else %}
                     <p class="empty-note">No students found for this run.</p>
                     {% endif %}
@@ -451,34 +474,90 @@
         {% endif %}
     </div>
 
+    <!-- ------------------------------------------------------- -->
+    <!-- School Check Button Logic + Totals Update               -->
+    <!-- ------------------------------------------------------- -->
     <script>
-    document.addEventListener("DOMContentLoaded", function () {                     // Wait until page is fully loaded
+    document.addEventListener("DOMContentLoaded", function () {                         // Wait until page is fully loaded
 
-        document.querySelectorAll(".present-btn").forEach(function (btn) {          // Loop present buttons
-            btn.addEventListener("click", function () {                             // Handle present click
-                const cell = btn.closest(".school-check");                          // Current button group
-                const absent = cell.querySelector(".absent-btn");                   // Opposite button
+        function updateCardTotals(card) {                                               // Recalculate totals inside one report card
+            const rows = card.querySelectorAll("tbody tr");                             // All student rows in this card
+            let presentCount = 0;                                                       // Present counter
+            let absentCount = 0;                                                        // Absent counter
 
-                btn.classList.toggle("selected-present");                           // Toggle present state
-                absent.classList.remove("selected-absent");                         // Clear absent state
+            rows.forEach(row => {                                                       // Check each student row
+                const statusCell = row.querySelector(".status-value");                  // Visible status label
+                const status = statusCell ? statusCell.dataset.status : "absent";       // Read current frontend status
+
+                if (status === "present") {                                             // Count present
+                    presentCount += 1;
+                } else {                                                                // Count absent
+                    absentCount += 1;
+                }
+            });
+
+            const totalPresent = card.querySelector(".total-present-value");            // Present total target
+            const totalAbsent = card.querySelector(".total-absent-value");              // Absent total target
+
+            if (totalPresent) totalPresent.textContent = presentCount;                  // Update present total
+            if (totalAbsent) totalAbsent.textContent = absentCount;                     // Update absent total
+        }
+
+        function setRowStatus(row, newStatus) {                                         // Update one student row status
+            const statusCell = row.querySelector(".status-value");                      // Status text element
+            if (!statusCell) return;
+
+            statusCell.dataset.status = newStatus;                                      // Save current frontend status
+
+            if (newStatus === "present") {                                              // Present visual state
+                statusCell.textContent = "Present";
+                statusCell.classList.remove("status-absent");
+                statusCell.classList.add("status-present");
+            } else {                                                                    // Absent visual state
+                statusCell.textContent = "Absent";
+                statusCell.classList.remove("status-present");
+                statusCell.classList.add("status-absent");
+            }
+        }
+
+        document.querySelectorAll(".present-btn").forEach(function (btn) {              // Loop present buttons
+            btn.addEventListener("click", function () {                                 // Handle present click
+                const card = btn.closest(".report-card");                               // Current report card
+                const cell = btn.closest(".school-check");                              // Current button group
+                const row = btn.closest("tr");                                          // Current student row
+                const absent = cell.querySelector(".absent-btn");                       // Opposite button
+
+                btn.classList.add("selected-present");                                  // Mark present selected
+                absent.classList.remove("selected-absent");                             // Clear absent state
+
+                setRowStatus(row, "present");                                           // Update visible row status
+                updateCardTotals(card);                                                 // Refresh totals in this card
             });
         });
 
-        document.querySelectorAll(".absent-btn").forEach(function (btn) {           // Loop absent buttons
-            btn.addEventListener("click", function () {                             // Handle absent click
-                const cell = btn.closest(".school-check");                          // Current button group
-                const present = cell.querySelector(".present-btn");                 // Opposite button
+        document.querySelectorAll(".absent-btn").forEach(function (btn) {               // Loop absent buttons
+            btn.addEventListener("click", function () {                                 // Handle absent click
+                const card = btn.closest(".report-card");                               // Current report card
+                const cell = btn.closest(".school-check");                              // Current button group
+                const row = btn.closest("tr");                                          // Current student row
+                const present = cell.querySelector(".present-btn");                     // Opposite button
 
-                btn.classList.toggle("selected-absent");                            // Toggle absent state
-                present.classList.remove("selected-present");                       // Clear present state
+                btn.classList.add("selected-absent");                                   // Mark absent selected
+                present.classList.remove("selected-present");                           // Clear present state
+
+                setRowStatus(row, "absent");                                            // Update visible row status
+                updateCardTotals(card);                                                 // Refresh totals in this card
             });
         });
 
+        document.querySelectorAll(".report-card").forEach(updateCardTotals);            // Initialize totals on page load
     });
     </script>
     
     <!-- ------------------------------------------------------- -->
     <!-- Report Interactions                                      -->
+    <!-- ------------------------------------------------------- -->
+    <!-- Validate Required IDs Before Confirm                    -->
     <!-- ------------------------------------------------------- -->
     <script>
     document.addEventListener("DOMContentLoaded", function () {                     // Wait until page is fully loaded
@@ -490,9 +569,17 @@
                 const runId = button.dataset.runId;                                 // Read run id from button
                 const card = button.closest(".report-card");                        // Find the current run card
                 const input = card ? card.querySelector(".confirm-input") : null;   // Find confirmer input safely
-                const confirmedBy = input && input.value.trim() 
-                    ? input.value.trim() 
-                    : "front desk";                                                 // Use typed name or fallback
+                const confirmedBy = input?.value?.trim();                           // Get typed name
+
+                if (!schoolId || !runId) {                                          // Ensure required ids exist
+                    alert("Missing school or run id on confirm button.");           // Stop broken request
+                    return;
+                }
+
+                if (!confirmedBy) {                                                 // Require real name
+                    alert("Please enter your name before confirming.");             // Block empty input
+                    return;
+                }
 
                 try {
                     const response = await fetch(
@@ -511,7 +598,11 @@
                     const data = await response.json();                             // Read backend response body
 
                     if (!response.ok) {                                             // Stop if backend returned error
-                        throw new Error(data.detail || "Confirmation failed");      // Show exact backend error
+                        const errorMessage = typeof data.detail === "string"        // If backend sent plain text
+                            ? data.detail
+                            : JSON.stringify(data.detail || data);                  // Convert object/array to readable text
+
+                        throw new Error(errorMessage);                              // Show readable backend error
                     }
 
                     const badge = card ? card.querySelector(".confirmation-text") : null;  // Find badge text safely
@@ -523,11 +614,20 @@
                     }
 
                     if (card) {
-                        const action = card.querySelector(".confirm-action");     // Find full confirm section
+                        const action = card.querySelector(".confirm-action");       // Find full confirm section
                         if (action) {
-                            action.style.display = "none";                        // Hide button + input together
+                            action.style.display = "none";                          // Hide button + input together
                         }
                     }
+                    // -------------------------------------------------------
+                    // Lock student actions after successful confirmation
+                    // -------------------------------------------------------
+                    if (card) {
+                        card.querySelectorAll(".school-check").forEach(section => {                 // Loop all school-check areas
+                            section.innerHTML = '<span class="confirmation-text confirmed">Locked after confirmation</span>';
+                        });
+                    }
+
                 } catch (error) {
                     console.error(error);                                           // Log error in console
                     alert(error.message);                                           // Show error message
@@ -537,5 +637,3 @@
         });
     });
     </script>
-    </body>
-    </html>

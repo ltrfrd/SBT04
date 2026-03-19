@@ -2224,3 +2224,91 @@ def test_get_school_mobile_attendance_report(client):
     assert "@media print" in body                  # Print CSS exists
     assert ".check-btn" in body                    # Check button CSS exists
     assert ".print-check-line" in body             # Print check line CSS exists
+
+# =============================================================================
+# School confirmation persistence test
+# -----------------------------------------------------------------------------
+# Verifies:
+# - school can confirm one run
+# - confirmation is saved in DB
+# - GET school attendance still returns confirmed state after refresh
+# =============================================================================
+def test_school_confirmation_persists_after_refresh(client):
+    # -------------------------------------------------------------------------
+    # Create driver                                                     # driver
+    # -------------------------------------------------------------------------
+    driver = client.post(
+        "/drivers/",
+        json={
+            "name": "Driver One",
+            "email": "driver1@test.com",
+            "phone": "11111",
+        },
+    )
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]                                     # save id
+
+    # -------------------------------------------------------------------------
+    # Create school                                                     # school
+    # -------------------------------------------------------------------------
+    school = client.post(
+        "/schools/",
+        json={
+            "name": "Test School",
+            "address": "123 Test St",
+        },
+    )
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]                                     # save id
+
+    # -------------------------------------------------------------------------
+    # Create route linked to school                                     # route
+    # -------------------------------------------------------------------------
+    route = client.post(
+        "/routes/",
+        json={
+            "route_number": "R1",
+            "unit_number": "Bus-01",
+            "driver_id": driver_id,
+            "school_ids": [school_id],                                  # attach school
+        },
+    )
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]                                       # save id
+
+    # -------------------------------------------------------------------------
+    # Create run                                                        # run
+    # -------------------------------------------------------------------------
+    run = client.post(
+        "/runs/",
+        json={
+            "driver_id": driver_id,
+            "route_id": route_id,
+            "run_type": "AM",
+        },
+    )
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]                                           # save id
+
+        # -------------------------------------------------------------------------
+    # Confirm school attendance                                         # POST confirm
+    # -------------------------------------------------------------------------
+    confirm = client.post(
+        f"/reports/school/{school_id}/confirm/{run_id}",
+        json={"confirmed_by": "Front Desk"},
+    )
+    assert confirm.status_code == 200
+    confirm_body = confirm.json()
+
+    assert confirm_body["message"] == "School attendance confirmed"
+    assert confirm_body["school_id"] == school_id
+    assert confirm_body["run_id"] == run_id
+    assert confirm_body["confirmed_by"] == "Front Desk"
+    assert confirm_body["confirmed_at"] is not None
+
+    # -------------------------------------------------------------------------
+    # Reload school attendance report                                   # GET after refresh
+    # -------------------------------------------------------------------------
+    report = client.get(f"/reports/school/{school_id}")
+    assert report.status_code == 200
+    body = report.json()
