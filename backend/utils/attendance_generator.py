@@ -396,25 +396,30 @@ def school_summary(db: Session, school_id: int):  # Build attendance for a schoo
 
             school_students_rows = []  # Final school-facing rows
 
-            for student in school_students:  # Always build from full school roster
-                assignment = assignment_by_student_id.get(student.id)  # Runtime assignment if present
+            for student in school_students:                                              # Always build from full school roster
+                assignment = assignment_by_student_id.get(student.id)                    # Runtime assignment if present
 
-                if assignment:  # Use runtime state when assignment exists
+                if assignment:                                                           # Use runtime state when assigned
                     operational_status = classify_student_attendance(
-                        assignment,  # Runtime assignment
-                        events,  # Runtime event history
-                        absence_lookup,  # Planned absence lookup
+                        assignment,
+                        events,
+                        absence_lookup,
                     )
                 else:
-                    operational_status = "planned_absent" if absence_lookup.get(student.id) else "expected"  # Missing runtime row still shows as absent
+                    operational_status = (
+                        "planned_absent"
+                        if absence_lookup.get(student.id)
+                        else "expected"
+                    )
 
                 school_students_rows.append(
                     {
-                        "student_name": student.name,  # School-facing student name
-                        "status": normalize_school_status(operational_status),  # Collapse to present / absent
+                        "student_id": student.id,                                        # Required for frontend/backend
+                        "student_name": student.name,                                    # Display name
+                        "status": normalize_school_status(operational_status),           # Present / absent
+                        "is_assigned": assignment is not None                            # Controls button enable/disable
                     }
                 )
-
             school_students_rows.sort(
                 key=lambda s: (s.get("student_name") or "").lower()
             )  # Stable safe alphabetical order
@@ -437,18 +442,36 @@ def school_summary(db: Session, school_id: int):  # Build attendance for a schoo
             # -------------------------------------------------------------------------
             # Build school-facing run payload                                     # include driver name
             # -------------------------------------------------------------------------
-            results.append(
+            assignment = assignment_by_student_id.get(student.id)                    # Runtime assignment if present
+
+            verification_status = None                                               # Default school override
+
+            if assignment:
+                verification_status = assignment.school_status                       # Load saved school status
+
+            if assignment:
+                operational_status = classify_student_attendance(
+                    assignment,
+                    events,
+                    absence_lookup,
+                )
+            else:
+                operational_status = (
+                    "planned_absent"
+                    if absence_lookup.get(student.id)
+                    else "expected"
+                )
+
+            final_status = verification_status if verification_status else normalize_school_status(operational_status)
+
+            school_students_rows.append(
                 {
-                    "id": run.id,                                                       # Run identifier needed by frontend
-                    "route_number": route.route_number,                                 # Route identifier
-                    "driver_name": run.driver.name if run.driver else "Unassigned",     # Driver for this run
-                    "run_type": str(run.run_type).split(".")[-1].upper() if run.run_type else "",  # AM / PM
-                    "date": run.start_time.date() if run.start_time else None,          # Run date
-                    "students": school_students_rows,                                   # Full school-facing student list
-                    "confirmation": confirmation,                                       # Confirmation state for this run
+                    "student_id": student.id,
+                    "student_name": student.name,
+                    "status": final_status,                                          # 🔥 persisted value
+                    "is_assigned": assignment is not None,
                 }
             )
-            
 
     routes_map = {}  # Group runs by route number
 
