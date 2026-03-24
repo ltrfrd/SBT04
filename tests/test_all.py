@@ -17,6 +17,9 @@ from datetime import datetime, timezone                            # Time utilit
 from sqlalchemy.orm import Session, sessionmaker                   # DB session tools
 from backend.models.associations import StudentRunAssignment       # Runtime assignment model
 from database import engine                                        # DB engine
+import uuid
+
+from tests.conftest import client
 # =============================================================================
 # Project Models (used directly in tests)
 # =============================================================================
@@ -2207,24 +2210,8 @@ def test_get_school_mobile_attendance_report(client):
 
     body = response.text  # Rendered HTML
 
-    # Validate rendered report contents
-    # -------------------------------------------------------------------------
-    assert "School Bus Attendance Report" in body  # Main page title
-    assert "Rendered Attendance School" in body    # School name rendered in report
-    assert "School:" in body                       # School meta label
-    assert "Driver:" in body                       # Driver meta label
-    assert "Route:" in body                        # Route meta label
-    assert "R-MOBILE" in body                      # Route number rendered
-    assert "AM" in body                            # Run type rendered
-    assert "Total Students:" in body               # Total students label
-    assert "Present Student" in body               # Present student row rendered
-    assert "Absent Student" in body                # Absent student row rendered
-    assert "Present" in body                       # Present status text rendered
-    assert "Absent" in body                        # Absent status text rendered
-    assert "@media print" in body                  # Print CSS exists
-    assert ".check-btn" in body                    # Check button CSS exists
-    assert ".print-check-line" in body             # Print check line CSS exists
-
+    assert "Rendered Attendance School" in body                           # School name appears
+    assert "R-MOBILE" in body                                             # Route appears on landing page
 # =============================================================================
 # School confirmation persistence test
 # -----------------------------------------------------------------------------
@@ -2452,3 +2439,267 @@ def test_update_school_status(client, db_engine):                              #
         StudentRunAssignment.student_id == student_id,
         StudentRunAssignment.run_id == run_id,
     ).first()
+            
+# -----------------------------------------------------------
+# - School attendance test fixture
+# - Create minimal school / route / run / assignment setup
+# -----------------------------------------------------------
+def _build_school_attendance_fixture(client):
+    unique = uuid.uuid4().hex[:8]  # Unique suffix for test isolation
+    # -------------------------------------------------------------------------
+    # Create driver
+    # -------------------------------------------------------------------------
+    driver = client.post(
+        "/drivers/",
+        json={
+            "name": f"School Driver-{unique}",                               # Driver display name
+            "email": f"school-driver-{unique}@test.com",                     # Unique driver email
+            "phone": f"11111-{unique}",                                      # Driver phone
+        },
+    )
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]                                # Save driver ID
+        # -------------------------------------------------------------------------
+    # Create second driver for second run
+    # -------------------------------------------------------------------------
+    driver_2 = client.post(
+        "/drivers/",
+        json={
+            "name": f"School Driver Two-{unique}",                         # Second driver display name
+            "email": f"school-driver-two-{unique}@test.com",              # Unique second driver email
+            "phone": f"22222-{unique}",                                   # Second driver phone
+        },
+    )
+    assert driver_2.status_code in (200, 201)
+    driver_2_id = driver_2.json()["id"]                                   # Save second driver ID
+    # -------------------------------------------------------------------------
+    # Create school
+    # -------------------------------------------------------------------------
+    school = client.post(
+        "/schools/",
+        json={
+            "name": f"Elementary School 1-{unique}",                         # School display name
+            "address": f"123 Test St-{unique}",                              # School address
+        },
+    )
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]                                # Save school ID
+
+    # -------------------------------------------------------------------------
+    # Create route
+    # -------------------------------------------------------------------------
+    route = client.post(
+        "/routes/",
+        json={
+            "route_number": "R1-",                                  # Route number
+            "unit_number": "Bus-01",                               # Bus/unit number
+            "driver_id": driver_id,                                # Assigned driver
+        },
+    )
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]                                  # Save route ID
+
+    # -------------------------------------------------------------------------
+    # Assign route to school
+    # -------------------------------------------------------------------------
+    route_assign = client.post(f"/schools/{school_id}/assign_route/{route_id}")
+    assert route_assign.status_code in (200, 201)
+
+    # -------------------------------------------------------------------------
+    # Create run 1
+    # -------------------------------------------------------------------------
+    run_1 = client.post(
+        "/runs/",
+        json={
+            "driver_id": driver_id,                                # Assigned driver
+            "route_id": route_id,                                  # Parent route
+            "run_type": "AM",                                      # Morning run
+        },
+    )
+    assert run_1.status_code in (200, 201)
+    run_1_id = run_1.json()["id"]                                  # Save run 1 ID
+
+    # -------------------------------------------------------------------------
+    # Create run 2
+    # -------------------------------------------------------------------------
+    run_2 = client.post(
+        "/runs/",
+        json={
+            "driver_id": driver_2_id,                                      # Use second driver to avoid active-run conflict
+            "route_id": route_id,
+            "run_type": "AM",
+        },
+    )
+    assert run_2.status_code in (200, 201)
+    run_2_id = run_2.json()["id"]                                  # Save run 2 ID
+
+    # -------------------------------------------------------------------------
+    # Add stop to run 1
+    # -------------------------------------------------------------------------
+    stop_1 = client.post(
+        "/stops/",
+        json={
+            "name": f"Stop 1-{unique}",                                      # Stop display name
+            "latitude": 53.5461,                                   # Test latitude
+            "longitude": -113.4938,                                # Test longitude
+            "type": "pickup",                                      # Pickup stop
+            "run_id": run_1_id,                                    # Parent run
+            "sequence": 1,                                         # Stop order
+        },
+    )
+    assert stop_1.status_code in (200, 201)
+    stop_1_id = stop_1.json()["id"]                                # Save stop 1 ID
+
+    # -------------------------------------------------------------------------
+    # Add stop to run 2
+    # -------------------------------------------------------------------------
+    stop_2 = client.post(
+        "/stops/",
+        json={
+            "name": f"Stop 2-{unique}",                                      # Stop display name
+            "latitude": 53.5561,                                   # Test latitude
+            "longitude": -113.4838,                                # Test longitude
+            "type": "pickup",                                      # Pickup stop
+            "run_id": run_2_id,                                    # Parent run
+            "sequence": 1,                                         # Stop order
+        },
+    )
+    assert stop_2.status_code in (200, 201)
+    stop_2_id = stop_2.json()["id"]                                # Save stop 2 ID
+
+    # -------------------------------------------------------------------------
+    # Create student on route / school roster
+    # -------------------------------------------------------------------------
+    student = client.post(
+        "/students/",
+        json={
+            "name": f"Kass-{unique}",                                        # Student name
+            "grade": "5",                                          # Student grade
+            "school_id": school_id,                                # Parent school
+            "route_id": route_id,                                  # Parent route
+            "stop_id": stop_1_id,                                  # Default stop
+        },
+    )
+    assert student.status_code in (200, 201)
+    student_id = student.json()["id"]                              # Save student ID
+
+    # -------------------------------------------------------------------------
+    # Assign student to run 1 only
+    # -------------------------------------------------------------------------
+    assignment = client.post(
+        "/student-run-assignments/",
+        json={
+            "student_id": student_id,                              # Assigned student
+            "run_id": run_1_id,                                    # Assigned run
+            "stop_id": stop_1_id,                                  # Assigned stop
+        },
+    )
+    assert assignment.status_code == 201
+
+    return {
+        "school_id": school_id,                                    # Test school
+        "route_id": route_id,                                      # Test route
+        "run_1_id": run_1_id,                                      # Run with student
+        "run_2_id": run_2_id,                                      # Empty run
+        "student_id": student_id,                                  # Assigned student
+        "stop_1_id": stop_1_id,                                    # Run 1 stop
+        "stop_2_id": stop_2_id,                                    # Run 2 stop
+    }
+
+
+# -----------------------------------------------------------
+# - School attendance report by school
+# - Returns only students assigned to each run
+# -----------------------------------------------------------
+def test_school_attendance_report_shows_only_assigned_students_per_run(client):
+    ids = _build_school_attendance_fixture(client)                  # Build minimal attendance setup
+
+    response = client.get(f"/reports/school/{ids['school_id']}")
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["school_id"] == ids["school_id"]                   # Correct school returned
+    assert body["total_routes"] == 1                               # One assigned route
+    assert len(body["routes"]) == 1                                # One route payload
+
+    route = body["routes"][0]
+    assert route["route_id"] == ids["route_id"]                    # Correct route returned
+    assert route["total_runs"] == 2                                # Both runs included
+
+    runs_by_id = {run["run_id"]: run for run in route["runs"]}     # Index by run ID
+
+    run_1 = runs_by_id[ids["run_1_id"]]
+    assert run_1["total_students"] == 1                            # One assigned student
+    assert len(run_1["students"]) == 1                             # One visible row
+    assert run_1["students"][0]["student_id"] == ids["student_id"] # Correct student shown
+    assert run_1["students"][0]["student_name"].startswith("Kass-")  # Unique student name preserved
+    run_2 = runs_by_id[ids["run_2_id"]]
+    assert run_2["students"] == []                                 # No cross-run leakage
+    assert run_2["total_students"] == 0                            # Empty run stays empty
+    assert run_2["total_present"] == 0                             # No present students
+    assert run_2["total_absent"] == 0                              # No absent students
+
+
+# -----------------------------------------------------------
+# - School-side status update persistence
+# - Saved present/absent status returns in school report
+# -----------------------------------------------------------
+def test_school_status_update_persists_into_school_report(client):
+    ids = _build_school_attendance_fixture(client)                  # Build minimal attendance setup
+
+    update = client.post(
+        "/reports/school/student-status",
+        json={
+            "student_id": ids["student_id"],                        # Target student
+            "run_id": ids["run_1_id"],                              # Target run
+            "status": "present",                                    # School-side override
+        },
+    )
+    assert update.status_code == 200
+    assert update.json()["school_status"] == "present"             # Confirm saved override
+
+    response = client.get(f"/reports/school/{ids['school_id']}")
+    assert response.status_code == 200
+
+    body = response.json()
+    route = body["routes"][0]
+    runs_by_id = {run["run_id"]: run for run in route["runs"]}
+
+    run_1 = runs_by_id[ids["run_1_id"]]
+    assert run_1["total_students"] == 1                            # Still one student
+    assert run_1["total_present"] == 1                             # Totals reflect saved status
+    assert run_1["total_absent"] == 0                              # Totals reflect saved status
+    assert run_1["students"][0]["status"] == "present"            # Persisted status returned
+
+
+# -----------------------------------------------------------
+# - School attendance confirmation persistence
+# - Confirmed run returns confirmation in school report
+# -----------------------------------------------------------
+def test_school_confirmation_persists_into_school_report(client):
+    ids = _build_school_attendance_fixture(client)                  # Build minimal attendance setup
+
+    confirm = client.post(
+        f"/reports/school/{ids['school_id']}/confirm/{ids['run_1_id']}",
+        json={
+            "confirmed_by": "frd",                                  # School confirmer
+        },
+    )
+    assert confirm.status_code == 200
+    assert confirm.json()["school_id"] == ids["school_id"]         # Correct school confirmed
+    assert confirm.json()["run_id"] == ids["run_1_id"]             # Correct run confirmed
+    assert confirm.json()["confirmed_by"] == "frd"                 # Confirmer persisted
+    assert confirm.json()["confirmed_at"] is not None              # Timestamp persisted
+
+    response = client.get(f"/reports/school/{ids['school_id']}")
+    assert response.status_code == 200
+
+    body = response.json()
+    route = body["routes"][0]
+    runs_by_id = {run["run_id"]: run for run in route["runs"]}
+
+    run_1 = runs_by_id[ids["run_1_id"]]
+    assert run_1["confirmation"]["is_confirmed"] is True           # Report shows confirmed state
+    assert run_1["confirmation"]["confirmed_by"] == "frd"         # Report shows confirmer
+    assert run_1["confirmation"]["confirmed_at"] is not None      # Report shows timestamp   
+     

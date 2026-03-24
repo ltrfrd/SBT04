@@ -5,9 +5,6 @@
     <title>School Bus Attendance Report</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        /* ------------------------------------------------------- */
-        /* Report Styles                                           */
-        /* ------------------------------------------------------- */
         body {
             font-family: Arial, sans-serif;
             margin: 0;
@@ -29,15 +26,49 @@
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
         }
 
+        .report-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+
         .report-title {
-            text-align: center;
-            margin: 0 0 18px 0;
+            margin: 0;
             font-size: 26px;
         }
 
-        /* --------------------------------------------------
-        Report meta header layout
-        -------------------------------------------------- */
+        .header-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .nav-link,
+        .print-button {
+            padding: 8px 14px;
+            font-size: 14px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .nav-link {
+            background: #e5e7eb;
+            color: #111827;
+        }
+
+        .print-button {
+            background: #2c7be5;
+            color: white;
+        }
+
         .report-meta {
             display: flex;
             justify-content: space-between;
@@ -53,12 +84,7 @@
         }
 
         .meta-column-right {
-            text-align: right;                       /* Align right-side values neatly */
-        }
-
-        .section-title {
-            margin: 20px 0 10px 0;
-            font-size: 20px;
+            text-align: right;
         }
 
         .table-wrap {
@@ -117,6 +143,11 @@
             cursor: pointer;
         }
 
+        .check-btn[disabled] {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
         .present-btn {
             background: #2ecc71;
             color: white;
@@ -139,11 +170,43 @@
             box-shadow: 0 0 0 3px rgba(192, 57, 43, 0.18);
         }
 
-        .print-check-line {
-            display: none;
-            min-width: 140px;
-            min-height: 24px;
-            border-bottom: 1px solid #222;
+        .confirmation-badge {
+            margin-top: 8px;
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        .confirmed {
+            color: #15803d;
+        }
+
+        .not-confirmed {
+            color: #b91c1c;
+        }
+
+        .confirm-action {
+            margin-top: 8px;
+        }
+
+        .confirm-input {
+            margin-top: 6px;
+            margin-right: 6px;
+            padding: 6px 10px;
+            font-size: 14px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+        }
+
+        .confirm-btn {
+            margin-top: 8px;
+            padding: 6px 12px;
+            font-size: 14px;
+            font-weight: 600;
+            background-color: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
         }
 
         .totals-box {
@@ -167,6 +230,17 @@
         .empty-note {
             color: #777;
             font-size: 15px;
+        }
+
+        .locked-note {
+            font-size: 14px;
+            font-weight: 700;
+            color: #15803d;
+        }
+
+        .not-assigned {
+            color: #6b7280;
+            font-size: 14px;
         }
 
         @media (max-width: 700px) {
@@ -217,12 +291,11 @@
                 break-inside: avoid;
             }
 
-            .check-btn {
+            .check-btn,
+            .confirm-action,
+            .print-button,
+            .nav-link {
                 display: none;
-            }
-
-            .print-check-line {
-                display: inline-block;
             }
 
             .table-wrap {
@@ -235,198 +308,100 @@
                 background: #ffffff;
             }
 
-            .attendance-btn {
-                display: none;         /* Hide present/absent buttons */
-            }
-
-            .print-button {
-                display: none;         /* Hide print button on paper */
-            }
-
             thead {
-                display: table-header-group;   /* Repeat table header on each printed page */
+                display: table-header-group;
             }
 
             tr {
-                break-inside: avoid;           /* Prevent row split across pages */
+                break-inside: avoid;
             }
         }
-
-        /* --------------------------------------------------
-        Print button styling
-        -------------------------------------------------- */
-        .report-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 16px;
-        }
-
-        .print-button {
-            padding: 8px 14px;
-            font-size: 14px;
-            border: none;
-            background: #2c7be5;
-            color: white;
-            border-radius: 6px;
-            cursor: pointer;
-        }
-
-        .print-button:hover {
-            background: #1a5fd0;
-        }
-
-        .confirmation-badge {                      /* Badge wrapper */
-            margin-top: 8px;                      /* Small spacing under run meta */
-            font-size: 14px;                      /* Readable mobile size */
-            font-weight: 700;                     /* Strong emphasis */
-        }
-
-        .confirmed {                              /* Confirmed state */
-            color: #15803d;                       /* Green text */
-        }
-
-        .not-confirmed {                          /* Pending state */
-            color: #b91c1c;                       /* Red text */
-        }
-
-        /* -------------------------------------------------- */
-        /* Confirm attendance button                          */
-        /* -------------------------------------------------- */
-        .confirm-btn {                            /* Confirm button base style */
-            margin-top: 8px;                      /* Space above button */
-            padding: 6px 12px;                    /* Button size and spacing */
-            font-size: 14px;                      /* Readable text size */
-            font-weight: 600;                     /* Slight emphasis */
-            background-color: #2563eb;            /* Blue background */
-            color: white;                         /* White text color */
-            border: none;                         /* Remove default border */
-            border-radius: 6px;                   /* Rounded corners */
-            cursor: pointer;                      /* Pointer cursor on hover */
-        }
-
-        .confirm-btn:hover {                      /* Hover effect */
-            background-color: #1d4ed8;            /* Darker blue on hover */
-        }
-
-        .confirm-action {                         /* Button container wrapper */
-            margin-top: 8px;                      /* Space below confirmation badge */
-        }
-
-        .confirm-input {                         /* Input for confirmer name */
-            margin-top: 6px;
-            margin-right: 6px;
-            padding: 6px 10px;
-            font-size: 14px;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
-        }
-        
-    
     </style>
 </head>
-
 <body>
-    <!-- ------------------------------------------------------- -->
-    <!-- Report Content                                           -->
-    <!-- ------------------------------------------------------- -->
     <div class="page">
-        {% if report.routes %}
-            {% for route in report.routes %}
-                {% for run in route.runs %}
-                <div class="report-card">
-                    <div class="report-header">
-                        <h1 class="report-title">School Bus Attendance Report</h1>
-                        <button class="print-button" onclick="window.print()">Print Report</button>
-                    </div>
+        {% set route = report.route %}
+        {% set run = report.run %}
+        {% set confirmation = run.get("confirmation", {}) %}
 
-                    <div class="report-meta">
-                        <div class="meta-column">
-                            <div><strong>School:</strong> {{ report.school_name }}</div>
-                            <div><strong>Driver:</strong> {{ run.driver_name or "Unassigned" }}</div>
-                            <div><strong>Route:</strong> {{ route.route_number }}</div>
-                        </div>
+        <div class="report-card">
+            <div class="report-header">
+                <h1 class="report-title">School Bus Attendance Report</h1>
+                <div class="header-actions">
+                    <a class="nav-link" href="/reports/school/{{ report.school_id }}/mobile/route/{{ route.route_id }}">Back to Runs</a>
+                    <button class="print-button" onclick="window.print()">Print Report</button>
+                </div>
+            </div>
 
-                        <div class="meta-column meta-column-right">
-                            <div><strong>Run:</strong> {{ run.run_type }}</div>
-                            <div><strong>Date:</strong> {{ run.date }}</div>
-                            <div><strong>Total Students:</strong> {{ run.students | length }}</div>
-                        </div>
-                    </div>
-                    <div class="confirmation-badge">                                                         <!-- School-specific confirmation for this run -->
-                        {% set confirmation = run.get("confirmation", {}) %}                                 <!-- Safe fallback when confirmation is missing -->
-                        {% if confirmation.get("is_confirmed") %}                                            <!-- Confirmed state -->
-                            <span class="confirmation-text confirmed">                                       <!-- Badge text target -->
-                                Confirmed{% if confirmation.get("confirmed_by") %} by {{ confirmation.get("confirmed_by") }}{% endif %}  <!-- Optional confirmer -->
-                            </span>
-                        {% else %}                                                                           <!-- Not confirmed state -->
-                            <span class="confirmation-text not-confirmed">Not Confirmed</span>               <!-- Badge text target -->
-                        {% endif %}
-                    </div>
+            <div class="report-meta">
+                <div class="meta-column">
+                    <div><strong>School:</strong> {{ report.school_name }}</div>
+                    <div><strong>Driver:</strong> {{ run.driver_name or "Unassigned" }}</div>
+                    <div><strong>Route:</strong> {{ route.route_number }}</div>
+                </div>
 
-                    <!-- ------------------------------------------------------- -->
-                    <!-- Confirm Action                                           -->
-                    <!-- ------------------------------------------------------- -->
-                    <div class="confirm-action">                                                    <!-- Wrapper for confirm action -->
-                        {% if not confirmation.get("is_confirmed") %}                               <!-- Show only if not confirmed -->
+                <div class="meta-column meta-column-right">
+                    <div><strong>Run:</strong> {{ run.run_type }}</div>
+                    <div><strong>Date:</strong> {{ run.date }}</div>
+                    <div><strong>Total Students:</strong> {{ run.total_students }}</div>
+                </div>
+            </div>
 
-                            <!-- Staff name input -->
-                            <input
-                                type="text"
-                                class="confirm-input"
-                                placeholder="Enter name"
-                            >
+            <div class="confirmation-badge">
+                {% if confirmation.get("is_confirmed") %}
+                    <span class="confirmation-text confirmed">
+                        Confirmed{% if confirmation.get("confirmed_by") %} by {{ confirmation.get("confirmed_by") }}{% endif %}
+                    </span>
+                {% else %}
+                    <span class="confirmation-text not-confirmed">Not Confirmed</span>
+                {% endif %}
+            </div>
 
-                            <!-- Confirm button with required ids -->
-                            <button
-                                class="confirm-btn"
-                                data-school-id="{{ report.school_id }}"
-                                data-run-id="{{ run.id }}"
-                            >
-                                Confirm Attendance
-                            </button>
+            <div class="confirm-action">
+                {% if not confirmation.get("is_confirmed") %}
+                    <input
+                        type="text"
+                        class="confirm-input"
+                        placeholder="Enter name"
+                    >
+                    <button
+                        class="confirm-btn"
+                        data-school-id="{{ report.school_id }}"
+                        data-run-id="{{ run.run_id }}"
+                    >
+                        Confirm Attendance
+                    </button>
+                {% endif %}
+            </div>
 
-                        {% endif %}                                                                  <!-- End conditional -->
-                    </div>
-
-                    {% if run.students %}
-                    <div class="table-wrap">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Student Name</th>
-                                    <th>Status</th>
-                                    <th>School Check</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for student in run.students %}
-                                <tr data-student-id="{{ student.student_id }}" data-run-id="{{ run.id }}">   <!-- Attach IDs for JS -->
-                                    <!-- ------------------------------------------------------- -->
-                                    <!-- Student Name + Debug ID                                 -->
-                                    <!-- ------------------------------------------------------- -->
-                                    <td>
-                                        {{ student.student_name }}   <!-- Student name -->
-                                        (ID: {{ student.student_id or student.id }})   <!-- Debug: verify ID -->
-                                    </td>
-
-                                    <!-- ------------------------------------------------------- -->
-                                    <!-- Student Status (from backend)                           -->
-                                    <!-- ------------------------------------------------------- -->
-                                    <td>
-                                        {% if student.status == "present" %}
-                                            <span class="status-value status-present" data-status="present">Present</span>
-                                        {% else %}
-                                            <span class="status-value status-absent" data-status="absent">Absent</span>
-                                        {% endif %}
-                                    </td>
-
-                                    <!-- ------------------------------------------------------- -->
-                                    <!-- School Check Buttons (REQUIRED WRAPPER)                 -->
-                                    <!-- ------------------------------------------------------- -->
-                                    <td>
-                                        <div class="school-check">   <!-- Required for JS -->
+            {% if run.students %}
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Student Name</th>
+                                <th>Status</th>
+                                <th>School Check</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for student in run.students %}
+                            <tr data-student-id="{{ student.student_id }}" data-run-id="{{ run.run_id }}">
+                                <td>{{ student.student_name }}</td>
+                                <td>
+                                    {% if student.status == "present" %}
+                                        <span class="status-value status-present" data-status="present">Present</span>
+                                    {% else %}
+                                        <span class="status-value status-absent" data-status="absent">Absent</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if confirmation.get("is_confirmed") %}
+                                        <div class="school-check">
+                                            <span class="locked-note">Locked after confirmation</span>
+                                        </div>
+                                    {% else %}
+                                        <div class="school-check">
                                             <button
                                                 type="button"
                                                 class="check-btn present-btn"
@@ -434,8 +409,7 @@
                                                 {% if not student.is_assigned %}disabled{% endif %}
                                             >
                                                 Present
-                                            </button>   <!-- Mark present -->
-
+                                            </button>
                                             <button
                                                 type="button"
                                                 class="check-btn absent-btn"
@@ -443,264 +417,226 @@
                                                 {% if not student.is_assigned %}disabled{% endif %}
                                             >
                                                 Absent
-                                            </button>   <!-- Mark absent -->
-
+                                            </button>
                                             {% if not student.is_assigned %}
-                                                <span class="not-assigned">(Not on this run)</span>   <!-- Inform school this student is not assigned -->
+                                                <span class="not-assigned">(Not on this run)</span>
                                             {% endif %}
                                         </div>
-                                    </td>
-
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    <div class="totals-box">
-                        <h3 class="totals-title">Totals</h3>
-                        <!-- ------------------------------------------------------- -->
-                        <!-- Totals Display                                          -->
-                        <!-- ------------------------------------------------------- -->
-                        <div class="totals-line">
-                            <strong>Total Present:</strong> <span class="total-present-value">{{ run.students | selectattr("status", "equalto", "present") | list | length }}</span>
-                        </div>
-                        <div class="totals-line">
-                            <strong>Total Absent:</strong> <span class="total-absent-value">{{ run.students | selectattr("status", "equalto", "absent") | list | length }}</span>
-                        </div>
-                    </div>
-                    {% else %}
-                    <p class="empty-note">No students found for this run.</p>
-                    {% endif %}
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
-                {% endfor %}
-            {% endfor %}
-        {% else %}
-            <div class="report-card">
-                <p class="empty-note">No routes found for this school.</p>
-            </div>
-        {% endif %}
+
+                <div class="totals-box">
+                    <h3 class="totals-title">Totals</h3>
+                    <div class="totals-line">
+                        <strong>Total Present:</strong> <span class="total-present-value">{{ run.total_present }}</span>
+                    </div>
+                    <div class="totals-line">
+                        <strong>Total Absent:</strong> <span class="total-absent-value">{{ run.total_absent }}</span>
+                    </div>
+                </div>
+            {% else %}
+                <p class="empty-note">No students found for this run.</p>
+            {% endif %}
+        </div>
     </div>
 
-    <!-- ------------------------------------------------------- -->
-    <!-- School Check Button Logic + Totals Update               -->
-    <!-- ------------------------------------------------------- -->
     <script>
-    document.addEventListener("DOMContentLoaded", function () {                         // Wait until page is fully loaded
+    document.addEventListener("DOMContentLoaded", function () {
+        function updateCardTotals(card) {
+            const rows = card.querySelectorAll("tbody tr");
+            let presentCount = 0;
+            let absentCount = 0;
 
-        function updateCardTotals(card) {                                               // Recalculate totals inside one report card
-            const rows = card.querySelectorAll("tbody tr");                             // All student rows in this card
-            let presentCount = 0;                                                       // Present counter
-            let absentCount = 0;                                                        // Absent counter
+            rows.forEach(row => {
+                const statusCell = row.querySelector(".status-value");
+                const status = statusCell ? statusCell.dataset.status : "absent";
 
-            rows.forEach(row => {                                                       // Check each student row
-                const statusCell = row.querySelector(".status-value");                  // Visible status label
-                const status = statusCell ? statusCell.dataset.status : "absent";       // Read current frontend status
-
-                if (status === "present") {                                             // Count present
+                if (status === "present") {
                     presentCount += 1;
-                } else {                                                                // Count absent
+                } else {
                     absentCount += 1;
                 }
             });
 
-            const totalPresent = card.querySelector(".total-present-value");            // Present total target
-            const totalAbsent = card.querySelector(".total-absent-value");              // Absent total target
+            const totalPresent = card.querySelector(".total-present-value");
+            const totalAbsent = card.querySelector(".total-absent-value");
 
-            if (totalPresent) totalPresent.textContent = presentCount;                  // Update present total
-            if (totalAbsent) totalAbsent.textContent = absentCount;                     // Update absent total
+            if (totalPresent) totalPresent.textContent = presentCount;
+            if (totalAbsent) totalAbsent.textContent = absentCount;
         }
 
-        function setRowStatus(row, newStatus) {                                         // Update one student row status
-            const statusCell = row.querySelector(".status-value");                      // Status text element
-            if (!statusCell) return;                                                    // Stop if status target missing
+        function setRowStatus(row, newStatus) {
+            const statusCell = row.querySelector(".status-value");
+            if (!statusCell) return;
 
-            statusCell.dataset.status = newStatus;                                      // Save current frontend status
+            statusCell.dataset.status = newStatus;
 
-            if (newStatus === "present") {                                              // Present visual state
+            if (newStatus === "present") {
                 statusCell.textContent = "Present";
                 statusCell.classList.remove("status-absent");
                 statusCell.classList.add("status-present");
-            } else {                                                                    // Absent visual state
+            } else {
                 statusCell.textContent = "Absent";
                 statusCell.classList.remove("status-present");
                 statusCell.classList.add("status-absent");
             }
         }
 
-        async function saveSchoolStatus(row, statusValue) {                             // Save school-side status to backend
-            if (!row) {                                                                 // Guard missing row
-                console.error("Student row not found");
+        async function saveSchoolStatus(row, statusValue) {
+            if (!row) {
                 return;
             }
 
-            const studentId = parseInt(row.dataset.studentId);                          // Read student id from row
-            const runId = parseInt(row.dataset.runId);                                  // Read run id from row
+            const studentId = parseInt(row.dataset.studentId);
+            const runId = parseInt(row.dataset.runId);
 
-            console.log("student_id:", row.dataset.studentId);                          // Debug student id
-            console.log("run_id:", row.dataset.runId);                                  // Debug run id
-            console.log("status:", statusValue);                                        // Debug status
-
-            if (!studentId || !runId) {                                                 // Validate required ids
-                console.error("Invalid IDs:", studentId, runId);
+            if (!studentId || !runId) {
                 return;
             }
 
-            try {
-                const response = await fetch("/reports/school/student-status", {        // POST status update
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({
-                        student_id: studentId,                                          // Integer student id
-                        run_id: runId,                                                  // Integer run id
-                        status: statusValue                                             // Present / absent
-                    })
-                });
+            const response = await fetch("/reports/school/student-status", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    student_id: studentId,
+                    run_id: runId,
+                    status: statusValue
+                })
+            });
 
-                const result = await response.json();                                   // Read backend response
-                console.log("save result:", result);                                    // Debug backend result
+            const result = await response.json();
 
-                if (!response.ok) {                                                     // Backend validation error
-                    console.error("Save failed:", result);
+            if (!response.ok) {
+                throw new Error(result.detail || "Save failed");
+            }
+        }
+
+        document.querySelectorAll(".present-btn").forEach(function (btn) {
+            btn.addEventListener("click", async function () {
+                const card = this.closest(".report-card");
+                const cell = this.closest(".school-check");
+                const row = this.closest("tr");
+                const absent = cell.querySelector(".absent-btn");
+
+                this.classList.add("selected-present");
+                absent.classList.remove("selected-absent");
+
+                try {
+                    await saveSchoolStatus(row, "present");
+                    setRowStatus(row, "present");
+                    updateCardTotals(card);
+                } catch (error) {
+                    alert(error.message);
                 }
-            } catch (error) {                                                           // Network / JS error
-                console.error("Request failed:", error);
+            });
+        });
+
+        document.querySelectorAll(".absent-btn").forEach(function (btn) {
+            btn.addEventListener("click", async function () {
+                const card = this.closest(".report-card");
+                const cell = this.closest(".school-check");
+                const row = this.closest("tr");
+                const present = cell.querySelector(".present-btn");
+
+                this.classList.add("selected-absent");
+                present.classList.remove("selected-present");
+
+                try {
+                    await saveSchoolStatus(row, "absent");
+                    setRowStatus(row, "absent");
+                    updateCardTotals(card);
+                } catch (error) {
+                    alert(error.message);
+                }
+            });
+        });
+
+        document.querySelectorAll("tbody tr").forEach(row => {
+            const statusCell = row.querySelector(".status-value");
+            if (!statusCell) return;
+
+            const status = statusCell.dataset.status;
+            const presentBtn = row.querySelector(".present-btn");
+            const absentBtn = row.querySelector(".absent-btn");
+
+            if (status === "present") {
+                presentBtn?.classList.add("selected-present");
+            } else {
+                absentBtn?.classList.add("selected-absent");
             }
-        }
-
-        document.querySelectorAll(".present-btn").forEach(function (btn) {              // Loop present buttons
-            btn.addEventListener("click", async function () {                           // Handle present click
-                const card = this.closest(".report-card");                              // Current report card
-                const cell = this.closest(".school-check");                             // Current button group
-                const row = this.closest("tr");                                         // Current student row
-                const absent = cell.querySelector(".absent-btn");                       // Opposite button
-
-                this.classList.add("selected-present");                                 // Mark present selected
-                absent.classList.remove("selected-absent");                             // Clear absent state
-
-                setRowStatus(row, "present");                                           // Update visible row status
-                updateCardTotals(card);                                                 // Refresh totals in this card
-                await saveSchoolStatus(row, "present");                                 // Persist to backend
-            });
         });
 
-        document.querySelectorAll(".absent-btn").forEach(function (btn) {               // Loop absent buttons
-            btn.addEventListener("click", async function () {                           // Handle absent click
-                const card = this.closest(".report-card");                              // Current report card
-                const cell = this.closest(".school-check");                             // Current button group
-                const row = this.closest("tr");                                         // Current student row
-                const present = cell.querySelector(".present-btn");                     // Opposite button
-
-                this.classList.add("selected-absent");                                  // Mark absent selected
-                present.classList.remove("selected-present");                           // Clear present state
-
-                setRowStatus(row, "absent");                                            // Update visible row status
-                updateCardTotals(card);                                                 // Refresh totals in this card
-                await saveSchoolStatus(row, "absent");                                  // Persist to backend
-            });
-        });
-    // -------------------------------------------------------
-    // Apply saved status on page load (PERSISTENCE)
-    // -------------------------------------------------------
-    document.querySelectorAll("tbody tr").forEach(row => {                   // Loop all rows
-        const statusCell = row.querySelector(".status-value");               // Get status cell
-        if (!statusCell) return;
-
-        const status = statusCell.dataset.status;                            // Read saved status
-
-        const presentBtn = row.querySelector(".present-btn");
-        const absentBtn = row.querySelector(".absent-btn");
-
-        if (status === "present") {
-            presentBtn?.classList.add("selected-present");                   // Highlight present
-        } else {
-            absentBtn?.classList.add("selected-absent");                     // Highlight absent
-        }
-    });
-        document.querySelectorAll(".report-card").forEach(updateCardTotals);            // Initialize totals on page load
+        document.querySelectorAll(".report-card").forEach(updateCardTotals);
     });
     </script>
-  
-    <!-- ------------------------------------------------------- -->
-    <!-- Report Interactions                                      -->
-    <!-- ------------------------------------------------------- -->
-    <!-- Validate Required IDs Before Confirm                    -->
-    <!-- ------------------------------------------------------- -->
+
     <script>
-    document.addEventListener("DOMContentLoaded", function () {                     // Wait until page is fully loaded
+    document.addEventListener("DOMContentLoaded", function () {
+        document.querySelectorAll(".confirm-btn").forEach(button => {
+            button.addEventListener("click", async () => {
+                const schoolId = button.dataset.schoolId;
+                const runId = button.dataset.runId;
+                const card = button.closest(".report-card");
+                const input = card ? card.querySelector(".confirm-input") : null;
+                const confirmedBy = input?.value?.trim();
 
-        document.querySelectorAll(".confirm-btn").forEach(button => {               // Loop all confirm buttons
-            button.addEventListener("click", async () => {                          // Handle click
-
-                const schoolId = button.dataset.schoolId;                           // Read school id from button
-                const runId = button.dataset.runId;                                 // Read run id from button
-                const card = button.closest(".report-card");                        // Find the current run card
-                const input = card ? card.querySelector(".confirm-input") : null;   // Find confirmer input safely
-                const confirmedBy = input?.value?.trim();                           // Get typed name
-
-                if (!schoolId || !runId) {                                          // Ensure required ids exist
-                    alert("Missing school or run id on confirm button.");           // Stop broken request
+                if (!schoolId || !runId) {
+                    alert("Missing school or run id on confirm button.");
                     return;
                 }
 
-                if (!confirmedBy) {                                                 // Require real name
-                    alert("Please enter your name before confirming.");             // Block empty input
+                if (!confirmedBy) {
+                    alert("Please enter your name before confirming.");
                     return;
                 }
 
                 try {
                     const response = await fetch(
-                        `/reports/school/${schoolId}/confirm/${runId}`,             // Confirmation endpoint
+                        `/reports/school/${schoolId}/confirm/${runId}`,
                         {
-                            method: "POST",                                         // Send POST request
+                            method: "POST",
                             headers: {
-                                "Content-Type": "application/json"                  // JSON request body
+                                "Content-Type": "application/json"
                             },
                             body: JSON.stringify({
-                                confirmed_by: confirmedBy                           // Send confirmer name
+                                confirmed_by: confirmedBy
                             })
                         }
                     );
 
-                    const data = await response.json();                             // Read backend response body
+                    const data = await response.json();
 
-                    if (!response.ok) {                                             // Stop if backend returned error
-                        const errorMessage = typeof data.detail === "string"        // If backend sent plain text
-                            ? data.detail
-                            : JSON.stringify(data.detail || data);                  // Convert object/array to readable text
-
-                        throw new Error(errorMessage);                              // Show readable backend error
+                    if (!response.ok) {
+                        throw new Error(data.detail || "Confirmation failed");
                     }
 
-                    const badge = card ? card.querySelector(".confirmation-text") : null;  // Find badge text safely
-
-                    if (badge) {                                                    // Update badge only if found
-                        badge.textContent = `Confirmed by ${data.confirmed_by}`;    // Update confirmation label
-                        badge.classList.remove("not-confirmed");                    // Remove red state
-                        badge.classList.add("confirmed");                           // Add green state
+                    const badge = card ? card.querySelector(".confirmation-text") : null;
+                    if (badge) {
+                        badge.textContent = `Confirmed by ${data.confirmed_by}`;
+                        badge.classList.remove("not-confirmed");
+                        badge.classList.add("confirmed");
                     }
 
                     if (card) {
-                        const action = card.querySelector(".confirm-action");       // Find full confirm section
+                        const action = card.querySelector(".confirm-action");
                         if (action) {
-                            action.style.display = "none";                          // Hide button + input together
+                            action.style.display = "none";
                         }
-                    }
-                    // -------------------------------------------------------
-                    // Lock student actions after successful confirmation
-                    // -------------------------------------------------------
-                    if (card) {
-                        card.querySelectorAll(".school-check").forEach(section => {                 // Loop all school-check areas
-                            section.innerHTML = '<span class="confirmation-text confirmed">Locked after confirmation</span>';
+
+                        card.querySelectorAll(".school-check").forEach(section => {
+                            section.innerHTML = '<span class="locked-note">Locked after confirmation</span>';
                         });
                     }
-
                 } catch (error) {
-                    console.error(error);                                           // Log error in console
-                    alert(error.message);                                           // Show error message
+                    alert(error.message);
                 }
-            
             });
         });
     });

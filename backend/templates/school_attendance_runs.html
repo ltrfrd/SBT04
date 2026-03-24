@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>School Attendance Runs</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 16px;
+            background: #f4f6f8;
+            color: #222;
+        }
+
+        .page {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .panel {
+            background: #ffffff;
+            border-radius: 12px;
+            padding: 18px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .title {
+            margin: 0;
+            font-size: 26px;
+        }
+
+        .back-link {
+            padding: 8px 14px;
+            border-radius: 6px;
+            background: #e5e7eb;
+            color: #111827;
+            text-decoration: none;
+        }
+
+        .subtitle {
+            margin: 0 0 18px 0;
+            color: #4b5563;
+        }
+
+        .run-list {
+            display: grid;
+            gap: 12px;
+        }
+
+        .run-link {
+            display: block;
+            padding: 14px 16px;
+            border-radius: 10px;
+            background: #eef2f6;
+            color: #111827;
+            text-decoration: none;
+            border: 1px solid #d9dee5;
+        }
+
+        .run-name {
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .run-meta {
+            margin-top: 6px;
+            color: #4b5563;
+            font-size: 14px;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .confirmed {
+            color: #15803d;
+            font-weight: 700;
+        }
+
+        .not-confirmed {
+            color: #b91c1c;
+            font-weight: 700;
+        }
+
+        .empty-note {
+            color: #777;
+            font-size: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="panel">
+            <div class="header">
+                <h1 class="title">Route {{ report.route.route_number }} Runs</h1>
+                <a class="back-link" href="/reports/school/{{ report.school_id }}/mobile">Back to Routes</a>
+            </div>
+
+            <p class="subtitle">
+                <strong>School:</strong> {{ report.school_name }}<br>
+                <strong>Total Runs:</strong> {{ report.total_runs }}
+            </p>
+
+            {% if report.route.runs %}
+                <div class="run-list">
+                    {% for run in report.route.runs %}
+                    {% set confirmation = run.get("confirmation", {}) %}
+                    <a class="run-link" href="/reports/school/{{ report.school_id }}/mobile/run/{{ run.run_id }}">
+                        <div class="run-name">{{ run.run_type }} Run</div>
+                        <div class="run-meta">
+                            <span>Date: {{ run.date }}</span>
+                            <span>Driver: {{ run.driver_name or "Unassigned" }}</span>
+                            <span>Students: {{ run.total_students }}</span>
+                            {% if confirmation.get("is_confirmed") %}
+                                <span class="confirmed">Confirmed</span>
+                            {% else %}
+                                <span class="not-confirmed">Not Confirmed</span>
+                            {% endif %}
+                        </div>
+                    </a>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="empty-note">No runs found for this route.</p>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

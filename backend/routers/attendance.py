@@ -444,20 +444,88 @@ def get_school_mobile_attendance(
     request: Request,                                         # FastAPI request object
     db: Session = Depends(get_db),                            # Database session
 ):
-
-    report_data = attendance_generator.generate_attendance(   # Generate school attendance data
+    report_data = attendance_generator.school_routes_summary(  # Generate school route list
         db=db,                                                 # Pass DB session
-        attendance_type="school",                              # School attendance mode
-        ref_id=school_id,                                      # School reference
-    )                                                          # Attendance payload
+        school_id=school_id,                                   # Requested school
+    )                                                          # Navigation payload
+
+    if "error" in report_data:                                 # Reject unknown school requests
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=report_data["error"],
+        )
 
     return templates.TemplateResponse(                        # Render mobile HTML template
-        "school_mobile_report.html",                           # Mobile template file
+        "school_attendance_routes.html",                       # Route landing template file
         {
             "request": request,                                # Required by Jinja templates
             "report": report_data,                             # School attendance data
         },
     )                                                          # Return rendered page
+
+
+# -----------------------------------------------------------
+# - School route attendance run list
+# - Shows runs for one selected school route
+# -----------------------------------------------------------
+@router.get("/school/{school_id}/mobile/route/{route_id}")   # Mobile school route page
+def get_school_mobile_route_runs(
+    school_id: int,                                           # Requested school
+    route_id: int,                                            # Requested route
+    request: Request,                                         # FastAPI request object
+    db: Session = Depends(get_db),                            # Database session
+):
+    report_data = attendance_generator.school_route_runs_summary(
+        db=db,                                                # Pass DB session
+        school_id=school_id,                                  # Requested school
+        route_id=route_id,                                    # Requested route
+    )                                                         # Route runs payload
+
+    if "error" in report_data:                                # Reject unknown route requests
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=report_data["error"],
+        )
+
+    return templates.TemplateResponse(                        # Render route run list template
+        "school_attendance_runs.html",                        # Route run list template file
+        {
+            "request": request,                               # Required by Jinja templates
+            "report": report_data,                            # Route runs payload
+        },
+    )                                                         # Return rendered page
+
+
+# -----------------------------------------------------------
+# - School single run attendance report
+# - Shows one selected run only
+# -----------------------------------------------------------
+@router.get("/school/{school_id}/mobile/run/{run_id}")       # Mobile school run page
+def get_school_mobile_single_run(
+    school_id: int,                                           # Requested school
+    run_id: int,                                              # Requested run
+    request: Request,                                         # FastAPI request object
+    db: Session = Depends(get_db),                            # Database session
+):
+    report_data = attendance_generator.school_single_run_summary(
+        db=db,                                                # Pass DB session
+        school_id=school_id,                                  # Requested school
+        run_id=run_id,                                        # Requested run
+    )                                                         # Single run payload
+
+    if "error" in report_data:                                # Reject unknown run requests
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=report_data["error"],
+        )
+
+    return templates.TemplateResponse(                        # Render single-run template
+        "school_mobile_report.html",                          # Single run report template
+        {
+            "request": request,                               # Required by Jinja templates
+            "report": report_data,                            # Single run payload
+        },
+    )                                                         # Return rendered page
 # -------------------------------------------------------------------------
 # Request Schema - School Student Status Update
 # -------------------------------------------------------------------------
@@ -481,15 +549,39 @@ def update_school_status(                                  # Handler function
             detail="Invalid payload"
         )
 
-    assignment = db.query(StudentRunAssignment).filter(    # Query assignment record
-        StudentRunAssignment.student_id == payload.student_id,   # Match student
-        StudentRunAssignment.run_id == payload.run_id            # Match run
-    ).first()                                              # Get first match
+    assignment = (
+        db.query(StudentRunAssignment)                     # Query assignment record
+        .options(joinedload(StudentRunAssignment.student)) # Load student for school verification
+        .filter(
+            StudentRunAssignment.student_id == payload.student_id,   # Match student
+            StudentRunAssignment.run_id == payload.run_id            # Match run
+        )
+        .first()
+    )                                                     # Get first match
 
     if not assignment:                                     # If no record found
         raise HTTPException(
             status_code=404,
             detail="Assignment not found"
+        )
+
+    school_id = assignment.student.school_id if assignment.student else None   # Resolve owning school
+    verification = None                                                        # Default no confirmation
+
+    if school_id is not None:                                                  # Check school/run confirmation
+        verification = (
+            db.query(SchoolAttendanceVerification)
+            .filter(
+                SchoolAttendanceVerification.school_id == school_id,            # Match school
+                SchoolAttendanceVerification.run_id == payload.run_id,          # Match run
+            )
+            .first()
+        )
+
+    if verification:                                                           # Lock updates after confirmation
+        raise HTTPException(
+            status_code=400,
+            detail="Attendance already confirmed for this run",
         )
 
     assignment.school_status = payload.status              # Save school-layer status

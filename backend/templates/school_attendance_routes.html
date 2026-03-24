@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>School Attendance Routes</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 16px;
+            background: #f4f6f8;
+            color: #222;
+        }
+
+        .page {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .panel {
+            background: #ffffff;
+            border-radius: 12px;
+            padding: 18px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+        }
+
+        .title {
+            margin: 0 0 8px 0;
+            font-size: 26px;
+        }
+
+        .subtitle {
+            margin: 0 0 18px 0;
+            color: #4b5563;
+        }
+
+        .route-list {
+            display: grid;
+            gap: 12px;
+        }
+
+        .route-link {
+            display: block;
+            padding: 14px 16px;
+            border-radius: 10px;
+            background: #eef2f6;
+            color: #111827;
+            text-decoration: none;
+            border: 1px solid #d9dee5;
+        }
+
+        .route-name {
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .route-meta {
+            margin-top: 6px;
+            color: #4b5563;
+            font-size: 14px;
+        }
+
+        .empty-note {
+            color: #777;
+            font-size: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="panel">
+            <h1 class="title">School Attendance</h1>
+            <p class="subtitle">
+                <strong>School:</strong> {{ report.school_name }}<br>
+                <strong>Routes Assigned:</strong> {{ report.total_routes }}
+            </p>
+
+            {% if report.routes %}
+                <div class="route-list">
+                    {% for route in report.routes %}
+                    <a class="route-link" href="/reports/school/{{ report.school_id }}/mobile/route/{{ route.route_id }}">
+                        <div class="route-name">Route {{ route.route_number }}</div>
+                        <div class="route-meta">Runs available: {{ route.total_runs }}</div>
+                    </a>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="empty-note">No routes found for this school.</p>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
