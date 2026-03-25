@@ -12,9 +12,6 @@ from pydantic import BaseModel, ConfigDict
 # Driver assignment payload
 # -----------------------------------------------------------
 class RouteDriverAssignmentBase(BaseModel):
-    is_primary: bool = False
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
     active: bool = True
 
 

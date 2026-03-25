@@ -49,74 +49,11 @@ def _serialize_route(route: Route) -> RouteOut:
                 route_id=assignment.route_id,
                 driver_id=assignment.driver_id,
                 driver_name=assignment.driver.name if assignment.driver else None,
-                is_primary=assignment.is_primary,
-                start_date=assignment.start_date,
-                end_date=assignment.end_date,
                 active=assignment.active,
             )
             for assignment in route.driver_assignments
         ],
     )
-
-
-# -----------------------------------------------------------
-# - Route assignment writer
-# - Keep one active driver assignment per route
-# -----------------------------------------------------------
-def _assign_driver_to_route(
-    route: Route,
-    driver_id: int,
-    db: Session,
-    assignment_in: RouteDriverAssignmentCreate | None = None,
-) -> RouteDriverAssignment:
-    driver = db.get(Driver, driver_id)  # Validate assigned driver exists
-    if not driver:
-        raise HTTPException(status_code=404, detail="Driver not found")
-
-    payload = assignment_in or RouteDriverAssignmentCreate()  # Default active assignment payload
-
-    existing_assignment = (
-        db.query(RouteDriverAssignment)
-        .filter(RouteDriverAssignment.route_id == route.id)
-        .filter(RouteDriverAssignment.driver_id == driver_id)
-        .filter(RouteDriverAssignment.active.is_(True))
-        .order_by(RouteDriverAssignment.id.desc())
-        .first()
-    )  # Reuse current active assignment when present
-
-    if payload.active is True:
-        active_assignments = (
-            db.query(RouteDriverAssignment)
-            .filter(RouteDriverAssignment.route_id == route.id)
-            .filter(RouteDriverAssignment.active.is_(True))
-            .all()
-        )  # Existing active assignments for this route
-
-        for assignment in active_assignments:
-            if existing_assignment and assignment.id == existing_assignment.id:
-                continue
-            assignment.active = False  # New assignment replaces the old active assignment
-
-    if existing_assignment:
-        existing_assignment.active = payload.active
-        existing_assignment.start_date = payload.start_date
-        existing_assignment.end_date = payload.end_date
-        existing_assignment.is_primary = payload.is_primary
-        db.flush()
-        return existing_assignment
-
-    new_assignment = RouteDriverAssignment(
-        route_id=route.id,
-        driver_id=driver_id,
-        is_primary=payload.is_primary,
-        start_date=payload.start_date,
-        end_date=payload.end_date,
-        active=payload.active,
-    )
-    db.add(new_assignment)
-    db.flush()
-    return new_assignment
-
 
 # -----------------------------------------------------------
 # - Create route without driver assignment
@@ -213,19 +150,58 @@ def get_route_schools(route_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Route not found")
 
     return [{"id": s.id, "name": s.name, "address": s.address} for s in route.schools]
-
-
 # -----------------------------------------------------------
 # - Assign driver to route
-# - Replace any existing active route assignment
+# - Enforce one active driver per route
+# -----------------------------------------------------------
+def _assign_driver_to_route(
+    route: Route,
+    driver_id: int,
+    db: Session,
+) -> RouteDriverAssignment:
+
+    driver = db.get(Driver, driver_id)                           # Validate driver exists
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+
+    # -----------------------------------------------------------
+    # Deactivate all current active assignments
+    # -----------------------------------------------------------
+    active_assignments = (
+        db.query(RouteDriverAssignment)
+        .filter(RouteDriverAssignment.route_id == route.id)
+        .filter(RouteDriverAssignment.active.is_(True))
+        .all()
+    )
+
+    for assignment in active_assignments:
+        assignment.active = False                                # Only one active driver allowed
+
+    # -----------------------------------------------------------
+    # Create new active assignment
+    # -----------------------------------------------------------
+    new_assignment = RouteDriverAssignment(
+        route_id=route.id,
+        driver_id=driver_id,
+        active=True,
+    )
+
+    db.add(new_assignment)
+    db.flush()
+
+    return new_assignment
+
+# -----------------------------------------------------------
+# - Assign driver to route endpoint
+# - Calls helper to enforce assignment rule
 # -----------------------------------------------------------
 @router.post("/{route_id}/assign_driver/{driver_id}", response_model=RouteDriverAssignmentOut)
 def assign_driver_to_route(
     route_id: int,
     driver_id: int,
-    assignment_in: RouteDriverAssignmentCreate | None = None,
     db: Session = Depends(get_db),
 ):
+
     route = (
         db.query(Route)
         .options(joinedload(Route.driver_assignments).joinedload(RouteDriverAssignment.driver))
@@ -235,7 +211,8 @@ def assign_driver_to_route(
     if not route:
         raise HTTPException(status_code=404, detail="Route not found")
 
-    assignment = _assign_driver_to_route(route, driver_id, db, assignment_in)
+    assignment = _assign_driver_to_route(route, driver_id, db)
+
     db.commit()
     db.refresh(assignment)
 
@@ -244,13 +221,8 @@ def assign_driver_to_route(
         route_id=assignment.route_id,
         driver_id=assignment.driver_id,
         driver_name=assignment.driver.name if assignment.driver else None,
-        is_primary=assignment.is_primary,
-        start_date=assignment.start_date,
-        end_date=assignment.end_date,
         active=assignment.active,
     )
-
-
 # -----------------------------------------------------------
 # Route driver assignment list
 # - Return drivers assigned to one route
@@ -272,9 +244,6 @@ def get_route_drivers(route_id: int, db: Session = Depends(get_db)):
             route_id=assignment.route_id,
             driver_id=assignment.driver_id,
             driver_name=assignment.driver.name if assignment.driver else None,
-            is_primary=assignment.is_primary,
-            start_date=assignment.start_date,
-            end_date=assignment.end_date,
             active=assignment.active,
         )
         for assignment in route.driver_assignments
@@ -297,11 +266,11 @@ def unassign_driver_from_route(route_id: int, driver_id: int, db: Session = Depe
     if not assignments:
         raise HTTPException(status_code=404, detail="Active route-driver assignment not found")
 
-    today = datetime.now(timezone.utc).date()  # Shared deactivation date
+    # -----------------------------------------------------------
+    # - Deactivate assignment
+    # - No date tracking needed in current model
+    # -----------------------------------------------------------
     for assignment in assignments:
         assignment.active = False
-        if assignment.end_date is None or assignment.end_date > today:
-            assignment.end_date = today
-
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
