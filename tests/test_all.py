@@ -24,6 +24,38 @@ from tests.conftest import client
 # Project Models (used directly in tests)
 # =============================================================================
 
+
+# -----------------------------------------------------------
+# Route-driver test helpers
+# - Keep migration setup consistent across tests
+# -----------------------------------------------------------
+def _create_route_with_assignment_flow(
+    client,
+    route_number: str,
+    unit_number: str,
+    driver_id: int | None = None,
+    school_ids: list[int] | None = None,
+):
+    route_response = client.post(
+        "/routes/",
+        json={
+            "route_number": route_number,
+            "unit_number": unit_number,
+            "school_ids": school_ids or [],
+        },
+    )
+    assert route_response.status_code in (200, 201)
+    route = route_response.json()
+
+    if driver_id is not None:
+        assignment_response = client.post(
+            f"/routes/{route['id']}/assign_driver/{driver_id}",
+            json={"is_primary": True},
+        )
+        assert assignment_response.status_code in (200, 201)
+
+    return route
+
 def test_root(client):
     r = client.get("/")
     assert r.status_code == 200
@@ -73,11 +105,10 @@ def test_websocket_gps(client):
     client.post("/drivers/", json={"name": "D", "email": "d@d.com", "phone": "000"})
     client.post("/login", json={"driver_id": 1})
 
-    r = client.post("/routes/", json={"route_number": "R1", "unit_number": "Test", "driver_id": 1})
-    assert r.status_code in (200, 201)
-    route_id = r.json()["id"]
+    route = _create_route_with_assignment_flow(client, "R1", "Test", driver_id=1)
+    route_id = route["id"]
 
-    r = client.post("/runs/start", json={"driver_id": 1, "route_id": route_id, "run_type": "AM"})
+    r = client.post("/runs/start", json={"route_id": route_id, "run_type": "AM"})
     assert r.status_code in (200, 201)
     run_id = r.json()["id"]
 
@@ -95,11 +126,10 @@ def test_alerts(client):
 
     client.post("/login", json={"driver_id": driver_id})
 
-    r = client.post("/routes/", json={"route_number": "R1", "unit_number": "Bus-01", "driver_id": driver_id})
-    assert r.status_code in (200, 201)
-    route_id = r.json()["id"]
+    route = _create_route_with_assignment_flow(client, "R1", "Bus-01", driver_id=driver_id)
+    route_id = route["id"]
 
-    r = client.post("/runs/start", json={"driver_id": driver_id, "route_id": route_id, "run_type": "AM"})
+    r = client.post("/runs/start", json={"route_id": route_id, "run_type": "AM"})
     assert r.status_code in (200, 201)
     run_id = r.json()["id"]
 
@@ -135,6 +165,158 @@ def test_alerts(client):
         ws.send_json({"lat": 40.7580, "lng": -73.9855})
         data = ws.receive_json()
         assert "progress" in data
+
+
+# -----------------------------------------------------------
+# Route-driver migration flow
+# - Verify route assignment workflow and run driver derivation
+# -----------------------------------------------------------
+def test_route_driver_assignment_flow(client):
+    driver = client.post(
+        "/drivers/",
+        json={"name": "Assigned Driver", "email": "assigned.driver@test.com", "phone": "10001"},
+    )
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]
+
+    school = client.post(
+        "/schools/",
+        json={"name": "Assignment School", "address": "100 Assignment Ave"},
+    )
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]
+
+    route = client.post(
+        "/routes/",
+        json={"route_number": "ASSIGN-1", "unit_number": "BUS-ASSIGN-1", "school_ids": [school_id]},
+    )
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+    assert route.json()["active_driver_id"] is None
+
+    assign = client.post(
+        f"/routes/{route_id}/assign_driver/{driver_id}",
+        json={"is_primary": True},
+    )
+    assert assign.status_code in (200, 201)
+    assert assign.json()["driver_id"] == driver_id
+    assert assign.json()["is_primary"] is True
+
+    route_after_assign = client.get(f"/routes/{route_id}")
+    assert route_after_assign.status_code == 200
+    assert route_after_assign.json()["active_driver_id"] == driver_id
+    assert route_after_assign.json()["active_driver_name"] == "Assigned Driver"
+
+    route_drivers = client.get(f"/routes/{route_id}/drivers")
+    assert route_drivers.status_code == 200
+    assert len(route_drivers.json()) == 1
+    assert route_drivers.json()[0]["driver_id"] == driver_id
+
+    driver_routes = client.get(f"/drivers/{driver_id}/routes")
+    assert driver_routes.status_code == 200
+    assert [item["id"] for item in driver_routes.json()] == [route_id]
+
+
+def test_create_run_uses_primary_route_assignment(client):
+    primary_driver = client.post(
+        "/drivers/",
+        json={"name": "Primary Route Driver", "email": "primary.route.driver@test.com", "phone": "10002"},
+    )
+    backup_driver = client.post(
+        "/drivers/",
+        json={"name": "Backup Route Driver", "email": "backup.route.driver@test.com", "phone": "10003"},
+    )
+    assert primary_driver.status_code in (200, 201)
+    assert backup_driver.status_code in (200, 201)
+
+    route = client.post(
+        "/routes/",
+        json={"route_number": "RUN-PRIMARY", "unit_number": "BUS-RUN-PRIMARY"},
+    )
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    first_assign = client.post(
+        f"/routes/{route_id}/assign_driver/{backup_driver.json()['id']}",
+        json={"is_primary": False},
+    )
+    second_assign = client.post(
+        f"/routes/{route_id}/assign_driver/{primary_driver.json()['id']}",
+        json={"is_primary": True},
+    )
+    assert first_assign.status_code in (200, 201)
+    assert second_assign.status_code in (200, 201)
+
+    run = client.post("/runs/", json={"route_id": route_id, "run_type": "AM"})
+    assert run.status_code in (200, 201)
+    assert run.json()["driver_id"] == primary_driver.json()["id"]
+    assert run.json()["driver_name"] == "Primary Route Driver"
+
+
+def test_create_run_fails_without_active_route_driver_assignment(client):
+    route = client.post(
+        "/routes/",
+        json={"route_number": "NO-DRIVER", "unit_number": "BUS-NO-DRIVER"},
+    )
+    assert route.status_code in (200, 201)
+
+    run = client.post("/runs/", json={"route_id": route.json()["id"], "run_type": "AM"})
+    assert run.status_code == 409
+    assert run.json()["detail"] == "Route has no active driver assignment"
+
+
+def test_create_run_fails_with_multiple_active_non_primary_assignments(client):
+    driver_one = client.post(
+        "/drivers/",
+        json={"name": "Multi Driver One", "email": "multi.driver.one@test.com", "phone": "10004"},
+    )
+    driver_two = client.post(
+        "/drivers/",
+        json={"name": "Multi Driver Two", "email": "multi.driver.two@test.com", "phone": "10005"},
+    )
+    assert driver_one.status_code in (200, 201)
+    assert driver_two.status_code in (200, 201)
+
+    route = client.post(
+        "/routes/",
+        json={"route_number": "MULTI-ROUTE", "unit_number": "BUS-MULTI"},
+    )
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    assign_one = client.post(
+        f"/routes/{route_id}/assign_driver/{driver_one.json()['id']}",
+        json={"is_primary": False},
+    )
+    assign_two = client.post(
+        f"/routes/{route_id}/assign_driver/{driver_two.json()['id']}",
+        json={"is_primary": False},
+    )
+    assert assign_one.status_code in (200, 201)
+    assert assign_two.status_code in (200, 201)
+
+    run = client.post("/runs/start", json={"route_id": route_id, "run_type": "AM"})
+    assert run.status_code == 409
+    assert run.json()["detail"] == "Route has multiple active driver assignments without a single primary"
+
+
+def test_unassign_driver_blocks_future_run_creation(client):
+    driver = client.post(
+        "/drivers/",
+        json={"name": "Unassign Driver", "email": "unassign.driver@test.com", "phone": "10006"},
+    )
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]
+
+    route = _create_route_with_assignment_flow(client, "UNASSIGN-1", "BUS-UNASSIGN-1", driver_id=driver_id)
+    route_id = route["id"]
+
+    unassign = client.delete(f"/routes/{route_id}/unassign_driver/{driver_id}")
+    assert unassign.status_code == 204
+
+    run = client.post("/runs/", json={"route_id": route_id, "run_type": "AM"})
+    assert run.status_code == 409
+    assert run.json()["detail"] == "Route has no active driver assignment"
 
 
 # =============================================================================
@@ -2092,29 +2274,19 @@ def test_get_school_mobile_attendance_report(client):
     # -------------------------------------------------------------------------
     # Create route assigned to the school
     # -------------------------------------------------------------------------
-    route = client.post(
-        "/routes/",
-        json={
-            "route_number": "R-MOBILE",
-            "unit_number": "Bus-HTML",
-            "driver_id": driver_id,
-            "school_ids": [school_id],
-        },
+    route = _create_route_with_assignment_flow(
+        client,
+        "R-MOBILE",
+        "Bus-HTML",
+        driver_id=driver_id,
+        school_ids=[school_id],
     )
-    assert route.status_code in (200, 201)
-    route_id = route.json()["id"]  # Save route ID
+    route_id = route["id"]  # Save route ID
 
     # -------------------------------------------------------------------------
     # Create run
     # -------------------------------------------------------------------------
-    run = client.post(
-        "/runs/",
-        json={
-            "driver_id": driver_id,
-            "route_id": route_id,
-            "run_type": "AM",
-        },
-    )
+    run = client.post("/runs/", json={"route_id": route_id, "run_type": "AM"})
     assert run.status_code in (200, 201)
     run_id = run.json()["id"]  # Save run ID
 
@@ -2251,29 +2423,19 @@ def test_school_confirmation_persists_after_refresh(client):
     # -------------------------------------------------------------------------
     # Create route linked to school                                     # route
     # -------------------------------------------------------------------------
-    route = client.post(
-        "/routes/",
-        json={
-            "route_number": "R1",
-            "unit_number": "Bus-01",
-            "driver_id": driver_id,
-            "school_ids": [school_id],                                  # attach school
-        },
+    route = _create_route_with_assignment_flow(
+        client,
+        "R1",
+        "Bus-01",
+        driver_id=driver_id,
+        school_ids=[school_id],
     )
-    assert route.status_code in (200, 201)
-    route_id = route.json()["id"]                                       # save id
+    route_id = route["id"]                                              # save id
 
     # -------------------------------------------------------------------------
     # Create run                                                        # run
     # -------------------------------------------------------------------------
-    run = client.post(
-        "/runs/",
-        json={
-            "driver_id": driver_id,
-            "route_id": route_id,
-            "run_type": "AM",
-        },
-    )
+    run = client.post("/runs/", json={"route_id": route_id, "run_type": "AM"})
     assert run.status_code in (200, 201)
     run_id = run.json()["id"]                                           # save id
 
@@ -2339,29 +2501,19 @@ def test_update_school_status(client, db_engine):                              #
     # -------------------------------------------------------------------------
     # Create route linked to school
     # -------------------------------------------------------------------------
-    route = client.post(
-        "/routes/",
-        json={
-            "route_number": "R1",
-            "unit_number": "Bus-01",
-            "driver_id": driver_id,
-            "school_ids": [school_id],
-        },
+    route = _create_route_with_assignment_flow(
+        client,
+        "R1",
+        "Bus-01",
+        driver_id=driver_id,
+        school_ids=[school_id],
     )
-    assert route.status_code in (200, 201)                                     # Confirm route created
-    route_id = route.json()["id"]                                              # Save route ID
+    route_id = route["id"]                                                     # Save route ID
 
     # -------------------------------------------------------------------------
     # Create run
     # -------------------------------------------------------------------------
-    run = client.post(
-        "/runs/",
-        json={
-            "driver_id": driver_id,
-            "route_id": route_id,
-            "run_type": "AM",
-        },
-    )
+    run = client.post("/runs/", json={"route_id": route_id, "run_type": "AM"})
     assert run.status_code in (200, 201)                                       # Confirm run created
     run_id = run.json()["id"]                                                  # Save run ID
 
@@ -2459,19 +2611,6 @@ def _build_school_attendance_fixture(client):
     )
     assert driver.status_code in (200, 201)
     driver_id = driver.json()["id"]                                # Save driver ID
-        # -------------------------------------------------------------------------
-    # Create second driver for second run
-    # -------------------------------------------------------------------------
-    driver_2 = client.post(
-        "/drivers/",
-        json={
-            "name": f"School Driver Two-{unique}",                         # Second driver display name
-            "email": f"school-driver-two-{unique}@test.com",              # Unique second driver email
-            "phone": f"22222-{unique}",                                   # Second driver phone
-        },
-    )
-    assert driver_2.status_code in (200, 201)
-    driver_2_id = driver_2.json()["id"]                                   # Save second driver ID
     # -------------------------------------------------------------------------
     # Create school
     # -------------------------------------------------------------------------
@@ -2518,14 +2657,18 @@ def _build_school_attendance_fixture(client):
     )
     assert run_1.status_code in (200, 201)
     run_1_id = run_1.json()["id"]                                  # Save run 1 ID
-
+    # -------------------------------------------------------------------------
+    # Complete run 1 so the same route driver can create run 2
+    # -------------------------------------------------------------------------
+    complete_run_1 = client.post(f"/runs/{run_1_id}/complete")
+    assert complete_run_1.status_code == 200
     # -------------------------------------------------------------------------
     # Create run 2
     # -------------------------------------------------------------------------
     run_2 = client.post(
         "/runs/",
         json={
-            "driver_id": driver_2_id,                                      # Use second driver to avoid active-run conflict
+            "driver_id": driver_id,                                      # Use second driver to avoid active-run conflict
             "route_id": route_id,
             "run_type": "AM",
         },

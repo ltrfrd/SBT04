@@ -47,6 +47,7 @@ from backend.routers import (
 from backend.utils import gps_tools
 from backend.utils import attendance_generator
 from backend.utils.auth import get_current_driver, login_driver, logout_driver
+from backend.utils.route_driver_assignment import get_route_driver_name
 
 # ---------- WEBSOCKET TRACKING ----------
 # Active WebSocket connections per run_id (real-time GPS broadcasting)
@@ -178,7 +179,7 @@ def route_report(route_id: int, request: Request, db: Session = Depends(get_db))
         raise HTTPException(status_code=404, detail=route_data["error"])
 
     route = db.get(route_model.Route, route_id)
-    driver_name = route.driver.name if route and route.driver else "Unassigned"
+    driver_name = get_route_driver_name(route) if route else None
     return templates.TemplateResponse(
         request,                                              # New Starlette signature: request first
             "route_report.html",                                  # Template name
@@ -186,7 +187,7 @@ def route_report(route_id: int, request: Request, db: Session = Depends(get_db))
             "request": request,
             "route": route,
             "route_data": route_data,
-            "driver_name": driver_name
+            "driver_name": driver_name or "Unassigned"
             }
         )
 

@@ -26,7 +26,7 @@ class RunType(str, Enum):
 # Logic
 # -----------------------------
 class RunStart(BaseModel):
-    driver_id: int  # Driver starting the run
+    driver_id: int | None = None  # Compatibility shim: validated against route assignment
     route_id: int  # Route being run
     run_type: RunType  # AM / MIDDAY / PM / EXTRA
 

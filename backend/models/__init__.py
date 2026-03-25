@@ -6,7 +6,7 @@ from .stop import Stop, StopType
 from .run import Run
 from .dispatch import Payroll
 from .run_event import RunEvent
-from .associations import route_schools, StudentRunAssignment
+from .associations import route_schools, StudentRunAssignment, RouteDriverAssignment
 from .student_bus_absence import StudentBusAbsence, StudentBusAbsenceSource
 from .school_attendance_verification import SchoolAttendanceVerification  # New school confirmation model
 __all__ = [
@@ -20,6 +20,7 @@ __all__ = [
     "Payroll",
     "route_schools",
     "StudentRunAssignment",
+    "RouteDriverAssignment",
     "RunEvent",
     "StudentBusAbsence",
     "StudentBusAbsenceSource",

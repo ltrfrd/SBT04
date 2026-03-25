@@ -9,7 +9,11 @@ from typing import List
 from database import get_db
 from backend import schemas
 from backend.models import driver as driver_model
+from backend.models.associations import RouteDriverAssignment
+from backend.models.route import Route
 from backend.schemas.driver import DriverUpdate
+from backend.schemas.route import RouteOut
+from backend.routers.route import _serialize_route
 
 # -----------------------------------------------------------
 # Router setup
@@ -46,6 +50,25 @@ def get_driver(driver_id: int, db: Session = Depends(get_db)):
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
     return driver
+
+
+# -----------------------------------------------------------
+# READ: Get routes for one driver
+# -----------------------------------------------------------
+@router.get("/{driver_id}/routes", response_model=List[RouteOut])
+def get_driver_routes(driver_id: int, db: Session = Depends(get_db)):
+    driver = db.get(driver_model.Driver, driver_id)
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+
+    routes = (
+        db.query(Route)
+        .join(RouteDriverAssignment, RouteDriverAssignment.route_id == Route.id)
+        .filter(RouteDriverAssignment.driver_id == driver_id)
+        .distinct()
+        .all()
+    )
+    return [_serialize_route(route) for route in routes]
 
 
 # -----------------------------------------------------------

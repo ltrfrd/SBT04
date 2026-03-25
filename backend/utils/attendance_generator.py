@@ -25,6 +25,7 @@ from backend.models.school_attendance_verification import SchoolAttendanceVerifi
 from database import get_db  # Shared DB dependency
 from backend.utils import attendance_generator  # Attendance utility functions
 from backend.routers import student_bus_absence  # Re-export planned absence router through attendance layer
+from backend.utils.route_driver_assignment import get_route_driver_name, resolve_route_driver_assignment
 
 router = APIRouter(
     prefix="/reports",  # Keep existing path stable during the rename phase
@@ -82,6 +83,13 @@ def route_summary(db: Session, route_id: int) -> dict:
     if not r:
         return {"error": "Route not found"}  # Return stable missing-route payload
 
+    active_driver_id = None  # Default unresolved route driver
+    try:
+        active_assignment = resolve_route_driver_assignment(r)  # Resolve active route driver
+        active_driver_id = active_assignment.driver_id
+    except ValueError:
+        active_assignment = None  # Leave unresolved when route has no active driver
+
     schools_list = [{"id": s.id, "name": s.name} for s in r.schools]  # Serialize assigned schools
 
     stops_list = []
@@ -125,7 +133,9 @@ def route_summary(db: Session, route_id: int) -> dict:
         "route_number": r.route_number,
         "unit_number": r.unit_number,
         "num_runs": r.num_runs,
-        "driver_id": r.driver_id,
+        "driver_id": active_driver_id,  # Compatibility shim for existing report payloads
+        "active_driver_id": active_driver_id,
+        "active_driver_name": get_route_driver_name(r),
         "schools": schools_list,
         "stops": stops_list,
         "students": students_list,

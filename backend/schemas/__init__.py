@@ -26,7 +26,12 @@ from .school import SchoolCreate, SchoolOut  # School creation and response sche
 # -------------------------------------------------------------------------
 # Route schemas
 # -------------------------------------------------------------------------
-from .route import RouteCreate, RouteOut  # Route creation and response schemas
+from .route import (
+    RouteCreate,
+    RouteOut,
+    RouteDriverAssignmentCreate,
+    RouteDriverAssignmentOut,
+)  # Route creation and response schemas
 
 
 # -------------------------------------------------------------------------
@@ -84,6 +89,8 @@ __all__ = [
 
     "RouteCreate",
     "RouteOut",
+    "RouteDriverAssignmentCreate",
+    "RouteDriverAssignmentOut",
 
     "StopCreate",
     "StopOut",

@@ -49,6 +49,7 @@ from backend.models.run import Run                            # Run model
 from backend.models.student import Student                      # Student model
 from backend.models.stop import Stop                            # Stop model
 from backend.models.associations import StudentRunAssignment  # Runtime rider assignments
+from backend.models.associations import RouteDriverAssignment  # Route-level driver assignments
 from backend.schemas.run import RunStart, RunOut
 from backend.models.run_event import RunEvent                  # Run timeline event model
 from backend.models import student as student_model  # Student model for replay names
@@ -61,6 +62,7 @@ from backend.schemas.run import (  # Running board response schemas
     RunningBoardStudent,
 )
 from backend.utils.student_bus_absence import apply_run_absence_filter
+from backend.utils.route_driver_assignment import resolve_route_driver_assignment
 from backend.schemas.run import (
     PickupStudentRequest,
     PickupStudentResponse,
@@ -120,26 +122,72 @@ def _build_run_occupancy_counts(assignments: list[StudentRunAssignment]) -> dict
     }
 
 
+# -----------------------------------------------------------
+# Route driver resolver
+# - Derive run driver from active route-driver assignment
+# -----------------------------------------------------------
+def _resolve_run_driver(route, requested_driver_id: int | None = None):
+    try:
+        assignment = resolve_route_driver_assignment(route)  # Apply route-level driver rules
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    if requested_driver_id is not None and requested_driver_id != assignment.driver_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Requested driver does not match the active route-driver assignment",
+        )
+
+    return assignment.driver_id
+
+
+# -----------------------------------------------------------
+# Run serializer
+# - Return enriched run payloads with driver and route labels
+# -----------------------------------------------------------
+def _serialize_run(run: run_model.Run) -> RunOut:
+    return RunOut(
+        id=run.id,
+        driver_id=run.driver_id,
+        route_id=run.route_id,
+        run_type=run.run_type,
+        start_time=run.start_time,
+        end_time=run.end_time,
+        current_stop_id=run.current_stop_id,
+        current_stop_sequence=run.current_stop_sequence,
+        driver_name=run.driver.name if run.driver else None,
+        route_number=run.route.route_number if run.route else None,
+    )
+
+
 # =============================================================================
 # POST /runs/
 # Create a run directly
 # =============================================================================
 @router.post("/", response_model=schemas.RunOut, status_code=status.HTTP_201_CREATED)
 def create_run(run: RunStart, db: Session = Depends(get_db)):
-    driver = db.get(driver_model.Driver, run.driver_id)  # Validate driver exists
-    if not driver:
-        raise HTTPException(status_code=404, detail="Driver not found")
-
-    route = db.get(route_model.Route, run.route_id)  # Validate route exists
+    route = (
+        db.query(route_model.Route)
+        .options(
+            joinedload(route_model.Route.driver_assignments).joinedload(RouteDriverAssignment.driver)
+        )
+        .filter(route_model.Route.id == run.route_id)
+        .first()
+    )  # Validate route and driver assignments exist
     if not route:
         raise HTTPException(status_code=404, detail="Route not found")
+
+    resolved_driver_id = _resolve_run_driver(route, run.driver_id)  # Derive driver from route assignment
 
         # -------------------------------------------------------------------------
     # Prevent driver from having multiple active runs
     # -------------------------------------------------------------------------
     existing_active_run = (
         db.query(run_model.Run)                      # Query Run table
-        .filter(run_model.Run.driver_id == run.driver_id)  # Same driver
+        .filter(run_model.Run.driver_id == resolved_driver_id)  # Same driver
         .filter(run_model.Run.end_time.is_(None))   # Only active runs
         .first()
     )
@@ -150,7 +198,9 @@ def create_run(run: RunStart, db: Session = Depends(get_db)):
             detail="Driver already has an active run"
         )
     new_run = run_model.Run(
-        **run.model_dump(),  # Copy input payload fields
+        driver_id=resolved_driver_id,  # Route-derived driver
+        route_id=run.route_id,  # Requested route
+        run_type=run.run_type,  # Requested run type
         start_time=datetime.now(timezone.utc).replace(tzinfo=None),  # Store naive UTC
         current_stop_id=None,  # Start with no actual stop location recorded
         current_stop_sequence=None,  # Start with no actual stop sequence recorded
@@ -158,7 +208,7 @@ def create_run(run: RunStart, db: Session = Depends(get_db)):
     db.add(new_run)  # Add run to session
     db.commit()  # Save to DB
     db.refresh(new_run)  # Reload saved object
-    return new_run  # Return created run
+    return _serialize_run(new_run)  # Return created run
 
 # =============================================================================
 # POST /runs/start
@@ -166,15 +216,26 @@ def create_run(run: RunStart, db: Session = Depends(get_db)):
 # =============================================================================
 @router.post("/start", response_model=RunOut)
 def start_run(run: RunStart, db: Session = Depends(get_db)):
-    driver = db.get(driver_model.Driver, run.driver_id)  # Load driver
-    route = db.get(route_model.Route, run.route_id)  # Load route
+    route = (
+        db.query(route_model.Route)
+        .options(
+            joinedload(route_model.Route.driver_assignments).joinedload(RouteDriverAssignment.driver)
+        )
+        .filter(route_model.Route.id == run.route_id)
+        .first()
+    )  # Load route with assignments
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
+
+    resolved_driver_id = _resolve_run_driver(route, run.driver_id)  # Derive driver from route assignment
+    driver = db.get(driver_model.Driver, resolved_driver_id)  # Load resolved driver
 
     # -------------------------------------------------------------------------
     # Prevent driver from starting multiple active runs
     # -------------------------------------------------------------------------
     existing_active_run = (
         db.query(run_model.Run)
-        .filter(run_model.Run.driver_id == run.driver_id)
+        .filter(run_model.Run.driver_id == resolved_driver_id)
         .filter(run_model.Run.end_time.is_(None))
         .first()
     )
@@ -185,14 +246,14 @@ def start_run(run: RunStart, db: Session = Depends(get_db)):
             detail="Driver already has an active run"
         )
 
-    if not driver or not route:  # Validate references
-        raise HTTPException(status_code=404, detail="Driver or Route not found")
+    if not driver:  # Validate resolved driver reference
+        raise HTTPException(status_code=404, detail="Driver not found")
 
     # -------------------------------------------------------------------------
     # Create the new run first
     # -------------------------------------------------------------------------
     new_run = run_model.Run(
-        driver_id=run.driver_id,  # Assigned driver
+        driver_id=resolved_driver_id,  # Route-derived driver
         route_id=run.route_id,  # Assigned route
         run_type=run.run_type,  # AM / PM / other
         start_time=datetime.now(timezone.utc).replace(tzinfo=None),  # Start timestamp
@@ -298,7 +359,7 @@ def start_run(run: RunStart, db: Session = Depends(get_db)):
     db.flush()  # Validate and insert all assignment rows before final commit
     db.commit()  # Save run, copied stops, and student assignments
     db.refresh(new_run)  # Reload saved run
-    return new_run  # Return started run
+    return _serialize_run(new_run)  # Return started run
 
 # =============================================================================
 # POST /runs/end

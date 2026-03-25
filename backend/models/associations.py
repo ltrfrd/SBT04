@@ -2,10 +2,17 @@
 # Association models for BusTrack routing and run operations
 # ============================================================
 
-# -----------------------------
-# Imports
-# -----------------------------
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Table, UniqueConstraint  # SQLAlchemy column types
+from sqlalchemy import (  # SQLAlchemy column types
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Table,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship  # ORM relationship helpers
 
 from database import Base  # Shared declarative base
@@ -19,7 +26,26 @@ route_schools = Table(
     Base.metadata,
     Column("route_id", Integer, ForeignKey("routes.id"), primary_key=True),  # Link one route row
     Column("school_id", Integer, ForeignKey("schools.id"), primary_key=True),  # Link one school row
-)  # Store route-to-school associations
+)
+
+
+# -----------------------------------------------------------
+# Route driver assignment
+# - Stores route-level driver ownership over time
+# -----------------------------------------------------------
+class RouteDriverAssignment(Base):
+    __tablename__ = "route_driver_assignments"  # Persist route driver assignments here
+
+    id = Column(Integer, primary_key=True, index=True)  # Unique assignment ID
+    route_id = Column(Integer, ForeignKey("routes.id", ondelete="CASCADE"), nullable=False)  # Parent route
+    driver_id = Column(Integer, ForeignKey("drivers.id", ondelete="CASCADE"), nullable=False)  # Assigned driver
+    is_primary = Column(Boolean, default=False, nullable=False)  # Primary driver flag
+    start_date = Column(Date, nullable=True)  # Assignment start date
+    end_date = Column(Date, nullable=True)  # Assignment end date
+    active = Column(Boolean, default=True, nullable=False)  # Soft-active flag
+
+    route = relationship("Route", back_populates="driver_assignments")  # Load parent route
+    driver = relationship("Driver", back_populates="route_assignments")  # Load assigned driver
 
 
 # -----------------------------
@@ -36,7 +62,7 @@ class StudentRunAssignment(Base):
     actual_dropoff_stop_id = Column(Integer, ForeignKey("stops.id", ondelete="SET NULL"), nullable=True)  # Store actual dropoff stop ID
     __table_args__ = (
         UniqueConstraint("student_id", "run_id", name="uq_student_run_assignment"),  # Allow one assignment per student per run
-    )  # Apply runtime uniqueness rule
+    )
 
     student = relationship("Student", back_populates="run_assignments")  # Load linked student
     run = relationship("Run", back_populates="student_assignments")  # Load linked run
@@ -48,5 +74,4 @@ class StudentRunAssignment(Base):
     dropped_off = Column(Boolean, default=False, nullable=False)  # Track whether exit happened
     dropped_off_at = Column(DateTime, nullable=True)  # Track when exit happened
     is_onboard = Column(Boolean, default=False, nullable=False)  # Track current onboard state
-    # School-side verification status (set by school, not driver)
     school_status = Column(String, nullable=True)  # "present" or "absent"
