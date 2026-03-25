@@ -1,63 +1,45 @@
 # -----------------------------------------------------------
-# Route driver assignment helpers
-# - Shared route-level driver resolution rules
+# - Route driver assignment helpers
+# - Shared one-active-driver-per-route rules
 # -----------------------------------------------------------
-from datetime import date, datetime, timezone
-
 from backend.models.associations import RouteDriverAssignment
-
+from datetime import datetime, timezone
 
 # -----------------------------------------------------------
-# Active assignment filter
-# - Keep only assignments effective for the requested date
+# - Active assignment filter
+# - Keep only active route-driver assignments
 # -----------------------------------------------------------
-def get_active_route_driver_assignments(route, target_date: date | None = None) -> list[RouteDriverAssignment]:
-    target_date = target_date or datetime.now(timezone.utc).date()  # Resolve effective date once
-
+def get_active_route_driver_assignments(route) -> list[RouteDriverAssignment]:
     return [
         assignment
         for assignment in getattr(route, "driver_assignments", [])
         if assignment.active is True
-        and (assignment.start_date is None or assignment.start_date <= target_date)
-        and (assignment.end_date is None or assignment.end_date >= target_date)
     ]
 
 
 # -----------------------------------------------------------
-# Route driver resolver
-# - Apply the deterministic active assignment rule
+# - Route driver resolver
+# - Enforce exactly one active driver assignment
 # -----------------------------------------------------------
-def resolve_route_driver_assignment(route, target_date: date | None = None) -> RouteDriverAssignment:
-    active_assignments = get_active_route_driver_assignments(route, target_date)  # Effective active assignments
+def resolve_route_driver_assignment(route) -> RouteDriverAssignment:
+    active_assignments = get_active_route_driver_assignments(route)  # Active route-driver assignments
 
     if not active_assignments:
         raise ValueError("Route has no active driver assignment")
 
-    primary_assignments = [
-        assignment
-        for assignment in active_assignments
-        if assignment.is_primary is True
-    ]  # Effective primary assignments
+    if len(active_assignments) > 1:
+        raise ValueError("Route has multiple active driver assignments")
 
-    if len(primary_assignments) == 1:
-        return primary_assignments[0]
-
-    if len(primary_assignments) > 1:
-        raise ValueError("Route has multiple active primary driver assignments")
-
-    if len(active_assignments) == 1:
-        return active_assignments[0]
-
-    raise ValueError("Route has multiple active driver assignments without a single primary")
+    return active_assignments[0]
 
 
 # -----------------------------------------------------------
-# Route driver display helper
-# - Return the currently resolved driver name when available
+# - Route driver display helper
+# - Return the resolved active driver name
 # -----------------------------------------------------------
-def get_route_driver_name(route, target_date: date | None = None) -> str | None:
+def get_route_driver_name(route) -> str | None:
     try:
-        assignment = resolve_route_driver_assignment(route, target_date)  # Resolve display assignment
+        assignment = resolve_route_driver_assignment(route)  # Resolve active route-driver assignment
     except ValueError:
         return None
 

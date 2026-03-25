@@ -7,16 +7,20 @@ def _create_driver(client):
 def _create_route(client, driver_id: int):
     r = client.post(
         "/routes/",
-        json={"route_number": "R1", "unit_number": "Bus-01", "driver_id": driver_id},
+        json={"route_number": "R1", "unit_number": "Bus-01"},
     )
     assert r.status_code in (200, 201)
-    return r.json()["id"]
+    route_id = r.json()["id"]
+
+    r = client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
+    assert r.status_code in (200, 201)
+    return route_id
 
 
 def _create_run(client, driver_id: int, route_id: int):
     r = client.post(
         "/runs/start",
-        json={"driver_id": driver_id, "route_id": route_id, "run_type": "AM"},
+        json={"route_id": route_id, "run_type": "AM"},
     )
     assert r.status_code in (200, 201)
     return r.json()["id"]

@@ -41,11 +41,13 @@ def test_start_run_copies_stops_from_latest_route_run(client):
         json={
             "route_number": "12",
             "unit_number": "BUS-12",
-            "driver_id": driver_id,
         },
     )
     assert route_response.status_code in (200, 201)
     route_id = route_response.json()["id"]  # Created route ID
+
+    assign_response = client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
+    assert assign_response.status_code in (200, 201)
 
     # -------------------------------------------------------------------------
     # Create source run directly
@@ -54,7 +56,6 @@ def test_start_run_copies_stops_from_latest_route_run(client):
     source_run_response = client.post(
         "/runs/",
         json={
-            "driver_id": driver_id,
             "route_id": route_id,
             "run_type": "AM",
         },
@@ -108,7 +109,6 @@ def test_start_run_copies_stops_from_latest_route_run(client):
     new_run_response = client.post(
         "/runs/start",
         json={
-            "driver_id": driver_id,
             "route_id": route_id,
             "run_type": "AM",
         },
@@ -177,11 +177,13 @@ def test_run_state_uses_stored_current_stop_sequence(client):
         json={
             "route_number": "R-STATE-STORED",
             "unit_number": "BUS-STATE-01",
-            "driver_id": driver_id,
         },
     )
     assert route_res.status_code in (200, 201)
     route_id = route_res.json()["id"]  # Created route ID
+
+    assign_res = client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
+    assert assign_res.status_code in (200, 201)
 
     # -------------------------------------------------------------------------
     # Create source run with ordered stops
@@ -189,7 +191,6 @@ def test_run_state_uses_stored_current_stop_sequence(client):
     seed_run_res = client.post(
         "/runs/",
         json={
-            "driver_id": driver_id,
             "route_id": route_id,
             "run_type": "AM",
         },
@@ -251,7 +252,6 @@ def test_run_state_uses_stored_current_stop_sequence(client):
     active_run_res = client.post(
         "/runs/start",
         json={
-            "driver_id": driver_id,
             "route_id": route_id,
             "run_type": "AM",
         },

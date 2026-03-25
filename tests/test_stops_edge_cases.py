@@ -3,11 +3,14 @@ def _setup_run(client):
     assert r.status_code in (200, 201)
     driver_id = r.json()["id"]
 
-    r = client.post("/routes/", json={"route_number": "R1", "unit_number": "Bus-01", "driver_id": driver_id})
+    r = client.post("/routes/", json={"route_number": "R1", "unit_number": "Bus-01"})
     assert r.status_code in (200, 201)
     route_id = r.json()["id"]
 
-    r = client.post("/runs/start", json={"driver_id": driver_id, "route_id": route_id, "run_type": "AM"})
+    r = client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
+    assert r.status_code in (200, 201)
+
+    r = client.post("/runs/start", json={"route_id": route_id, "run_type": "AM"})
     assert r.status_code in (200, 201)
     return r.json()["id"]
 

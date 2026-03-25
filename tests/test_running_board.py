@@ -40,15 +40,16 @@ def test_running_board_basic(client):  # Test the running board endpoint
     route = client.post("/routes/", json={  # Create route
         "route_number": "99",
         "unit_number": "BUS99",
-        "driver_id": driver["id"],
         "school_ids": [school["id"]]
     }).json()
+
+    assign = client.post(f"/routes/{route['id']}/assign_driver/{driver['id']}")  # Assign driver separately
+    assert assign.status_code in (200, 201)
 
     # -------------------------------------------------------------------------
     # Create run
     # -------------------------------------------------------------------------
     run = client.post("/runs/", json={  # Create run
-        "driver_id": driver["id"],
         "route_id": route["id"],
         "run_type": "AM"
     }).json()

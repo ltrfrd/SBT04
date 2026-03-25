@@ -50,7 +50,6 @@ def _create_route_with_assignment_flow(
     if driver_id is not None:
         assignment_response = client.post(
             f"/routes/{route['id']}/assign_driver/{driver_id}",
-            json={"is_primary": True},
         )
         assert assignment_response.status_code in (200, 201)
 
@@ -196,11 +195,9 @@ def test_route_driver_assignment_flow(client):
 
     assign = client.post(
         f"/routes/{route_id}/assign_driver/{driver_id}",
-        json={"is_primary": True},
     )
     assert assign.status_code in (200, 201)
     assert assign.json()["driver_id"] == driver_id
-    assert assign.json()["is_primary"] is True
 
     route_after_assign = client.get(f"/routes/{route_id}")
     assert route_after_assign.status_code == 200
@@ -217,17 +214,17 @@ def test_route_driver_assignment_flow(client):
     assert [item["id"] for item in driver_routes.json()] == [route_id]
 
 
-def test_create_run_uses_primary_route_assignment(client):
-    primary_driver = client.post(
+def test_create_run_uses_single_active_route_assignment(client):
+    first_driver = client.post(
         "/drivers/",
-        json={"name": "Primary Route Driver", "email": "primary.route.driver@test.com", "phone": "10002"},
+        json={"name": "First Route Driver", "email": "first.route.driver@test.com", "phone": "10002"},
     )
-    backup_driver = client.post(
+    second_driver = client.post(
         "/drivers/",
-        json={"name": "Backup Route Driver", "email": "backup.route.driver@test.com", "phone": "10003"},
+        json={"name": "Second Route Driver", "email": "second.route.driver@test.com", "phone": "10003"},
     )
-    assert primary_driver.status_code in (200, 201)
-    assert backup_driver.status_code in (200, 201)
+    assert first_driver.status_code in (200, 201)
+    assert second_driver.status_code in (200, 201)
 
     route = client.post(
         "/routes/",
@@ -236,21 +233,26 @@ def test_create_run_uses_primary_route_assignment(client):
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
 
-    first_assign = client.post(
-        f"/routes/{route_id}/assign_driver/{backup_driver.json()['id']}",
-        json={"is_primary": False},
-    )
-    second_assign = client.post(
-        f"/routes/{route_id}/assign_driver/{primary_driver.json()['id']}",
-        json={"is_primary": True},
-    )
+    first_assign = client.post(f"/routes/{route_id}/assign_driver/{first_driver.json()['id']}")
+    second_assign = client.post(f"/routes/{route_id}/assign_driver/{second_driver.json()['id']}")
     assert first_assign.status_code in (200, 201)
     assert second_assign.status_code in (200, 201)
 
+    route_drivers = client.get(f"/routes/{route_id}/drivers")
+    assert route_drivers.status_code == 200
+
+    active_assignments = [item for item in route_drivers.json() if item["active"] is True]
+    inactive_assignments = [item for item in route_drivers.json() if item["active"] is False]
+
+    assert len(active_assignments) == 1
+    assert active_assignments[0]["driver_id"] == second_driver.json()["id"]
+    assert len(inactive_assignments) == 1
+    assert inactive_assignments[0]["driver_id"] == first_driver.json()["id"]
+
     run = client.post("/runs/", json={"route_id": route_id, "run_type": "AM"})
     assert run.status_code in (200, 201)
-    assert run.json()["driver_id"] == primary_driver.json()["id"]
-    assert run.json()["driver_name"] == "Primary Route Driver"
+    assert run.json()["driver_id"] == second_driver.json()["id"]
+    assert run.json()["driver_name"] == "Second Route Driver"
 
 
 def test_create_run_fails_without_active_route_driver_assignment(client):
@@ -265,7 +267,7 @@ def test_create_run_fails_without_active_route_driver_assignment(client):
     assert run.json()["detail"] == "Route has no active driver assignment"
 
 
-def test_create_run_fails_with_multiple_active_non_primary_assignments(client):
+def test_create_run_fails_when_route_has_multiple_active_assignments(client, db_engine):
     driver_one = client.post(
         "/drivers/",
         json={"name": "Multi Driver One", "email": "multi.driver.one@test.com", "phone": "10004"},
@@ -284,20 +286,27 @@ def test_create_run_fails_with_multiple_active_non_primary_assignments(client):
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
 
-    assign_one = client.post(
-        f"/routes/{route_id}/assign_driver/{driver_one.json()['id']}",
-        json={"is_primary": False},
-    )
-    assign_two = client.post(
-        f"/routes/{route_id}/assign_driver/{driver_two.json()['id']}",
-        json={"is_primary": False},
-    )
-    assert assign_one.status_code in (200, 201)
-    assert assign_two.status_code in (200, 201)
+    client.post(f"/routes/{route_id}/assign_driver/{driver_one.json()['id']}")
+
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+    db = TestingSessionLocal()
+    try:
+        from backend.models.associations import RouteDriverAssignment
+
+        db.add(
+            RouteDriverAssignment(
+                route_id=route_id,
+                driver_id=driver_two.json()["id"],
+                active=True,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
 
     run = client.post("/runs/start", json={"route_id": route_id, "run_type": "AM"})
     assert run.status_code == 409
-    assert run.json()["detail"] == "Route has multiple active driver assignments without a single primary"
+    assert run.json()["detail"] == "Route has multiple active driver assignments"
 
 
 def test_unassign_driver_blocks_future_run_creation(client):

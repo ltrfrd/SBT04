@@ -1,9 +1,26 @@
-SBT02 — Project Study Structure
+SBT03 — Project Study Structure 
 ================================
+
+MIGRATION STATUS (SBT03)
+-----------------------
+This version is the active development state of the project.
+
+Key change:
+- Driver is no longer assigned directly to Route
+- Driver ↔ Route is now handled via RouteDriverAssignment
+
+Important rules:
+- Requirements are frozen
+- Development is done in layers (backend → UI → integration)
+- Changes must remain minimal and non-breaking
+- Attendance remains strictly run-based
+- /reports/... compatibility must NOT break
+
+This migration is being applied without breaking existing attendance and reporting behavior.
 
 1) PROJECT IDENTITY
 -------------------
-SBT02 is a FastAPI-based school bus operations backend with a small server-rendered frontend.
+SBT03 is a FastAPI-based school bus operations backend with a small server-rendered frontend.
 The project is organized around operational transport entities such as drivers, schools, students,
 routes, stops, runs, attendance, dispatch/payroll, and planned student absences.
 
@@ -248,6 +265,22 @@ Project function:
 Used by driver CRUD, login/session flow, dashboard counts, run ownership,
 and route/attendance reporting. app.py queries Driver counts and driver-run views use it. :contentReference[oaicite:10]{index=10}
 
+RouteDriverAssignment
+---------------------
+Stores driver ownership of a route.
+
+Fields:
+- route_id
+- driver_id
+- is_primary
+- start_date
+- end_date
+- active
+
+Used to resolve which driver is responsible for a route when creating runs.
+Note:
+Driver is no longer stored directly on Route and is resolved via assignments.
+
 backend/models/school.py
 ------------------------
 Role:
@@ -280,7 +313,8 @@ Role:
 Route entity model.
 
 What it likely represents:
-A bus route definition, probably including route number, unit number, assigned driver,
+A bus route definition, including route number, unit number, and driver assignments
+through RouteDriverAssignment.
 linked schools, child runs, and route-owned logic.
 
 Project function:
@@ -541,7 +575,7 @@ It combines:
 - absence visibility
 
 Why it matters:
-If a person wants to understand the live “attendance module” in SBT02,
+If a person wants to understand the live “attendance module” in SBT03,
 this is the first backend file to study after app.py.
 
 backend/routers/report.py
@@ -928,7 +962,7 @@ tests/
 
 14) WHAT THE PROJECT IS REALLY DOING FUNCTIONALLY
 -------------------------------------------------
-In plain project terms, SBT02 is trying to solve these workflows:
+In plain project terms, SBT03 is trying to solve these workflows:
 
 1. Domain setup
    - manage drivers
@@ -979,11 +1013,11 @@ That order gives the clearest mental map of the system.
 
 16) CURRENT PROJECT STATE IN ONE SENTENCE
 -----------------------------------------
-SBT02 is a transport-operations backend whose core is already functional around drivers,
+SBT03 is a transport-operations backend whose core is already functional around drivers,
 routes, runs, attendance, and school confirmation, but the codebase is still midway through
 a rename-and-cleanup phase where attendance has replaced report as the main application layer.
 
-SBT02 — Recommended Cleanup Roadmap
+SBT03 — Recommended Cleanup Roadmap
 ===================================
 
 GOAL
@@ -1181,6 +1215,7 @@ It lets you clean safely without breaking callers.
 ------------------------------------------------
 Problem:
 The repo currently mixes:
+- SBT03
 - SBT02
 - SBT01
 - BST
@@ -1192,7 +1227,7 @@ What to do:
 Choose one standard and apply it consistently.
 
 Recommended standard:
-- Project name in comments: SBT02
+- Project name in comments: SBT03
 - Module name: Attendance
 - Compatibility comments may mention "legacy report naming"
 
@@ -1227,7 +1262,7 @@ Problem:
 README.md is empty. :contentReference[oaicite:16]{index=16}
 
 What to include:
-- what SBT02 is
+- what SBT03 is
 - current stack
 - module overview
 - how to run locally
@@ -1433,7 +1468,7 @@ STEP 3
 Clean imports and self-imports in attendance_generator.py
 
 STEP 4
-Standardize naming comments to SBT02 / Attendance
+Standardize naming comments to SBT03 / Attendance
 
 STEP 5
 Replace structure.txt and write README.md

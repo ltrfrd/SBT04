@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -17,13 +16,13 @@ from backend.schemas.route import (
     RouteOut,
 )
 from backend.utils.route_driver_assignment import resolve_route_driver_assignment
-
+from datetime import datetime, timezone
 
 router = APIRouter(prefix="/routes", tags=["Routes"])
 
 
 # -----------------------------------------------------------
-# Route serializer
+# - Route serializer
 # - Return stable route payloads with assignment context
 # -----------------------------------------------------------
 def _serialize_route(route: Route) -> RouteOut:
@@ -35,7 +34,7 @@ def _serialize_route(route: Route) -> RouteOut:
         active_driver_id = active_assignment.driver_id  # Resolved driver identifier
         active_driver_name = active_assignment.driver.name if active_assignment.driver else None  # Resolved driver name
     except ValueError:
-        active_assignment = None  # Explicitly mark unresolved route driver state
+        pass  # Leave unresolved route driver fields empty
 
     return RouteOut(
         id=route.id,
@@ -61,10 +60,10 @@ def _serialize_route(route: Route) -> RouteOut:
 
 
 # -----------------------------------------------------------
-# Route assignment upsert
-# - Convert compatibility driver payloads into assignment rows
+# - Route assignment writer
+# - Keep one active driver assignment per route
 # -----------------------------------------------------------
-def _upsert_route_driver_assignment(
+def _assign_driver_to_route(
     route: Route,
     driver_id: int,
     db: Session,
@@ -74,11 +73,7 @@ def _upsert_route_driver_assignment(
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
 
-    payload = assignment_in or RouteDriverAssignmentCreate(
-        is_primary=True,
-        start_date=datetime.now(timezone.utc).date(),
-        active=True,
-    )  # Default compatibility assignment payload
+    payload = assignment_in or RouteDriverAssignmentCreate()  # Default active assignment payload
 
     existing_assignment = (
         db.query(RouteDriverAssignment)
@@ -89,25 +84,24 @@ def _upsert_route_driver_assignment(
         .first()
     )  # Reuse current active assignment when present
 
-    if payload.is_primary:
-        active_primary_assignments = (
+    if payload.active is True:
+        active_assignments = (
             db.query(RouteDriverAssignment)
             .filter(RouteDriverAssignment.route_id == route.id)
             .filter(RouteDriverAssignment.active.is_(True))
-            .filter(RouteDriverAssignment.is_primary.is_(True))
             .all()
-        )  # Demote older active primaries for this route
+        )  # Existing active assignments for this route
 
-        for assignment in active_primary_assignments:
+        for assignment in active_assignments:
             if existing_assignment and assignment.id == existing_assignment.id:
                 continue
-            assignment.is_primary = False
+            assignment.active = False  # New assignment replaces the old active assignment
 
     if existing_assignment:
-        existing_assignment.is_primary = payload.is_primary
+        existing_assignment.active = payload.active
         existing_assignment.start_date = payload.start_date
         existing_assignment.end_date = payload.end_date
-        existing_assignment.active = payload.active
+        existing_assignment.is_primary = payload.is_primary
         db.flush()
         return existing_assignment
 
@@ -125,14 +119,13 @@ def _upsert_route_driver_assignment(
 
 
 # -----------------------------------------------------------
-# Route create
-# - Create a route without embedded driver ownership
+# - Create route without driver assignment
+# - Driver assignment happens in a separate step
 # -----------------------------------------------------------
 @router.post("/", response_model=RouteOut)
 def create_route(route: RouteCreate, db: Session = Depends(get_db)):
     payload = route.model_dump(exclude_unset=True)
     school_ids = payload.pop("school_ids", [])
-    driver_id = payload.pop("driver_id", None)  # Compatibility shim input
 
     db_route = Route(**payload)
     db.add(db_route)
@@ -140,9 +133,6 @@ def create_route(route: RouteCreate, db: Session = Depends(get_db)):
 
     if school_ids:
         db_route.schools = db.query(School).filter(School.id.in_(school_ids)).all()
-
-    if driver_id is not None:
-        _upsert_route_driver_assignment(db_route, driver_id, db)
 
     db.commit()
     db.refresh(db_route)
@@ -194,16 +184,12 @@ def update_route(route_id: int, route_in: RouteCreate, db: Session = Depends(get
 
     update_data = route_in.model_dump(exclude_unset=True)
     school_ids = update_data.pop("school_ids", None)
-    driver_id = update_data.pop("driver_id", None)  # Compatibility shim input
 
     for key, value in update_data.items():
         setattr(route, key, value)
 
     if school_ids is not None:
         route.schools = db.query(School).filter(School.id.in_(school_ids)).all()
-
-    if driver_id is not None:
-        _upsert_route_driver_assignment(route, driver_id, db)
 
     db.commit()
     db.refresh(route)
@@ -230,8 +216,8 @@ def get_route_schools(route_id: int, db: Session = Depends(get_db)):
 
 
 # -----------------------------------------------------------
-# Route driver assignment create
-# - Assign one driver to one route
+# - Assign driver to route
+# - Replace any existing active route assignment
 # -----------------------------------------------------------
 @router.post("/{route_id}/assign_driver/{driver_id}", response_model=RouteDriverAssignmentOut)
 def assign_driver_to_route(
@@ -249,7 +235,7 @@ def assign_driver_to_route(
     if not route:
         raise HTTPException(status_code=404, detail="Route not found")
 
-    assignment = _upsert_route_driver_assignment(route, driver_id, db, assignment_in)
+    assignment = _assign_driver_to_route(route, driver_id, db, assignment_in)
     db.commit()
     db.refresh(assignment)
 

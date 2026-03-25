@@ -8,8 +8,9 @@ from datetime import date, timedelta  # Date helpers for matching and mismatch c
 def _build_run_with_students(client):
     driver = client.post("/drivers/", json={"name": "Absence Driver", "email": "absence_driver@test.com", "phone": "7805557001"}).json()  # Create driver dependency
     school = client.post("/schools/", json={"name": "Absence School", "address": "700 School Street", "phone": "7805557002"}).json()  # Create school dependency
-    route = client.post("/routes/", json={"route_number": "700", "unit_number": "BUS-700", "driver_id": driver["id"], "school_ids": [school["id"]]}).json()  # Create route dependency
-    run = client.post("/runs/", json={"driver_id": driver["id"], "route_id": route["id"], "run_type": "AM"}).json()  # Create target run
+    route = client.post("/routes/", json={"route_number": "700", "unit_number": "BUS-700", "school_ids": [school["id"]]}).json()  # Create route dependency
+    client.post(f"/routes/{route['id']}/assign_driver/{driver['id']}")  # Assign driver separately
+    run = client.post("/runs/", json={"route_id": route["id"], "run_type": "AM"}).json()  # Create target run
     stop = client.post("/stops/", json={"run_id": run["id"], "type": "pickup", "sequence": 1, "name": "Absence Stop", "address": "700 Stop Street", "planned_time": "07:10:00", "latitude": 53.7, "longitude": -113.7}).json()  # Create shared stop
     student = client.post("/students/", json={"name": "Boarded Student", "grade": "5", "school_id": school["id"], "route_id": route["id"], "stop_id": stop["id"]}).json()  # Create target student
     return run, stop, student  # Return shared setup objects

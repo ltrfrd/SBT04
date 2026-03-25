@@ -44,7 +44,8 @@ class RouteCreate(BaseModel):
     route_number: str
     unit_number: str
     school_ids: Optional[List[int]] = []
-    driver_id: Optional[int] = None  # Compatibility shim: converted into assignment rows
+
+    model_config = ConfigDict(extra="forbid")
 
 
 # -----------------------------------------------------------

@@ -38,15 +38,15 @@ def test_create_student_run_assignment_success(client):  # Test valid assignment
     route = client.post("/routes/", json={  # Create a route
         "route_number": "300",
         "unit_number": "BUS-300",
-        "driver_id": driver["id"],
         "school_ids": [school["id"]]
     }).json()  # Parse JSON response
+
+    client.post(f"/routes/{route['id']}/assign_driver/{driver['id']}")  # Assign driver separately
 
     # -------------------------------------------------------------------------
     # Create run
     # -------------------------------------------------------------------------
     run = client.post("/runs/", json={  # Create a run
-        "driver_id": driver["id"],
         "route_id": route["id"],
         "run_type": "AM"
     }).json()  # Parse JSON response
@@ -119,15 +119,15 @@ def test_create_student_run_assignment_duplicate_returns_409(client):  # Test du
     route = client.post("/routes/", json={  # Create a route
         "route_number": "400",
         "unit_number": "BUS-400",
-        "driver_id": driver["id"],
         "school_ids": [school["id"]]
     }).json()  # Parse JSON response
+
+    client.post(f"/routes/{route['id']}/assign_driver/{driver['id']}")  # Assign driver separately
 
     # -------------------------------------------------------------------------
     # Create run
     # -------------------------------------------------------------------------
     run = client.post("/runs/", json={  # Create a run
-        "driver_id": driver["id"],
         "route_id": route["id"],
         "run_type": "AM"
     }).json()  # Parse JSON response

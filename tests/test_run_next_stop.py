@@ -35,11 +35,13 @@ def test_next_stop_advances_progress(client):
         json={
             "route_number": "NEXT-STOP-01",
             "unit_number": "BUS-NEXT-01",
-            "driver_id": driver_id,
         },
     )
     assert route_res.status_code in (200, 201)
     route_id = route_res.json()["id"]
+
+    assign_res = client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
+    assert assign_res.status_code in (200, 201)
 
     # -------------------------------------------------------------------------
     # Create run
@@ -47,7 +49,6 @@ def test_next_stop_advances_progress(client):
     run_res = client.post(
         "/runs/",
         json={
-            "driver_id": driver_id,
             "route_id": route_id,
             "run_type": "AM",
         },

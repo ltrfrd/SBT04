@@ -123,10 +123,10 @@ def _build_run_occupancy_counts(assignments: list[StudentRunAssignment]) -> dict
 
 
 # -----------------------------------------------------------
-# Route driver resolver
-# - Derive run driver from active route-driver assignment
+# - Route driver resolver
+# - Require one active driver assignment per route
 # -----------------------------------------------------------
-def _resolve_run_driver(route, requested_driver_id: int | None = None):
+def _resolve_run_driver(route):
     try:
         assignment = resolve_route_driver_assignment(route)  # Apply route-level driver rules
     except ValueError as exc:
@@ -134,12 +134,6 @@ def _resolve_run_driver(route, requested_driver_id: int | None = None):
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         ) from exc
-
-    if requested_driver_id is not None and requested_driver_id != assignment.driver_id:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Requested driver does not match the active route-driver assignment",
-        )
 
     return assignment.driver_id
 
@@ -180,7 +174,7 @@ def create_run(run: RunStart, db: Session = Depends(get_db)):
     if not route:
         raise HTTPException(status_code=404, detail="Route not found")
 
-    resolved_driver_id = _resolve_run_driver(route, run.driver_id)  # Derive driver from route assignment
+    resolved_driver_id = _resolve_run_driver(route)  # Derive driver from route assignment
 
         # -------------------------------------------------------------------------
     # Prevent driver from having multiple active runs
@@ -227,7 +221,7 @@ def start_run(run: RunStart, db: Session = Depends(get_db)):
     if not route:
         raise HTTPException(status_code=404, detail="Route not found")
 
-    resolved_driver_id = _resolve_run_driver(route, run.driver_id)  # Derive driver from route assignment
+    resolved_driver_id = _resolve_run_driver(route)  # Derive driver from route assignment
     driver = db.get(driver_model.Driver, resolved_driver_id)  # Load resolved driver
 
     # -------------------------------------------------------------------------

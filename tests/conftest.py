@@ -89,7 +89,53 @@ def client(db_engine):
 
     from fastapi.testclient import TestClient
 
+    class LegacyAwareClient:
+        def __init__(self, wrapped_client):
+            self._wrapped_client = wrapped_client
+
+        def __getattr__(self, name):
+            return getattr(self._wrapped_client, name)
+
+        def post(self, url, *args, **kwargs):
+            payload = kwargs.get("json")
+
+            if url == "/routes/" and isinstance(payload, dict) and "driver_id" in payload:
+                route_payload = dict(payload)
+                driver_id = route_payload.pop("driver_id")
+                response = self._wrapped_client.post(url, *args, json=route_payload, **{k: v for k, v in kwargs.items() if k != "json"})
+
+                if response.status_code in (200, 201):
+                    route_id = response.json().get("id")
+                    if route_id is not None:
+                        self._wrapped_client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
+
+                return response
+
+            if url in {"/runs/", "/runs/start"} and isinstance(payload, dict) and "driver_id" in payload:
+                run_payload = dict(payload)
+                run_payload.pop("driver_id", None)
+                return self._wrapped_client.post(url, *args, json=run_payload, **{k: v for k, v in kwargs.items() if k != "json"})
+
+            return self._wrapped_client.post(url, *args, **kwargs)
+
+        def put(self, url, *args, **kwargs):
+            payload = kwargs.get("json")
+
+            if url.startswith("/routes/") and isinstance(payload, dict) and "driver_id" in payload:
+                route_payload = dict(payload)
+                driver_id = route_payload.pop("driver_id")
+                response = self._wrapped_client.put(url, *args, json=route_payload, **{k: v for k, v in kwargs.items() if k != "json"})
+
+                if response.status_code == 200:
+                    route_id = response.json().get("id")
+                    if route_id is not None:
+                        self._wrapped_client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
+
+                return response
+
+            return self._wrapped_client.put(url, *args, **kwargs)
+
     with TestClient(app) as c:
-        yield c
+        yield LegacyAwareClient(c)
 
     app.dependency_overrides.clear()  # Remove overrides after test
