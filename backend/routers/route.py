@@ -57,14 +57,45 @@ def _serialize_route(route: Route) -> RouteOut:
 
 # -----------------------------------------------------------
 # - Create route without driver assignment
-# - Driver assignment happens in a separate step
+# - Document duplicate route_number conflict in Swagger
 # -----------------------------------------------------------
-@router.post("/", response_model=RouteOut)
+@router.post(
+    "/",                                                          # FIX: remove trailing slash to avoid 405 redirect issue
+    response_model=RouteOut,                                     # Successful response model
+    summary="Create route",                                      # Clear Swagger title
+    description=(                                                # Explain real route creation flow
+        "Create a route without assigning a driver. "
+        "Driver assignment is handled separately. "
+        "Route numbers must be unique."
+    ),
+    response_description="Created route",                        # Swagger success text
+    responses={
+        409: {                                                   # Duplicate route_number response
+            "description": "Route number already exists",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Route number already exists"}
+                }
+            },
+        }
+    },
+)
 def create_route(route: RouteCreate, db: Session = Depends(get_db)):
-    payload = route.model_dump(exclude_unset=True)
-    school_ids = payload.pop("school_ids", [])
+    payload = route.model_dump(exclude_unset=True)               # Read validated route payload
+    school_ids = payload.pop("school_ids", [])                   # Separate school assignment ids
 
-    db_route = Route(**payload)
+    existing_route = (
+        db.query(Route)
+        .filter(Route.route_number == payload["route_number"])   # Enforce unique route number only
+        .first()
+    )
+    if existing_route:
+        raise HTTPException(
+            status_code=409,                                     # Conflict for duplicate route number
+            detail="Route number already exists",
+        )
+
+    db_route = Route(**payload)                                  # Create route after uniqueness check
     db.add(db_route)
     db.flush()
 
@@ -76,7 +107,11 @@ def create_route(route: RouteCreate, db: Session = Depends(get_db)):
     return _serialize_route(db_route)
 
 
-@router.get("/", response_model=List[RouteOut])
+# -----------------------------------------------------------
+# - Get all routes
+# - Return route collection with assignment context
+# -----------------------------------------------------------
+@router.get("/", response_model=List[RouteOut])                   # FIX: match POST behavior
 def get_routes(db: Session = Depends(get_db)):
     routes = (
         db.query(Route)
@@ -88,21 +123,25 @@ def get_routes(db: Session = Depends(get_db)):
     )
     return [_serialize_route(route) for route in routes]
 
-
+# -----------------------------------------------------------
+# - Get one route by id
+# - Return route details with assignment context
+# -----------------------------------------------------------
 @router.get("/{route_id}", response_model=RouteOut)
 def get_route(route_id: int, db: Session = Depends(get_db)):
     route = (
         db.query(Route)
         .options(
-            joinedload(Route.schools),
-            joinedload(Route.driver_assignments).joinedload(RouteDriverAssignment.driver),
+            joinedload(Route.schools),                           # Include linked schools
+            joinedload(Route.driver_assignments).joinedload(RouteDriverAssignment.driver),  # Include driver assignments
         )
-        .filter(Route.id == route_id)
+        .filter(Route.id == route_id)                           # Match requested route id
         .first()
     )
     if not route:
         raise HTTPException(status_code=404, detail="Route not found")
-    return _serialize_route(route)
+
+    return _serialize_route(route)                              # Return normalized route payload
 
 
 @router.put("/{route_id}", response_model=RouteOut)
@@ -195,7 +234,21 @@ def _assign_driver_to_route(
 # - Assign driver to route endpoint
 # - Calls helper to enforce assignment rule
 # -----------------------------------------------------------
-@router.post("/{route_id}/assign_driver/{driver_id}", response_model=RouteDriverAssignmentOut)
+# -----------------------------------------------------------
+# - Assign one active driver to a route
+# - Swagger should describe the real assignment workflow
+# -----------------------------------------------------------
+@router.post(
+    "/{route_id}/assign_driver/{driver_id}",                     # Route + driver selected from path
+    response_model=RouteDriverAssignmentOut,                     # Return the activated assignment
+    summary="Assign active driver to route",                     # Clear Swagger title
+    description=(                                                # Explain exact SBT03 behavior
+        "Assign a driver to a route as the single active assignment. "
+        "If another active driver assignment already exists for the route, "
+        "it is automatically deactivated. No request body is required."
+    ),
+    response_description="The newly active route-driver assignment",  # Swagger response text
+)
 def assign_driver_to_route(
     route_id: int,
     driver_id: int,
@@ -223,11 +276,21 @@ def assign_driver_to_route(
         driver_name=assignment.driver.name if assignment.driver else None,
         active=assignment.active,
     )
+
 # -----------------------------------------------------------
-# Route driver assignment list
-# - Return drivers assigned to one route
+# - List driver assignments for one route
+# - Show which assignment is currently active
 # -----------------------------------------------------------
-@router.get("/{route_id}/drivers", response_model=List[RouteDriverAssignmentOut])
+@router.get(
+    "/{route_id}/drivers",                                       # Read assignments for one route
+    response_model=List[RouteDriverAssignmentOut],               # Return assignment collection
+    summary="List route driver assignments",                     # Clear Swagger title
+    description=(                                                # Explain what the list represents
+        "Return all driver assignments for the route, including which one is "
+        "currently active."
+    ),
+    response_description="Route driver assignment list",         # Swagger response text
+)
 def get_route_drivers(route_id: int, db: Session = Depends(get_db)):
     route = (
         db.query(Route)
