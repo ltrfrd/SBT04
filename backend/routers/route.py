@@ -160,7 +160,7 @@ def update_route(route_id: int, route_in: RouteCreate, db: Session = Depends(get
 
     update_data = route_in.model_dump(exclude_unset=True)
     school_ids = update_data.pop("school_ids", None)
-        # -----------------------------------------------------------
+    # -----------------------------------------------------------
     # - Protect route_number uniqueness on update
     # - Exclude current route from duplicate detection
     # -----------------------------------------------------------

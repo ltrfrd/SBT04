@@ -22,9 +22,17 @@ router = APIRouter(prefix="/drivers", tags=["Drivers"])
 
 
 # -----------------------------------------------------------
-# CREATE: Add new driver
+# - Create driver
+# - Register new driver in the system
 # -----------------------------------------------------------
-@router.post("/", response_model=schemas.DriverOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/",
+    response_model=schemas.DriverOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create driver",
+    description="Create a new driver record. Email must be unique.",
+    response_description="Created driver",
+)
 def create_driver(driver: schemas.DriverCreate, db: Session = Depends(get_db)):
     new_driver = driver_model.Driver(**driver.model_dump())
     db.add(new_driver)
@@ -34,22 +42,35 @@ def create_driver(driver: schemas.DriverCreate, db: Session = Depends(get_db)):
 
 
 # -----------------------------------------------------------
-# READ: Get all drivers
+# - List drivers
+# - Return all registered driver records
 # -----------------------------------------------------------
-@router.get("/", response_model=List[schemas.DriverOut])
+@router.get(
+    "/",
+    response_model=List[schemas.DriverOut],
+    summary="List drivers",
+    description="Return all registered driver records.",
+    response_description="Driver list",
+)
 def get_drivers(db: Session = Depends(get_db)):
     return db.query(driver_model.Driver).all()
 
-
 # -----------------------------------------------------------
-# READ: Get driver by ID
+# - Get driver by id
+# - Return a single driver record
 # -----------------------------------------------------------
-@router.get("/{driver_id}", response_model=schemas.DriverOut)
+@router.get(
+    "/{driver_id}",
+    response_model=schemas.DriverOut,
+    summary="Get driver",
+    description="Return a single driver record by id.",
+    response_description="Driver record",
+)
 def get_driver(driver_id: int, db: Session = Depends(get_db)):
-    driver = db.get(driver_model.Driver, driver_id)
+    driver = db.get(driver_model.Driver, driver_id)                         # Load one driver by primary key
     if not driver:
-        raise HTTPException(status_code=404, detail="Driver not found")
-    return driver
+        raise HTTPException(status_code=404, detail="Driver not found")     # Return not found when missing
+    return driver                                                           # Return one driver object
 
 
 # -----------------------------------------------------------
@@ -72,9 +93,16 @@ def get_driver_routes(driver_id: int, db: Session = Depends(get_db)):
 
 
 # -----------------------------------------------------------
-# UPDATE: Modify driver
+# - Update driver
+# - Modify an existing driver record
 # -----------------------------------------------------------
-@router.put("/{driver_id}", response_model=schemas.DriverOut)
+@router.put(
+    "/{driver_id}",
+    response_model=schemas.DriverOut,
+    summary="Update driver",
+    description="Update an existing driver record by id.",
+    response_description="Updated driver",
+)
 def update_driver(
     driver_id: int, driver_in: DriverUpdate, db: Session = Depends(get_db)
 ):
@@ -90,11 +118,17 @@ def update_driver(
     db.refresh(driver)
     return driver
 
-
 # -----------------------------------------------------------
-# DELETE: Remove driver
+# - Delete driver
+# - Remove a driver record from the system
 # -----------------------------------------------------------
-@router.delete("/{driver_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{driver_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete driver",
+    description="Delete a driver record by id.",
+    response_description="Driver deleted",
+)
 def delete_driver(driver_id: int, db: Session = Depends(get_db)):
     driver = db.get(driver_model.Driver, driver_id)
     if not driver:

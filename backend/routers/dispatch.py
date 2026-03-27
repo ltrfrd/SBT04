@@ -62,7 +62,7 @@ def log_charter_hours(
         charter_start=charter_start,
         charter_end=charter_end,
     )
-    record.charter_hours = record.calculate_charter_hours         # Compute hours
+    record.charter_hours = record.calculate_charter_hours            # Compute hours
     db.add(record)
     db.commit()
     db.refresh(record)
@@ -74,7 +74,7 @@ def log_charter_hours(
 # -----------------------------------------------------------
 @router.get("/", response_model=List[schemas.DispatchOut])
 def get_all_dispatch_records(db: Session = Depends(get_db)):
-    """Dispatch module retrieves every entry."""
+    """Return all dispatch records."""
     return db.query(dispatch_model.Payroll).all()
 
 
@@ -84,7 +84,7 @@ def get_all_dispatch_records(db: Session = Depends(get_db)):
 # -----------------------------------------------------------
 @router.get("/driver/{driver_id}", response_model=List[schemas.DispatchOut])
 def get_driver_dispatch_records(driver_id: int, db: Session = Depends(get_db)):
-    """List all dispatch entries for one driver."""
+    """Return all dispatch records for a driver."""
     driver = db.get(driver_model.Driver, driver_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
@@ -101,7 +101,7 @@ def get_driver_dispatch_records(driver_id: int, db: Session = Depends(get_db)):
 # -----------------------------------------------------------
 @router.put("/{dispatch_id}/approve", response_model=schemas.DispatchOut)
 def approve_dispatch_record(dispatch_id: int, db: Session = Depends(get_db)):
-    """Dispatch module marks a record as approved."""
+    """Approve a dispatch record."""
     record = db.get(dispatch_model.Payroll, dispatch_id)
     if not record:
         raise HTTPException(status_code=404, detail="Dispatch record not found")
