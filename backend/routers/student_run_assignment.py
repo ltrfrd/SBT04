@@ -1,3 +1,8 @@
+# ===========================================================
+# backend/routers/student_run_assignment.py - BST Student Run Assignment Router
+# -----------------------------------------------------------
+# Manage explicit runtime student-to-run assignment records.
+# ===========================================================
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -16,11 +21,24 @@ from backend.schemas.student_run_assignment import (
 from backend.utils.db_errors import raise_conflict_if_unique
 from backend.utils.student_bus_absence import has_student_bus_absence
 
-
+# -----------------------------------------------------------
+# Router setup
+# -----------------------------------------------------------
 router = APIRouter(prefix="/student-run-assignments", tags=["StudentRunAssignments"])
 
 
-@router.post("/", response_model=StudentRunAssignmentOut, status_code=status.HTTP_201_CREATED)
+# -----------------------------------------------------------
+# - Create student run assignment
+# - Assign a student to a run and stop
+# -----------------------------------------------------------
+@router.post(
+    "/",
+    response_model=StudentRunAssignmentOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create student run assignment",
+    description="Create a student run assignment for a specific run and stop.",
+    response_description="Created student run assignment",
+)
 def create_assignment(payload: StudentRunAssignmentCreate, db: Session = Depends(get_db)):
     student = db.get(student_model.Student, payload.student_id)
     if not student:
@@ -57,8 +75,17 @@ def create_assignment(payload: StudentRunAssignmentCreate, db: Session = Depends
         )
         raise HTTPException(status_code=400, detail="Integrity error")
 
-
-@router.get("/", response_model=List[StudentRunAssignmentOut])
+# -----------------------------------------------------------
+# - List student run assignments
+# - Return assignments with optional run and student filters
+# -----------------------------------------------------------
+@router.get(
+    "/",
+    response_model=List[StudentRunAssignmentOut],
+    summary="List student run assignments",
+    description="Return student run assignments with optional run and student filters.",
+    response_description="Student run assignment list",
+)
 def list_assignments(
     run_id: int | None = None,
     student_id: int | None = None,
@@ -71,8 +98,17 @@ def list_assignments(
         query = query.filter(StudentRunAssignment.student_id == student_id)
     return query.all()
 
-
-@router.delete("/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
+# -----------------------------------------------------------
+# - Delete student run assignment
+# - Remove one assignment by id
+# -----------------------------------------------------------
+@router.delete(
+    "/{assignment_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete student run assignment",
+    description="Delete a student run assignment by id.",
+    response_description="Student run assignment deleted",
+)
 def delete_assignment(assignment_id: int, db: Session = Depends(get_db)):
     assignment = db.get(StudentRunAssignment, assignment_id)
     if not assignment:

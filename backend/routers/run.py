@@ -1,37 +1,7 @@
-# ============================================================
-# Run router for BusTrack operational workflows
-# ============================================================
-
-# -----------------------------
-# Imports
-# -----------------------------
-
-# -----------------------------
-# Router / Model / Schema
-# -----------------------------
-
-# -----------------------------
-# Logic
-# -----------------------------
-
-# =============================================================================
-# backend/routers/run.py — SBT02 Run Router
-# -----------------------------------------------------------------------------
-# Responsibilities:
-#   - Create runs
-#   - Start and end runs
-#   - List runs with optional filters
-#   - Return one run by ID
-#   - Return ordered stops for a run
-#   - Return running board data for a run
-#
-# Data model notes:
-#   - Route -> Runs
-#   - Run -> Stops
-#   - Runtime rider mapping uses StudentRunAssignment
-#   - Legacy student.route_id and student.stop_id are NOT the source of truth
-#     for running board logic
-# =============================================================================
+# ===========================================================
+# backend/routers/run.py - BST Run Router
+# Manage run lifecycle, live stop progress, and rider actions.
+# ===========================================================
 
 from datetime import datetime, timezone
 from typing import List
@@ -78,7 +48,7 @@ router = APIRouter(prefix="/runs", tags=["Runs"])
 
 
 # -----------------------------------------------------------
-# Run state helpers
+# - Run state helpers
 # - Shared read-only summary logic for occupancy and state views
 # -----------------------------------------------------------
 def _get_run_or_404(run_id: int, db: Session) -> Run:
@@ -139,7 +109,7 @@ def _resolve_run_driver(route):
 
 
 # -----------------------------------------------------------
-# Run serializer
+# - Run serializer
 # - Return enriched run payloads with driver and route labels
 # -----------------------------------------------------------
 def _serialize_run(run: run_model.Run) -> RunOut:
@@ -157,11 +127,18 @@ def _serialize_run(run: run_model.Run) -> RunOut:
     )
 
 
-# =============================================================================
-# POST /runs/
-# Create a run directly
-# =============================================================================
-@router.post("/", response_model=schemas.RunOut, status_code=status.HTTP_201_CREATED)
+# -----------------------------------------------------------
+# - Create run
+# - Create a run record directly from the route assignment
+# -----------------------------------------------------------
+@router.post(
+    "/",
+    response_model=schemas.RunOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create run",
+    description="Create a run record directly for a route using its active driver assignment.",
+    response_description="Created run",
+)
 def create_run(run: RunStart, db: Session = Depends(get_db)):
     route = (
         db.query(route_model.Route)
@@ -176,7 +153,7 @@ def create_run(run: RunStart, db: Session = Depends(get_db)):
 
     resolved_driver_id = _resolve_run_driver(route)  # Derive driver from route assignment
 
-        # -------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Prevent driver from having multiple active runs
     # -------------------------------------------------------------------------
     existing_active_run = (
@@ -204,11 +181,17 @@ def create_run(run: RunStart, db: Session = Depends(get_db)):
     db.refresh(new_run)  # Reload saved object
     return _serialize_run(new_run)  # Return created run
 
-# =============================================================================
-# POST /runs/start
-# Start a run
-# =============================================================================
-@router.post("/start", response_model=RunOut)
+# -----------------------------------------------------------
+# - Start run
+# - Start a run, copy stops, and create runtime assignments
+# -----------------------------------------------------------
+@router.post(
+    "/start",
+    response_model=RunOut,
+    summary="Start run",
+    description="Start a run for the route, copy the latest stop plan, and create runtime student assignments.",
+    response_description="Started run",
+)
 def start_run(run: RunStart, db: Session = Depends(get_db)):
     route = (
         db.query(route_model.Route)
@@ -270,7 +253,7 @@ def start_run(run: RunStart, db: Session = Depends(get_db)):
         .first()
     )
 
-        # -------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Copy stops from source run into the new run
     # -------------------------------------------------------------------------
     if source_run:
@@ -355,11 +338,17 @@ def start_run(run: RunStart, db: Session = Depends(get_db)):
     db.refresh(new_run)  # Reload saved run
     return _serialize_run(new_run)  # Return started run
 
-# =============================================================================
-# POST /runs/end
-# End an active run
-# =============================================================================
-@router.post("/end", response_model=schemas.RunOut)
+# -----------------------------------------------------------
+# - End run
+# - End an active run by run id
+# -----------------------------------------------------------
+@router.post(
+    "/end",
+    response_model=schemas.RunOut,
+    summary="End run",
+    description="End an active run by run id.",
+    response_description="Ended run",
+)
 def end_run(run_id: int, db: Session = Depends(get_db)):
     run = db.get(run_model.Run, run_id)  # Load run
     if not run:
@@ -372,17 +361,17 @@ def end_run(run_id: int, db: Session = Depends(get_db)):
     db.refresh(run)  # Reload updated run
     return run  # Return ended run
 
-# =============================================================================
-# POST /runs/end_by_driver
-# End the current active run for a specific driver
-#
-# Rules:
-#   - driver_id is required
-#   - driver must exist
-#   - only active run can be ended
-#   - if multiple active runs exist, end the newest one
-# =============================================================================
-@router.post("/end_by_driver", response_model=schemas.RunOut)
+# -----------------------------------------------------------
+# - End run by driver
+# - End the newest active run for a specific driver
+# -----------------------------------------------------------
+@router.post(
+    "/end_by_driver",
+    response_model=schemas.RunOut,
+    summary="End run by driver",
+    description="End the newest active run for a specific driver.",
+    response_description="Ended run",
+)
 def end_run_by_driver(
     driver_id: int,                         # Driver whose active run should be ended
     db: Session = Depends(get_db)          # Database session dependency
@@ -444,7 +433,13 @@ def end_run_by_driver(
 #   - driver_name
 #   - route_number
 # =============================================================================
-@router.get("/", response_model=List[schemas.RunOut])
+@router.get(
+    "/",
+    response_model=List[schemas.RunOut],
+    summary="List runs",
+    description="Return runs with optional driver, route, run type, and active status filters.",
+    response_description="Run list",
+)
 def get_all_runs(
     driver_id: int | None = None,          # Optional filter: driver
     route_id: int | None = None,           # Optional filter: route
@@ -536,7 +531,13 @@ def get_all_runs(
 #   - if no active run exists for that driver, return 404
 #   - if multiple active runs exist, return the newest one
 # =============================================================================
-@router.get("/active", response_model=schemas.RunOut)
+@router.get(
+    "/active",
+    response_model=schemas.RunOut,
+    summary="Get active run",
+    description="Return the newest active run for the requested driver.",
+    response_description="Active run",
+)
 def get_active_run(
     driver_id: int,                         # Driver to check for active run
     db: Session = Depends(get_db)          # Database session dependency
@@ -577,7 +578,13 @@ def get_active_run(
 #   - sequence ascending
 #   - id ascending
 # =============================================================================
-@router.get("/{run_id}/stops", response_model=List[StopOut])
+@router.get(
+    "/{run_id}/stops",
+    response_model=List[StopOut],
+    summary="Get run stops",
+    description="Return the stops for a run ordered by sequence and id.",
+    response_description="Ordered run stops",
+)
 def get_run_stops(run_id: int, db: Session = Depends(get_db)):
     # -------------------------------------------------------------------------
     # Validate run exists
@@ -604,20 +611,20 @@ def get_run_stops(run_id: int, db: Session = Depends(get_db)):
 
 
 # -----------------------------------------------------------
-# Run Action Endpoints
+# - Run action endpoints
 # - Mutate live run state and runtime rider execution data
 # -----------------------------------------------------------
-# =============================================================================
-# POST /runs/{run_id}/arrive_stop
-# Mark the driver as arrived at a specific stop in the run
-#
-# Rules:
-#   - run must exist
-#   - run must still be active
-#   - stop sequence must exist in that run
-#   - updates run.current_stop_sequence
-# =============================================================================
-@router.post("/{run_id}/arrive_stop", response_model=schemas.RunOut)
+# -----------------------------------------------------------
+# - Arrive at stop
+# - Mark the driver as arrived at a specific stop in the run
+# -----------------------------------------------------------
+@router.post(
+    "/{run_id}/arrive_stop",
+    response_model=schemas.RunOut,
+    summary="Arrive at stop",
+    description="Mark the run as arrived at the requested stop sequence and log an ARRIVE event.",
+    response_description="Updated run state",
+)
 def arrive_at_stop(
     run_id: int,
     stop_sequence: int = Query(..., ge=1),          # Stop sequence reached by driver
@@ -686,7 +693,13 @@ def arrive_at_stop(
 #   Advance the run to the next stop without requiring the driver to know the
 #   stop sequence number.
 # =============================================================================
-@router.post("/{run_id}/next_stop", response_model=schemas.RunOut)
+@router.post(
+    "/{run_id}/next_stop",
+    response_model=schemas.RunOut,
+    summary="Advance to next stop",
+    description="Advance the run to the next configured stop without providing a stop sequence.",
+    response_description="Updated run state",
+)
 def advance_to_next_stop(
     run_id: int,
     db: Session = Depends(get_db),                  # Database session dependency
@@ -764,7 +777,13 @@ def advance_to_next_stop(
 #   - student's assigned stop must match current stop sequence
 #   - student must not already be picked up
 # =============================================================================
-@router.post("/{run_id}/pickup_student", response_model=PickupStudentResponse)
+@router.post(
+    "/{run_id}/pickup_student",
+    response_model=PickupStudentResponse,
+    summary="Pick up student",
+    description="Mark a student as picked up at the run's current stop and log a PICKUP event.",
+    response_description="Pickup confirmation",
+)
 def pickup_student(
     run_id: int,
     payload: PickupStudentRequest,
@@ -895,7 +914,13 @@ def pickup_student(
 #   - student must currently be onboard
 #   - student must not already be dropped off
 # =============================================================================
-@router.post("/{run_id}/dropoff_student", response_model=DropoffStudentResponse)
+@router.post(
+    "/{run_id}/dropoff_student",
+    response_model=DropoffStudentResponse,
+    summary="Drop off student",
+    description="Mark a student as dropped off at the run's current stop and log a DROPOFF event.",
+    response_description="Drop-off confirmation",
+)
 def dropoff_student(
     run_id: int,
     payload: DropoffStudentRequest,
@@ -1023,7 +1048,13 @@ def dropoff_student(
 # - Complete Run
 # - Mark a run as finished and lock further action updates
 # -----------------------------------------------------------
-@router.post("/{run_id}/complete", response_model=RunCompleteOut)
+@router.post(
+    "/{run_id}/complete",
+    response_model=RunCompleteOut,
+    summary="Complete run",
+    description="Mark a run as completed, close it, and create no-show events for riders not picked up.",
+    response_description="Run completion status",
+)
 def complete_run(run_id: int, db: Session = Depends(get_db)):
     # -------------------------------------------------------------------------
     # Load run
@@ -1106,33 +1137,20 @@ def complete_run(run_id: int, db: Session = Depends(get_db)):
     )
 
 # -----------------------------------------------------------
-# Run View Endpoints
-# - Read/present live run state, summaries, and history views
+# - Run view endpoints
+# - Read and present live run state, summaries, and history views
 # -----------------------------------------------------------
 # -----------------------------------------------------------
-# Run State Endpoint
-# - Returns the current operational snapshot of a run
-# - Does not mutate state
-# - Progress is derived from ARRIVE events because the
-#   run engine allows flexible stop movement and revisits
+# - Get run state
+# - Return the current operational snapshot of a run
 # -----------------------------------------------------------
-# =============================================================================
-# GET /runs/{run_id}/state
-# ---------------------------------------------------------------------------
-# Purpose:
-#   Return a current operational snapshot for the run "now".
-#
-# View separation:
-#   - state    -> current snapshot
-#   - timeline -> raw event history
-#   - replay   -> interpreted human-readable history
-#
-# Flexible movement note:
-#   completed_stops uses distinct ARRIVE events instead of assuming a strict
-#   forward-only sequence. This respects revisits/backtracking while keeping
-#   progress stable and non-negative.
-# =============================================================================
-@router.get("/{run_id}/state", response_model=RunStateOut)
+@router.get(
+    "/{run_id}/state",
+    response_model=RunStateOut,
+    summary="Get run state",
+    description="Return the current operational snapshot for a run, including stop progress and rider counts.",
+    response_description="Current run state",
+)
 def get_run_state(
     run_id: int,
     db: Session = Depends(get_db),
@@ -1228,7 +1246,13 @@ def get_run_state(
 #
 # Students are returned ordered by stop sequence.
 # =============================================================================
-@router.get("/{run_id}/onboard_students", response_model=OnboardStudentsResponse)
+@router.get(
+    "/{run_id}/onboard_students",
+    response_model=OnboardStudentsResponse,
+    summary="Get onboard students",
+    description="Return students currently onboard the bus for an active run, ordered by stop sequence.",
+    response_description="Onboard student list",
+)
 def get_onboard_students(
     run_id: int,
     db: Session = Depends(get_db),
@@ -1326,6 +1350,8 @@ def get_onboard_students(
     "/{run_id}/occupancy_summary",
     response_model=RunOccupancySummaryResponse,
     summary="Get run occupancy summary",
+    description="Return rider occupancy totals for one run based on runtime student assignments.",
+    response_description="Run occupancy summary",
 )
 def get_run_occupancy_summary(
     run_id: int,
@@ -1367,7 +1393,13 @@ def get_run_occupancy_summary(
 #   This stays separate from /state because timeline is a lossless event log,
 #   not a current snapshot or interpreted admin view.
 # =============================================================================
-@router.get("/{run_id}/timeline", response_model=RunTimelineOut)
+@router.get(
+    "/{run_id}/timeline",
+    response_model=RunTimelineOut,
+    summary="Get run timeline",
+    description="Return the raw ordered ARRIVE, PICKUP, and DROPOFF event history for a run.",
+    response_description="Run timeline",
+)
 def get_run_timeline(run_id: int, db: Session = Depends(get_db)):
 
     run = db.get(run_model.Run, run_id)                                   # Load run by ID
@@ -1401,7 +1433,13 @@ def get_run_timeline(run_id: int, db: Session = Depends(get_db)):
 #   This stays separate from /timeline because replay adds names, messages,
 #   and occupancy interpretation on top of the raw event log.
 # =============================================================================
-@router.get("/{run_id}/replay", response_model=RunReplayOut)
+@router.get(
+    "/{run_id}/replay",
+    response_model=RunReplayOut,
+    summary="Get run replay",
+    description="Return an interpreted event history for a run with readable messages and occupancy context.",
+    response_description="Run replay",
+)
 def get_run_replay(run_id: int, db: Session = Depends(get_db)):
     # -------------------------------------------------------------------------
     # Validate run exists
@@ -1524,7 +1562,13 @@ def get_run_replay(run_id: int, db: Session = Depends(get_db)):
 # GET /runs/{run_id}
 # Return one run by ID with enriched display fields
 # =============================================================================
-@router.get("/{run_id}", response_model=schemas.RunOut)
+@router.get(
+    "/{run_id}",
+    response_model=schemas.RunOut,
+    summary="Get run",
+    description="Return one run by id with driver and route display fields.",
+    response_description="Run record",
+)
 def get_run(run_id: int, db: Session = Depends(get_db)):
 
     # -------------------------------------------------------------------------
@@ -1560,12 +1604,17 @@ def get_run(run_id: int, db: Session = Depends(get_db)):
     )
 
 
-# =============================================================================
-# GET /runs/{run_id}/running_board
-# Returns the operational running board for one run
-# Source of truth for riders is StudentRunAssignment, not legacy student fields
-# =============================================================================
-@router.get("/{run_id}/running_board", response_model=RunningBoardResponse)
+# -----------------------------------------------------------
+# - Get running board
+# - Return the operational running board for one run
+# -----------------------------------------------------------
+@router.get(
+    "/{run_id}/running_board",
+    response_model=RunningBoardResponse,
+    summary="Get running board",
+    description="Return the operational running board for a run using runtime student assignments as the source of truth.",
+    response_description="Running board",
+)
 def get_running_board(run_id: int, db: Session = Depends(get_db)):
 
     # -------------------------------------------------------------------------
@@ -1660,11 +1709,16 @@ def get_running_board(run_id: int, db: Session = Depends(get_db)):
         stops=running_stops,  # Running board rows
     )
 
-# =============================================================================
-# GET /runs/{run_id}/assignments
-# Returns all student assignments for a specific run
-# =============================================================================
-@router.get("/{run_id}/assignments")
+# -----------------------------------------------------------
+# - Get run assignments
+# - Return all effective student assignments for a specific run
+# -----------------------------------------------------------
+@router.get(
+    "/{run_id}/assignments",
+    summary="Get run assignments",
+    description="Return all effective student assignments for a run with student and stop details.",
+    response_description="Run assignments",
+)
 def get_run_assignments(
     run_id: int,                         # Run identifier
     db: Session = Depends(get_db)        # Database session dependency
@@ -1716,11 +1770,17 @@ def get_run_assignments(
 
     return result
 
-# =============================================================================
-# GET /runs/{run_id}/summary
-# Returns a compact operational summary for one run
-# =============================================================================
-@router.get("/{run_id}/summary", response_model=schemas.RunSummaryOut)
+# -----------------------------------------------------------
+# - Get run summary
+# - Return a compact operational summary for one run
+# -----------------------------------------------------------
+@router.get(
+    "/{run_id}/summary",
+    response_model=schemas.RunSummaryOut,
+    summary="Get run summary",
+    description="Return a compact operational summary for one run with driver, route, and rider totals.",
+    response_description="Run summary",
+)
 def get_run_summary(run_id: int, db: Session = Depends(get_db)):
 
     # -------------------------------------------------------------------------

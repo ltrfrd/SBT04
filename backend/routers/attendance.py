@@ -1,9 +1,7 @@
 # -----------------------------------------------------------
-# Attendance Router
+# - Attendance Router
 # - Expose attendance-layer endpoints using the existing report behavior
-# -----------------------------------------------------------
-# -----------------------------------------------------------
-# Standard library
+# - Standard library
 # -----------------------------------------------------------
 from datetime import date, datetime, timezone   # Date filter type # UTC timestamp for confirmation save
 from datetime import timedelta # Date arithmetic
@@ -56,32 +54,56 @@ router = APIRouter(
 class SchoolConfirmationRequest(BaseModel):
     confirmed_by: str | None = None  # Optional school staff name
 
-@router.get("/driver/{driver_id}", status_code=status.HTTP_200_OK)
+# -----------------------------------------------------------
+# - Driver attendance summary
+# - Return attendance payload for one driver
+# -----------------------------------------------------------
+@router.get(
+    "/driver/{driver_id}",                                      # Endpoint path with driver id
+    status_code=status.HTTP_200_OK,                             # HTTP 200 on success
+    summary="Driver attendance summary",                        # Swagger title
+    description="Return attendance and work summary for a driver.",  # Swagger description
+    response_description="Driver attendance summary",           # Swagger response text
+)
 def get_driver_attendance(driver_id: int, db: Session = Depends(get_db)):
-    """Return work summary for one driver."""  # Behavior unchanged during rename
+    """Return work summary for one driver."""                   # Internal docstring
     attendance = attendance_generator.driver_summary(db, driver_id)  # Build driver attendance payload
-    if "error" in attendance:
-        raise HTTPException(status_code=404, detail=attendance["error"])  # Preserve missing-resource behavior
-    return attendance
-
-
-@router.get("/route/{route_id}", status_code=status.HTTP_200_OK)
-def get_route_attendance(route_id: int, db: Session = Depends(get_db)):
-    """Return detailed attendance summary for one route."""  # Outward wording updated only
-    attendance = attendance_generator.route_summary(db, route_id)  # Build route attendance payload
-    if "error" in attendance:
-        raise HTTPException(status_code=404, detail=attendance["error"])  # Preserve missing-resource behavior
-    return attendance
+    if "error" in attendance:                                       # Preserve missing-resource behavior
+        raise HTTPException(status_code=404, detail=attendance["error"])
+    return attendance                                               # Return attendance payload
 
 
 # -----------------------------------------------------------
-# Run Attendance Report
+# - Route attendance summary
+# - Return attendance payload for one route
+# -----------------------------------------------------------
+@router.get(
+    "/route/{route_id}",                                        # Endpoint path with route id
+    status_code=status.HTTP_200_OK,                             # HTTP 200 on success
+    summary="Route attendance summary",                         # Swagger title
+    description="Return attendance and work summary for a route.",  # Swagger description
+    response_description="Route attendance summary",            # Swagger response text
+)
+def get_route_attendance(route_id: int, db: Session = Depends(get_db)):
+    """Return work summary for one route."""                    # Internal docstring
+    attendance = attendance_generator.route_summary(db, route_id)  # Build route attendance payload
+    if "error" in attendance:                                      # Preserve missing-resource behavior
+        raise HTTPException(status_code=404, detail=attendance["error"])
+    return attendance                                              # Return attendance payload
+
+# -----------------------------------------------------------
+# - Run attendance summary
 # - Return attendance status for each student in a run
 # -----------------------------------------------------------
-@router.get("/run/{run_id}", status_code=status.HTTP_200_OK)
+@router.get(
+    "/run/{run_id}",                                           # Endpoint path with run id
+    status_code=status.HTTP_200_OK,                            # HTTP 200 on success
+    summary="Run attendance summary",                          # Swagger title
+    description="Return attendance status for each student in a run.",  # Swagger description
+    response_description="Run attendance summary",             # Swagger response text
+)
 def get_run_attendance(run_id: int, db: Session = Depends(get_db)):
-    """Return student attendance status for a specific run."""  # Attendance-layer view
-   
+    """Return student attendance status for a specific run."""  # Internal docstring
     run = db.query(Run).filter(Run.id == run_id).first()  # Load run
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")  # Preserve missing-resource behavior
@@ -128,9 +150,19 @@ def get_run_attendance(run_id: int, db: Session = Depends(get_db)):
     }
 
 
-@router.get("/payroll", status_code=status.HTTP_200_OK)
+# -----------------------------------------------------------
+# - Driver work summary
+# - Return payroll-style summary for a date range
+# -----------------------------------------------------------
+@router.get(
+    "/payroll",                                                # Endpoint path
+    status_code=status.HTTP_200_OK,                            # HTTP 200 on success
+    summary="Driver work summary",                             # Swagger title
+    description="Return driver work summary for the selected date range.",  # Swagger description
+    response_description="Driver work summary",                # Swagger response text
+)
 def get_driver_work_summary(start: date, end: date, db: Session = Depends(get_db)):
-    """Return payroll summary for all drivers within the given date range."""  # Behavior unchanged during rename
+    """Return payroll summary for all drivers within the given date range."""  # Internal docstring
     attendance = attendance_generator.payroll_summary(db, start, end)  # Build payroll attendance payload
     if not attendance:
         raise HTTPException(status_code=404, detail="No payroll records found in range")  # Preserve empty-range behavior
@@ -140,13 +172,18 @@ def get_driver_work_summary(start: date, end: date, db: Session = Depends(get_db
         "records": attendance,  # Summary payload
     }  # Preserve existing response payload shape
 
-# -----------------------------------------------------------  # Attendance report by date
-# Attendance report by date                                   # Dispatch daily attendance dashboard
-# - Dispatch daily attendance dashboard                       # Read-only attendance aggregation
-# -----------------------------------------------------------  # Section separator
+# -----------------------------------------------------------
+# - Date attendance summary
+# - Return attendance aggregation for one date
+# -----------------------------------------------------------
 
-@router.get("/date/{target_date}")                            # Daily attendance endpoint
-def get_date_attendance(                                      # Return attendance for one date
+@router.get(
+    "/date/{target_date}",                                    # Endpoint path with target date
+    summary="Date attendance summary",                        # Swagger title
+    description="Return attendance aggregation for a single date.",  # Swagger description
+    response_description="Date attendance summary",           # Swagger response text
+)
+def get_date_attendance(
     target_date: date,                                        # Requested attendance date
     db: Session = Depends(get_db),                            # Database session
 ):
@@ -157,13 +194,17 @@ def get_date_attendance(                                      # Return attendanc
         end=target_date,                                      # End date = target date
     )  # Daily attendance summary                             # Return one-day attendance data
 
-# -----------------------------------------------------------  # Attendance report by school
-# Attendance report by school                                 # School-level attendance dashboard
-# - School-level attendance dashboard                         # Read-only attendance aggregation
-# -----------------------------------------------------------  # Section separator
-
-@router.get("/school/{school_id}")                            # School attendance endpoint
-def get_school_attendance(                                    # Return attendance for one school
+# -----------------------------------------------------------
+# - School attendance summary
+# - Return attendance aggregation for one school
+# -----------------------------------------------------------
+@router.get(
+    "/school/{school_id}",                                    # Endpoint path with school id
+    summary="School attendance summary",                      # Swagger title
+    description="Return attendance aggregation for a single school.",  # Swagger description
+    response_description="School attendance summary",         # Swagger response text
+)
+def get_school_attendance(
     school_id: int,                                           # Requested school ID
     db: Session = Depends(get_db),                            # Database session
 ):
@@ -173,12 +214,17 @@ def get_school_attendance(                                    # Return attendanc
         ref_id=school_id,                                     # School reference ID
     )  # School attendance summary                            # Return school attendance data
 
-
 # -----------------------------------------------------------
-# School attendance confirmation
+# - Confirm school attendance
 # - Persist school-side confirmation for one run
 # -----------------------------------------------------------
-@router.post("/school/{school_id}/confirm/{run_id}", status_code=status.HTTP_200_OK)
+@router.post(
+    "/school/{school_id}/confirm/{run_id}",                   # Endpoint path with school + run ids
+    status_code=status.HTTP_200_OK,                           # HTTP 200 on success
+    summary="Confirm school attendance",                      # Swagger title
+    description="Persist school confirmation for a specific run.",  # Swagger description
+    response_description="Attendance confirmation saved",     # Swagger response text
+)
 def confirm_school_attendance(
     school_id: int,  # Requested school ID
     run_id: int,  # Requested run ID
@@ -249,10 +295,15 @@ def confirm_school_attendance(
         "confirmed_by": verification.confirmed_by,
     }
 # -----------------------------------------------------------
-# Absence report by date
-# - Returns planned bus absences for a given date
+# - Absences by date
+# - Return planned bus absences for one date
 # -----------------------------------------------------------
-@router.get("/absences/date/{target_date}")                                   # Absence visibility endpoint
+@router.get(
+    "/absences/date/{target_date}",                            # Endpoint path with target date
+    summary="Absences by date",                                # Swagger title
+    description="Return planned bus absences for a single date.",  # Swagger description
+    response_description="Absence list for date",              # Swagger response text
+)
 def get_absences_by_date(
     target_date: date,                                                                # Requested date
     db: Session = Depends(get_db),                                                    # Database session
@@ -287,13 +338,16 @@ def get_absences_by_date(
         "absences": results,                                                          # Absence list
     }
 
-
-
 # -----------------------------------------------------------
-# Absence report by school
-# - Returns planned absences for students of a given school
+# - Absences by school
+# - Return planned absences for one school
 # -----------------------------------------------------------
-@router.get("/absences/school/{school_id}")                               # School absence visibility
+@router.get(
+    "/absences/school/{school_id}",                          # Endpoint path with school id
+    summary="Absences by school",                            # Swagger title
+    description="Return planned bus absences for a single school.",  # Swagger description
+    response_description="Absence list for school",          # Swagger response text
+)
 def get_absences_by_school(
     school_id: int,                                                                # Requested school
     db: Session = Depends(get_db),                                                 # Database session
@@ -326,10 +380,15 @@ def get_absences_by_school(
     }
 
 # -----------------------------------------------------------
-# - Absence report by run
-# - Returns planned absences for students assigned to a run
+# - Absences by run
+# - Return planned absences for one run
 # -----------------------------------------------------------
-@router.get("/absences/run/{run_id}")                                    # Driver run absence visibility
+@router.get(
+    "/absences/run/{run_id}",                               # Endpoint path with run id
+    summary="Absences by run",                              # Swagger title
+    description="Return planned bus absences for a single run.",  # Swagger description
+    response_description="Absence list for run",            # Swagger response text
+)
 def get_absences_by_run(
     run_id: int,                                                                  # Requested run
     db: Session = Depends(get_db),                                                # Database session
@@ -355,7 +414,8 @@ def get_absences_by_run(
             joinedload(StudentBusAbsence.student)                                        # Load student relation
         )
         .filter(StudentRunAssignment.run_id == run_id)                            # Only this run
-        .filter(StudentBusAbsence.date == run.start_time.date())                  # Only run date        .order_by(StudentBusAbsence.id.asc()) 
+        .filter(StudentBusAbsence.date == run.start_time.date())                  # Only run date
+        .order_by(StudentBusAbsence.id.asc())                                     # Stable ordering
         .all()                                                                    # Materialize list
     )
 
@@ -378,10 +438,16 @@ def get_absences_by_run(
     }
 
 # -----------------------------------------------------------
-# School attendance by date
-# - Returns present / absent status for school students
+# - School attendance by date
+# - Return present or absent status for school students
 # -----------------------------------------------------------
-@router.get("/school/{school_id}/attendance/{target_date}")                      # School attendance by date
+@router.get(
+    "/school/{school_id}/attendance/{target_date}",                              # Endpoint path with school + date
+    status_code=status.HTTP_200_OK,                                              # HTTP 200 on success
+    summary="School attendance by date",                                         # Swagger title
+    description="Return present or absent status for school students on one date.",  # Swagger description
+    response_description="School attendance by date",                            # Swagger response text
+)
 def get_school_attendance_by_date(
     school_id: int,                                                              # Requested school
     target_date: date,                                                           # Requested date
@@ -434,11 +500,16 @@ def get_school_attendance_by_date(
     }
 
 # -----------------------------------------------------------
-# School mobile attendance checklist
-# - Mobile friendly page for school drop-off verification
-# - Allows optional second confirmation of student arrival
+# - School mobile attendance checklist
+# - Render mobile-friendly school attendance route list
 # -----------------------------------------------------------
-@router.get("/school/{school_id}/mobile")                     # Mobile school attendance page
+@router.get(
+    "/school/{school_id}/mobile",                             # Mobile school attendance page
+    status_code=status.HTTP_200_OK,                           # HTTP 200 on success
+    summary="School mobile attendance checklist",             # Swagger title
+    description="Render the mobile school attendance checklist for one school.",  # Swagger description
+    response_description="Rendered school mobile attendance page",  # Swagger response text
+)
 def get_school_mobile_attendance(
     school_id: int,                                           # Requested school
     request: Request,                                         # FastAPI request object
@@ -466,9 +537,15 @@ def get_school_mobile_attendance(
 
 # -----------------------------------------------------------
 # - School route attendance run list
-# - Shows runs for one selected school route
+# - Render runs for one selected school route
 # -----------------------------------------------------------
-@router.get("/school/{school_id}/mobile/route/{route_id}")   # Mobile school route page
+@router.get(
+    "/school/{school_id}/mobile/route/{route_id}",            # Mobile school route page
+    status_code=status.HTTP_200_OK,                           # HTTP 200 on success
+    summary="School mobile route runs",                       # Swagger title
+    description="Render the mobile list of runs for one selected school route.",  # Swagger description
+    response_description="Rendered school mobile route runs page",  # Swagger response text
+)
 def get_school_mobile_route_runs(
     school_id: int,                                           # Requested school
     route_id: int,                                            # Requested route
@@ -498,9 +575,15 @@ def get_school_mobile_route_runs(
 
 # -----------------------------------------------------------
 # - School single run attendance report
-# - Shows one selected run only
+# - Render one selected run only
 # -----------------------------------------------------------
-@router.get("/school/{school_id}/mobile/run/{run_id}")       # Mobile school run page
+@router.get(
+    "/school/{school_id}/mobile/run/{run_id}",                # Mobile school run page
+    status_code=status.HTTP_200_OK,                           # HTTP 200 on success
+    summary="School mobile single run",                       # Swagger title
+    description="Render the mobile attendance report for one selected run.",  # Swagger description
+    response_description="Rendered school mobile single run page",  # Swagger response text
+)
 def get_school_mobile_single_run(
     school_id: int,                                           # Requested school
     run_id: int,                                              # Requested run
@@ -538,7 +621,13 @@ class StudentStatusUpdate(BaseModel):                      # Pydantic model for 
 # -------------------------------------------------------------------------
 # School updates student status (layered, non-driver)
 # -------------------------------------------------------------------------
-@router.post("/school/student-status")                     # Endpoint for school-side status updates
+@router.post(
+    "/school/student-status",                               # Endpoint for school-side status updates
+    status_code=status.HTTP_200_OK,                         # HTTP 200 on success
+    summary="Update school student status",                 # Swagger title
+    description="Update school-layer attendance status for one assigned student.",  # Swagger description
+    response_description="School student status updated",   # Swagger response text
+)
 def update_school_status(                                  # Handler function
     payload: StudentStatusUpdate,                          # Typed JSON body
     db: Session = Depends(get_db)                          # Database session dependency
@@ -598,3 +687,4 @@ def update_school_status(                                  # Handler function
 student_bus_absence_router = student_bus_absence.router  # Keep absence under attendance module ownership
 
 __all__ = ["router", "student_bus_absence_router"]  # Export attendance router and absence compatibility router
+

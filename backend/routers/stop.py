@@ -1,3 +1,7 @@
+# ===========================================================
+# backend/routers/stop.py - BST Stop Router
+# Manage run stop validation, normalization, and ordering.
+# ===========================================================
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -13,85 +17,100 @@ from backend.models.stop import Stop
 from backend.schemas.stop import StopCreate, StopOut, StopUpdate, StopReorder
 from backend.utils.db_errors import raise_conflict_if_unique
 
-
+# -----------------------------------------------------------
+# Router setup
+# -----------------------------------------------------------
 router = APIRouter(prefix="/stops", tags=["Stops"])
 
-SHIFT_OFFSET = 100000
+
+# -----------------------------------------------------------
+# - Stop reorder helpers
+# - Keep run stop sequences contiguous during inserts and moves
+# -----------------------------------------------------------
+SHIFT_OFFSET = 100000  # Temporary sequence offset used to avoid unique collisions during moves
 
 
 def shift_block_up(db: Session, run_id: int, start_seq: int, end_seq: int) -> None:
-    if start_seq > end_seq:
+    if start_seq > end_seq:  # Ignore empty ranges
         return
 
     db.execute(
         update(stop_model.Stop)
-        .where(stop_model.Stop.run_id == run_id)
-        .where(stop_model.Stop.sequence >= start_seq)
-        .where(stop_model.Stop.sequence <= end_seq)
-        .values(sequence=stop_model.Stop.sequence + SHIFT_OFFSET)
-        .execution_options(synchronize_session=False)
+        .where(stop_model.Stop.run_id == run_id)  # Only stops for this run
+        .where(stop_model.Stop.sequence >= start_seq)  # Start of block to shift
+        .where(stop_model.Stop.sequence <= end_seq)  # End of block to shift
+        .values(sequence=stop_model.Stop.sequence + SHIFT_OFFSET)  # Move block into safe offset range
+        .execution_options(synchronize_session=False)  # Keep bulk update behavior unchanged
     )
 
     db.execute(
         update(stop_model.Stop)
-        .where(stop_model.Stop.run_id == run_id)
-        .where(stop_model.Stop.sequence >= start_seq + SHIFT_OFFSET)
-        .where(stop_model.Stop.sequence <= end_seq + SHIFT_OFFSET)
-        .values(sequence=stop_model.Stop.sequence - SHIFT_OFFSET + 1)
-        .execution_options(synchronize_session=False)
+        .where(stop_model.Stop.run_id == run_id)  # Only stops for this run
+        .where(stop_model.Stop.sequence >= start_seq + SHIFT_OFFSET)  # Shifted block start
+        .where(stop_model.Stop.sequence <= end_seq + SHIFT_OFFSET)  # Shifted block end
+        .values(sequence=stop_model.Stop.sequence - SHIFT_OFFSET + 1)  # Reinsert block one slot later
+        .execution_options(synchronize_session=False)  # Keep bulk update behavior unchanged
     )
 
 
 def shift_block_down(db: Session, run_id: int, start_seq: int, end_seq: int) -> None:
-    if start_seq > end_seq:
+    if start_seq > end_seq:  # Ignore empty ranges
         return
 
     db.execute(
         update(stop_model.Stop)
-        .where(stop_model.Stop.run_id == run_id)
-        .where(stop_model.Stop.sequence >= start_seq)
-        .where(stop_model.Stop.sequence <= end_seq)
-        .values(sequence=stop_model.Stop.sequence + SHIFT_OFFSET)
-        .execution_options(synchronize_session=False)
+        .where(stop_model.Stop.run_id == run_id)  # Only stops for this run
+        .where(stop_model.Stop.sequence >= start_seq)  # Start of block to shift
+        .where(stop_model.Stop.sequence <= end_seq)  # End of block to shift
+        .values(sequence=stop_model.Stop.sequence + SHIFT_OFFSET)  # Move block into safe offset range
+        .execution_options(synchronize_session=False)  # Keep bulk update behavior unchanged
     )
 
     db.execute(
         update(stop_model.Stop)
-        .where(stop_model.Stop.run_id == run_id)
-        .where(stop_model.Stop.sequence >= start_seq + SHIFT_OFFSET)
-        .where(stop_model.Stop.sequence <= end_seq + SHIFT_OFFSET)
-        .values(sequence=stop_model.Stop.sequence - SHIFT_OFFSET - 1)
-        .execution_options(synchronize_session=False)
+        .where(stop_model.Stop.run_id == run_id)  # Only stops for this run
+        .where(stop_model.Stop.sequence >= start_seq + SHIFT_OFFSET)  # Shifted block start
+        .where(stop_model.Stop.sequence <= end_seq + SHIFT_OFFSET)  # Shifted block end
+        .values(sequence=stop_model.Stop.sequence - SHIFT_OFFSET - 1)  # Reinsert block one slot earlier
+        .execution_options(synchronize_session=False)  # Keep bulk update behavior unchanged
     )
 
 
 def normalize_run_sequences(db: Session, run_id: int) -> None:
-    offset = 100000
+    offset = 100000  # Temporary offset used while renumbering stops safely
 
     stops = (
         db.query(Stop)
-        .filter(Stop.run_id == run_id)
-        .order_by(Stop.sequence.asc())
-        .all()
+        .filter(Stop.run_id == run_id)  # Only stops for this run
+        .order_by(Stop.sequence.asc())  # Normalize from current sequence order
+        .all()  # Materialize stop list
     )
 
-    if not stops:
+    if not stops:  # Nothing to normalize
         return
 
-    desired_by_id = {s.id: idx + 1 for idx, s in enumerate(stops)}
-    if all(s.sequence == desired_by_id[s.id] for s in stops):
+    desired_by_id = {s.id: idx + 1 for idx, s in enumerate(stops)}  # Build contiguous target sequence map
+    if all(s.sequence == desired_by_id[s.id] for s in stops):  # Skip work when already normalized
         return
 
     for s in stops:
-        s.sequence = s.sequence + offset
-    db.flush()
+        s.sequence = s.sequence + offset  # Move all rows into temporary safe range first
+    db.flush()  # Persist temporary offset values before final renumbering
 
     for s in stops:
-        s.sequence = desired_by_id[s.id]
-    db.flush()
+        s.sequence = desired_by_id[s.id]  # Apply contiguous sequence values
+    db.flush()  # Persist normalized sequence order
 
-
-@router.get("/validate/{run_id}")
+# -----------------------------------------------------------
+# - Validate run sequences
+# - Check whether stop sequences are contiguous for a run
+# -----------------------------------------------------------
+@router.get(
+    "/validate/{run_id}",
+    summary="Validate run sequences",
+    description="Check whether the stops for a run have contiguous sequence values.",
+    response_description="Run stop sequence validation result",
+)
 def validate_run_sequences(
     run_id: int,
     db: Session = Depends(get_db),
@@ -127,8 +146,16 @@ def validate_run_sequences(
         "has_gaps": gaps,
     }
 
-
-@router.post("/normalize/{run_id}")
+# -----------------------------------------------------------
+# - Normalize run sequences
+# - Force stop sequences into contiguous order for a run
+# -----------------------------------------------------------
+@router.post(
+    "/normalize/{run_id}",
+    summary="Normalize run sequences",
+    description="Force the stops for a run into contiguous sequence order.",
+    response_description="Normalized run stop sequences",
+)
 def force_normalize_run(
     run_id: int,
     db: Session = Depends(get_db),
@@ -162,8 +189,18 @@ def force_normalize_run(
         )
         raise HTTPException(status_code=400, detail="Integrity error")
 
-
-@router.post("/", response_model=StopOut, status_code=201)
+# -----------------------------------------------------------
+# - Create stop
+# - Create a stop and place it within the run sequence
+# -----------------------------------------------------------
+@router.post(
+    "/",
+    response_model=StopOut,
+    status_code=201,
+    summary="Create stop",
+    description="Create a stop for a run and place it in the requested sequence position.",
+    response_description="Created stop",
+)
 def create_stop(payload: StopCreate, db: Session = Depends(get_db)):
     try:
         run = db.get(run_model.Run, payload.run_id)
@@ -211,8 +248,17 @@ def create_stop(payload: StopCreate, db: Session = Depends(get_db)):
         )
         raise HTTPException(status_code=400, detail="Integrity error")
 
-
-@router.get("/", response_model=List[StopOut])
+# -----------------------------------------------------------
+# - List stops
+# - Return stops with optional run filtering
+# -----------------------------------------------------------
+@router.get(
+    "/",
+    response_model=List[StopOut],
+    summary="List stops",
+    description="Return all stops, optionally filtered to one run.",
+    response_description="Stop list",
+)
 def get_stops(run_id: int | None = None, db: Session = Depends(get_db)):
     query = db.query(stop_model.Stop)
 
@@ -222,8 +268,17 @@ def get_stops(run_id: int | None = None, db: Session = Depends(get_db)):
     query = query.order_by(stop_model.Stop.sequence.asc())
     return query.all()
 
-
-@router.put("/{stop_id}", response_model=StopOut)
+# -----------------------------------------------------------
+# - Update stop
+# - Modify an existing stop record
+# -----------------------------------------------------------
+@router.put(
+    "/{stop_id}",
+    response_model=StopOut,
+    summary="Update stop",
+    description="Update an existing stop record by id.",
+    response_description="Updated stop",
+)
 def update_stop(
     stop_id: int, stop_in: StopUpdate, db: Session = Depends(get_db)
 ):
@@ -239,8 +294,17 @@ def update_stop(
     db.refresh(stop)
     return stop
 
-
-@router.delete("/{stop_id}", status_code=status.HTTP_204_NO_CONTENT)
+# -----------------------------------------------------------
+# - Delete stop
+# - Remove a stop and normalize the remaining sequence order
+# -----------------------------------------------------------
+@router.delete(
+    "/{stop_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete stop",
+    description="Delete a stop by id and normalize the remaining stop sequence order.",
+    response_description="Stop deleted",
+)
 def delete_stop(stop_id: int, db: Session = Depends(get_db)):
     try:
         stop = db.get(stop_model.Stop, stop_id)
@@ -268,8 +332,17 @@ def delete_stop(stop_id: int, db: Session = Depends(get_db)):
         )
         raise HTTPException(status_code=400, detail="Integrity error")
 
-
-@router.put("/{stop_id}/reorder", response_model=StopOut)
+# -----------------------------------------------------------
+# - Reorder stop
+# - Move an existing stop to a new sequence position
+# -----------------------------------------------------------
+@router.put(
+    "/{stop_id}/reorder",
+    response_model=StopOut,
+    summary="Reorder stop",
+    description="Move an existing stop to a new sequence position within the run.",
+    response_description="Reordered stop",
+)
 def reorder_stop(
     stop_id: int, payload: StopReorder, db: Session = Depends(get_db)
 ):

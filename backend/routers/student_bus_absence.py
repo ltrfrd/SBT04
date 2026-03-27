@@ -1,7 +1,8 @@
+# ===========================================================
+# backend/routers/student_bus_absence.py - BST Student Bus Absence Router
 # -----------------------------------------------------------
-# Student Bus Absence Router
-# - Manage planned student no-ride records independently of incidents
-# -----------------------------------------------------------
+# Manage planned student no-ride records independently of incidents.
+# ===========================================================
 from datetime import date  # Query and payload date type
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status  # FastAPI router primitives
@@ -16,9 +17,16 @@ from backend.models.student_bus_absence import StudentBusAbsence  # Planned abse
 from backend.utils.db_errors import raise_conflict_if_unique  # Shared unique-conflict helper
 from backend.models import student_bus_absence as student_bus_absence_model  # Student planned absence model
 
+# -----------------------------------------------------------
+# Router setup
+# -----------------------------------------------------------
 router = APIRouter(prefix="/students", tags=["StudentBusAbsences"])  # Student-scoped planned absence routes
 
 
+# -----------------------------------------------------------
+# - Student helpers
+# - Load the target student before absence operations
+# -----------------------------------------------------------
 def _get_student_or_404(student_id: int, db: Session) -> student_model.Student:
     student = db.get(student_model.Student, student_id)  # Load student by ID
     if not student:
@@ -30,6 +38,9 @@ def _get_student_or_404(student_id: int, db: Session) -> student_model.Student:
     "/{student_id}/bus_absence",
     response_model=StudentBusAbsenceOut,
     status_code=status.HTTP_201_CREATED,
+    summary="Create student bus absence",
+    description="Create a planned bus absence record for a student.",
+    response_description="Created student bus absence",
 )
 def create_student_bus_absence(
     student_id: int,
@@ -56,11 +67,16 @@ def create_student_bus_absence(
         raise HTTPException(status_code=400, detail="Integrity error")  # Fallback for non-unique integrity failures
 
 # -----------------------------------------------------------
-# - Get Student Bus Absences
+# - Get student bus absences
 # - Retrieve all planned no-ride dates for a specific student
 # -----------------------------------------------------------
-@router.get("/{student_id}/bus_absence")                      # Retrieve planned absences for a student
-def get_student_bus_absences(                                 # List student bus absences
+@router.get(
+    "/{student_id}/bus_absence",
+    summary="Get student bus absences",
+    description="Return all planned bus absence records for a specific student.",
+    response_description="Student bus absence list",
+)  # Retrieve planned absences for a student
+def get_student_bus_absences(  # List student bus absences
     student_id: int,
     db: Session = Depends(get_db),
 ):
@@ -85,7 +101,17 @@ def get_student_bus_absences(                                 # List student bus
         "absences": absences                                  # Absence objects
     }
 
-@router.delete("/{student_id}/bus_absence", status_code=status.HTTP_204_NO_CONTENT)
+# -----------------------------------------------------------
+# - Delete student bus absence
+# - Remove one planned no-ride record for a specific date and run type
+# -----------------------------------------------------------
+@router.delete(
+    "/{student_id}/bus_absence",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete student bus absence",
+    description="Delete one planned bus absence record for a student by date and run type.",
+    response_description="Student bus absence deleted",
+)
 def delete_student_bus_absence(
     student_id: int,
     absence_date: date = Query(..., alias="date"),
