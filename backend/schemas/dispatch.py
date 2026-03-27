@@ -7,26 +7,30 @@ from datetime import date, time
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # -----------------------------------------------------------
-# PayrollCreate
+# DispatchCreate
 # - Create or update a dispatch-backed work entry
 # -----------------------------------------------------------
-class PayrollCreate(BaseModel):
+class DispatchCreate(BaseModel):
     driver_id: int  # FK: driver submitting
-    work_date: date  # Workday date
+    work_date: date = Field(
+        ...,
+        description="Date in YYYY-MM-DD format (e.g. 2026-03-23)",
+        json_schema_extra={"example": "2026-03-23"},
+    )  # Workday date
     charter_start: Optional[time] = None  # Charter start time
     charter_end: Optional[time] = None  # Charter end time
     approved: Optional[bool] = False  # Default not verified
 
 
 # -----------------------------------------------------------
-# PayrollOut
+# DispatchOut
 # - Return dispatch work entry data
 # -----------------------------------------------------------
-class PayrollOut(BaseModel):
+class DispatchOut(BaseModel):
     id: int
     driver_id: int
     work_date: date
@@ -36,3 +40,11 @@ class PayrollOut(BaseModel):
     approved: bool
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# -----------------------------------------------------------
+# - Backward compatibility aliases
+# - Preserve legacy Payroll schema names
+# -----------------------------------------------------------
+PayrollCreate = DispatchCreate
+PayrollOut = DispatchOut

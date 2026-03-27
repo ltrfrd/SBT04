@@ -160,7 +160,25 @@ def update_route(route_id: int, route_in: RouteCreate, db: Session = Depends(get
 
     update_data = route_in.model_dump(exclude_unset=True)
     school_ids = update_data.pop("school_ids", None)
+        # -----------------------------------------------------------
+    # - Protect route_number uniqueness on update
+    # - Exclude current route from duplicate detection
+    # -----------------------------------------------------------
+    new_route_number = update_data.get("route_number")                              # Proposed route number from request
 
+    if new_route_number and new_route_number != route.route_number:                 # Check only when route number changes
+        existing_route = (
+            db.query(Route)
+            .filter(Route.route_number == new_route_number)                         # Find matching route number
+            .filter(Route.id != route_id)                                           # Exclude current route
+            .first()
+        )
+
+        if existing_route:                                                          # Duplicate route number found
+            raise HTTPException(
+                status_code=409,
+                detail="Route number already exists",
+            )
     for key, value in update_data.items():
         setattr(route, key, value)
 

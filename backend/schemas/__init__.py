@@ -55,10 +55,16 @@ from .run import (
 )
 
 
-# -------------------------------------------------------------------------
-# Dispatch schemas
-# -------------------------------------------------------------------------
-from .dispatch import PayrollCreate, PayrollOut  # Dispatch creation and response schemas
+# -----------------------------------------------------------
+# - Dispatch schema exports
+# - Outward-facing Dispatch names with Payroll aliases
+# -----------------------------------------------------------
+from .dispatch import (
+    DispatchCreate,
+    DispatchOut,
+    PayrollCreate,
+    PayrollOut,
+)  # Dispatch creation and response schemas
 
 
 # -------------------------------------------------------------------------
@@ -98,6 +104,8 @@ __all__ = [
     "RunOut",
     "RunSummaryOut",
 
+    "DispatchCreate",
+    "DispatchOut",
     "PayrollCreate",
     "PayrollOut",
 

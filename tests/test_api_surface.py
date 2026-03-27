@@ -108,3 +108,30 @@ def test_students_crud(client):
     assert r.status_code in (200, 204)
     r = client.get(f"/students/{student_id}")
     assert r.status_code == 404
+
+# -----------------------------------------------------------
+# - Reject duplicate route_number during route update
+# - Keep current route excluded from duplicate detection
+# -----------------------------------------------------------
+def test_route_update_rejects_duplicate_route_number(client):
+    first_route = client.post(                                                       # Create first route
+        "/routes/",
+        json={"route_number": "R200", "unit_number": "Bus-200"},
+    )
+    assert first_route.status_code in (200, 201)
+
+    second_route = client.post(                                                      # Create second route
+        "/routes/",
+        json={"route_number": "R201", "unit_number": "Bus-201"},
+    )
+    assert second_route.status_code in (200, 201)
+
+    second_route_id = second_route.json()["id"]                                      # Target route to update
+
+    response = client.put(                                                           # Try changing to duplicate number
+        f"/routes/{second_route_id}",
+        json={"route_number": "R200", "unit_number": "Bus-201"},
+    )
+
+    assert response.status_code == 409                                               # Duplicate route number blocked
+    assert response.json()["detail"] == "Route number already exists"                # Match API error message
