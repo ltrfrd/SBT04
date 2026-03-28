@@ -6,20 +6,9 @@
 # Imports
 # -----------------------------
 from datetime import datetime  # Datetime types used in API schemas
-from enum import Enum  # Shared enum support
 from typing import List, Optional  # Optional and collection typing
 
-from pydantic import BaseModel, ConfigDict  # Pydantic schema helpers
-
-
-# -----------------------------
-# Router / Model / Schema
-# -----------------------------
-class RunType(str, Enum):
-    AM = "AM"  # Morning run type
-    MIDDAY = "MIDDAY"  # Midday run type
-    PM = "PM"  # Afternoon run type
-    EXTRA = "EXTRA"  # Extra run type
+from pydantic import BaseModel, ConfigDict, Field  # Pydantic schema helpers
 
 
 # -----------------------------
@@ -27,7 +16,13 @@ class RunType(str, Enum):
 # -----------------------------
 class RunStart(BaseModel):
     route_id: int  # Route being run
-    run_type: RunType  # AM / MIDDAY / PM / EXTRA
+    run_type: str = Field(min_length=1)  # Flexible run label
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class RunUpdate(BaseModel):
+    run_type: str = Field(min_length=1)  # Updated flexible run label
 
     model_config = ConfigDict(extra="forbid")
 
@@ -36,8 +31,8 @@ class RunOut(BaseModel):
     id: int  # Run identifier
     driver_id: int  # Assigned driver ID
     route_id: int  # Assigned route ID
-    run_type: RunType  # Operational run type
-    start_time: datetime  # Run start timestamp
+    run_type: str  # Operational run label
+    start_time: Optional[datetime] = None  # Run start timestamp when the run has started
     end_time: Optional[datetime] = None  # Run end timestamp if completed
     current_stop_id: Optional[int] = None  # Current actual stop ID for the bus
     current_stop_sequence: Optional[int] = None  # Current actual stop sequence for the bus
@@ -78,10 +73,10 @@ class RunSummaryOut(BaseModel):
     driver_name: str | None  # Driver display name
     route_id: int  # Route ID
     route_number: str | None  # Route number
-    run_type: RunType  # Run type
-    start_time: datetime  # Run start timestamp
+    run_type: str  # Run label
+    start_time: datetime | None  # Run start timestamp when started
     end_time: datetime | None  # Run end timestamp
-    status: str  # active / ended
+    status: str  # planned / active / ended
     total_stops: int  # Number of stops in the run
     total_assigned_students: int  # Number of assigned riders
     current_load: int  # Current cumulative load based on assignments
@@ -148,7 +143,7 @@ class RunStateOut(BaseModel):
     run_id: int  # Current run ID
     route_id: int  # Parent route ID
     driver_id: int  # Assigned driver ID
-    run_type: RunType  # AM / PM / etc.
+    run_type: str  # Flexible run label
     current_stop_id: int | None = None  # Latest known bus location stop ID
     current_stop_sequence: int | None = None  # Latest known bus location sequence
     current_stop_name: str | None = None  # Latest known bus location name

@@ -47,7 +47,7 @@ def test_next_stop_advances_progress(client):
     # Create run
     # -------------------------------------------------------------------------
     run_res = client.post(
-        "/runs/",
+        "/runs/start",
         json={
             "route_id": route_id,
             "run_type": "AM",

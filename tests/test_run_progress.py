@@ -8,7 +8,6 @@
 # Endpoint flow tested:
 #   - POST /runs/
 #   - POST /stops/
-#   - POST /runs/end
 #   - POST /runs/start
 #   - GET /runs/{run_id}/stops
 # =============================================================================
@@ -95,12 +94,6 @@ def test_start_run_copies_stops_from_latest_route_run(client):
         },
     )
     assert stop_2_response.status_code in (200, 201)
-
-    # -------------------------------------------------------------------------
-    # End the source run so the same driver can start a new active run
-    # -------------------------------------------------------------------------
-    end_response = client.post(f"/runs/end?run_id={source_run_id}")
-    assert end_response.status_code == 200
 
     # -------------------------------------------------------------------------
     # Start a fresh run on the same route
@@ -244,11 +237,8 @@ def test_run_state_uses_stored_current_stop_sequence(client):
     assert stop_3_res.status_code in (200, 201)
 
     # -------------------------------------------------------------------------
-    # End the seed run and start the copied active run
+    # Start the copied active run from the same route
     # -------------------------------------------------------------------------
-    end_res = client.post(f"/runs/end?run_id={seed_run_id}")
-    assert end_res.status_code == 200
-
     active_run_res = client.post(
         "/runs/start",
         json={

@@ -19,7 +19,8 @@ from fastapi.templating import Jinja2Templates  # For rendering HTML templates
 from fastapi.middleware.cors import CORSMiddleware  # Allow cross-domain requests
 from fastapi.staticfiles import StaticFiles         # Serve static files (CSS, JS)
 from starlette.middleware.sessions import SessionMiddleware  # Session handling
-from sqlalchemy.orm import Session         # Database session for ORM
+from sqlalchemy import and_
+from sqlalchemy.orm import Session, joinedload         # Database session for ORM
 from datetime import datetime, date        # For timestamps and date filters
 import json                                # Parse JSON payloads
 from typing import Dict, List              # Type hints for dictionaries/lists
@@ -35,6 +36,7 @@ from backend.models import (                # Import model modules for ORM bindi
     run as run_model,
     dispatch as dispatch_model
 )
+from backend.models.associations import RouteDriverAssignment, StudentRunAssignment
 
 # ---------- ROUTERS ----------
 # Import each router module (each exposes a .router object)
@@ -195,44 +197,178 @@ def route_report(route_id: int, request: Request, db: Session = Depends(get_db))
 # -----------------------------------------------------------
 # DRIVER RUN PAGE
 # -----------------------------------------------------------
+def _get_run_workspace_status(run: run_model.Run) -> str:
+    if run.start_time is None:
+        return "planned"                                     # Planned runs exist before start
+    if run.end_time is None:
+        return "active"                                      # Started but not ended yet
+    return "ended"                                           # Historical completed run
+
+
+def _build_route_workspace(route: route_model.Route) -> dict:
+    active_assignment = next(                                # Route-level assigned driver for header display
+        (assignment for assignment in route.driver_assignments if assignment.active),
+        None,
+    )
+
+    ordered_runs = sorted(                                   # Show the newest run context first
+        route.runs,
+        key=lambda run: (run.start_time or datetime.min, run.id),
+        reverse=True,
+    )
+
+    run_rows = []                                            # Final nested run workspace rows
+
+    for run in ordered_runs:
+        ordered_stops = sorted(                              # Stable stop order inside each run
+            run.stops,
+            key=lambda stop: (
+                stop.sequence if stop.sequence is not None else 999999,
+                stop.id,
+            ),
+        )
+
+        assignments_by_stop: dict[int, list[dict]] = {}     # Stop -> student rows for the template
+
+        for assignment in sorted(
+            run.student_assignments,
+            key=lambda item: (
+                item.stop.sequence if item.stop and item.stop.sequence is not None else 999999,
+                item.id,
+            ),
+        ):
+            if assignment.stop_id is None or not assignment.student:
+                continue
+
+            assignments_by_stop.setdefault(assignment.stop_id, []).append(
+                {
+                    "student_id": assignment.student.id,     # Stable student identifier for row keys
+                    "student_name": assignment.student.name, # Driver-facing student display
+                    "grade": assignment.student.grade,       # Compact rider detail
+                    "school_name": assignment.student.school.name if assignment.student.school else None,  # School context
+                }
+            )
+
+        stop_rows = []                                       # Ordered stop rows for this run
+
+        for stop in ordered_stops:
+            stop_students = assignments_by_stop.get(stop.id, [])
+            stop_rows.append(
+                {
+                    "id": stop.id,
+                    "sequence": stop.sequence,
+                    "name": stop.name,
+                    "address": stop.address,
+                    "student_count": len(stop_students),
+                    "students": stop_students,
+                }
+            )
+
+        status = _get_run_workspace_status(run)              # Planned / active / ended summary label
+        run_rows.append(
+            {
+                "id": run.id,
+                "run_type": run.run_type,
+                "status": status,
+                "start_time": run.start_time,
+                "end_time": run.end_time,
+                "stop_count": len(stop_rows),
+                "student_count": len(run.student_assignments),
+                "current_stop_id": run.current_stop_id,
+                "current_stop_sequence": run.current_stop_sequence,
+                "can_start": run.start_time is None,         # Start only from not-yet-started runs
+                "can_update": run.start_time is None,        # Only planned runs remain editable
+                "can_delete": run.start_time is None,        # Only planned runs remain deletable
+                "can_end": status == "active",               # Preserve active end-run behavior
+                "stops": stop_rows,
+            }
+        )
+
+    active_run = next((run for run in run_rows if run["status"] == "active"), None)  # At most one active run per driver
+
+    return {
+        "id": route.id,
+        "route_number": route.route_number,
+        "unit_number": route.unit_number,
+        "schools": [
+            {
+                "id": school.id,
+                "name": school.name,
+            }
+            for school in route.schools
+        ],
+        "assigned_driver_id": active_assignment.driver_id if active_assignment else None,
+        "assigned_driver_name": active_assignment.driver.name if active_assignment and active_assignment.driver else None,
+        "runs": run_rows,
+        "active_run": active_run,
+    }
+
+
 @app.get("/driver_run/{driver_id}", response_class=HTMLResponse)
 def driver_run_view(
     driver_id: int,
     request: Request,
+    route_id: int | None = None,
     db: Session = Depends(get_db),
     current_driver: driver_model.Driver = Depends(get_current_driver)
 ):
-    """Renders driver's active or pending run view with route and stop data."""
+    """Render the route-first driver workspace."""
     if not current_driver:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     if current_driver.id != driver_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    # Get current active run (if any)
-    active_run = db.query(run_model.Run).filter(
-        run_model.Run.driver_id == driver_id,
-        run_model.Run.end_time.is_(None)
-    ).first()
+    active_run = (
+        db.query(run_model.Run)
+        .options(joinedload(run_model.Run.route))
+        .filter(run_model.Run.driver_id == driver_id)
+        .filter(run_model.Run.start_time.is_not(None))
+        .filter(run_model.Run.end_time.is_(None))
+        .first()
+    )                                                        # Current active run for route preselection
 
-    # Determine run state and stops
-    run_status = "active" if active_run else "pending"
-    stops = sorted(active_run.stops, key=lambda s: s.sequence) if active_run else []
-    current_stop_index = 1
+    available_routes = (
+        db.query(route_model.Route)
+        .options(
+            joinedload(route_model.Route.schools),           # Route header school list
+            joinedload(route_model.Route.driver_assignments).joinedload(RouteDriverAssignment.driver),  # Assigned driver display
+            joinedload(route_model.Route.runs).joinedload(run_model.Run.stops),  # Run -> stop hierarchy
+            joinedload(route_model.Route.runs).joinedload(run_model.Run.student_assignments).joinedload(StudentRunAssignment.student).joinedload(student_model.Student.school),  # Run -> stop -> student hierarchy
+            joinedload(route_model.Route.runs).joinedload(run_model.Run.student_assignments).joinedload(StudentRunAssignment.stop),  # Assignment stop grouping
+        )
+        .filter(route_model.Route.driver_assignments.any(and_(
+            RouteDriverAssignment.driver_id == driver_id,
+            RouteDriverAssignment.active.is_(True),
+        )))
+        .order_by(route_model.Route.route_number.asc(), route_model.Route.id.asc())
+        .all()
+    )                                                        # Driver-selectable route workspace choices
+
+    selected_route = None                                    # Default when the driver has no assigned route yet
+
+    if route_id is not None:
+        selected_route = next((route for route in available_routes if route.id == route_id), None)
+
+    if selected_route is None and active_run and active_run.route_id is not None:
+        selected_route = next((route for route in available_routes if route.id == active_run.route_id), None)
+
+    if selected_route is None and available_routes:
+        selected_route = available_routes[0]
+
+    workspace = _build_route_workspace(selected_route) if selected_route else None
 
     return templates.TemplateResponse(
         request,                                              # Request must be first
         "driver_run.html", {
-        "request": request,
-        "driver_id": driver_id,
-        "driver_name": current_driver.name,
-        "run_status": run_status,
-        "run": active_run,
-        "route": active_run.route if active_run else None,
-        "stops": stops,
-        "current_stop_index": current_stop_index,
-        "available_routes": db.query(route_model.Route).all(),
-        "today": datetime.now().date().isoformat()
+            "request": request,
+            "driver_id": driver_id,
+            "driver_name": current_driver.name,
+            "available_routes": available_routes,
+            "selected_route_id": selected_route.id if selected_route else None,
+            "workspace": workspace,
+            "active_run_id": active_run.id if active_run else None,
+            "today": datetime.now().date().isoformat(),
         }
     )
 

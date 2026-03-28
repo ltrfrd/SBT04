@@ -13,6 +13,7 @@ from typing import Optional
 class SchoolBase(BaseModel):
     """Common fields shared by create and response models."""
 
+    school_code: Optional[str] = None
     name: str
     address: str
     phone: Optional[str] = None

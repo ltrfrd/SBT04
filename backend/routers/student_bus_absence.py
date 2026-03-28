@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session  # Database session type
 
 from database import get_db  # Shared DB dependency
 from backend.schemas.student_bus_absence import StudentBusAbsenceCreate, StudentBusAbsenceOut  # Planned absence schemas
-from backend.schemas.run import RunType  # Reuse existing run type convention
 from backend.models import student as student_model  # Student validation model
 from backend.models.student_bus_absence import StudentBusAbsence  # Planned absence model
 from backend.utils.db_errors import raise_conflict_if_unique  # Shared unique-conflict helper
@@ -115,7 +114,7 @@ def get_student_bus_absences(  # List student bus absences
 def delete_student_bus_absence(
     student_id: int,
     absence_date: date = Query(..., alias="date"),
-    run_type: RunType = Query(...),
+    run_type: str = Query(..., min_length=1),
     db: Session = Depends(get_db),
 ):
     _get_student_or_404(student_id, db)  # Validate student exists before deleting absence

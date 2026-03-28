@@ -20,7 +20,7 @@ from backend.models.student import Student                      # Student model
 from backend.models.stop import Stop                            # Stop model
 from backend.models.associations import StudentRunAssignment  # Runtime rider assignments
 from backend.models.associations import RouteDriverAssignment  # Route-level driver assignments
-from backend.schemas.run import RunStart, RunOut
+from backend.schemas.run import RunStart, RunOut, RunUpdate
 from backend.models.run_event import RunEvent                  # Run timeline event model
 from backend.models import student as student_model  # Student model for replay names
 from backend.schemas.run import RunReplayOut, RunReplayEventOut, RunReplaySummaryOut
@@ -92,6 +92,10 @@ def _build_run_occupancy_counts(assignments: list[StudentRunAssignment]) -> dict
     }
 
 
+def _is_run_active(run: Run) -> bool:
+    return run.start_time is not None and run.end_time is None  # Planned runs are not active until they start
+
+
 # -----------------------------------------------------------
 # - Route driver resolver
 # - Require one active driver assignment per route
@@ -132,55 +136,51 @@ def _serialize_run(run: run_model.Run) -> RunOut:
 # - Create a run record directly from the route assignment
 # -----------------------------------------------------------
 @router.post(
-    "/",
-    response_model=schemas.RunOut,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create run",
-    description="Create a run record directly for a route using its active driver assignment.",
-    response_description="Created run",
+    "/",                                                         # Route path
+    response_model=schemas.RunOut,                               # Response schema
+    status_code=status.HTTP_201_CREATED,                         # HTTP 201 on success
+    summary="Create run",                                        # Swagger summary
+    description="Create a run record directly for a route using its active driver assignment.",  # Swagger description
+    response_description="Created run",                          # Swagger response text
 )
 def create_run(run: RunStart, db: Session = Depends(get_db)):
+    # -----------------------------------------------------------
+    # - Validate route exists
+    # - Load active driver assignment with route
+    # -----------------------------------------------------------
     route = (
-        db.query(route_model.Route)
+        db.query(route_model.Route)                              # Query Route table
         .options(
-            joinedload(route_model.Route.driver_assignments).joinedload(RouteDriverAssignment.driver)
+            joinedload(route_model.Route.driver_assignments)     # Load driver assignments
+            .joinedload(RouteDriverAssignment.driver)            # Load driver details
         )
-        .filter(route_model.Route.id == run.route_id)
-        .first()
-    )  # Validate route and driver assignments exist
-    if not route:
-        raise HTTPException(status_code=404, detail="Route not found")
-
-    resolved_driver_id = _resolve_run_driver(route)  # Derive driver from route assignment
-
-    # -------------------------------------------------------------------------
-    # Prevent driver from having multiple active runs
-    # -------------------------------------------------------------------------
-    existing_active_run = (
-        db.query(run_model.Run)                      # Query Run table
-        .filter(run_model.Run.driver_id == resolved_driver_id)  # Same driver
-        .filter(run_model.Run.end_time.is_(None))   # Only active runs
-        .first()
+        .filter(route_model.Route.id == run.route_id)            # Match requested route
+        .first()                                                 # Get single result
     )
 
-    if existing_active_run:                         # If active run already exists
-        raise HTTPException(
-            status_code=409,
-            detail="Driver already has an active run"
-        )
-    new_run = run_model.Run(
-        driver_id=resolved_driver_id,  # Route-derived driver
-        route_id=run.route_id,  # Requested route
-        run_type=run.run_type,  # Requested run type
-        start_time=datetime.now(timezone.utc).replace(tzinfo=None),  # Store naive UTC
-        current_stop_id=None,  # Start with no actual stop location recorded
-        current_stop_sequence=None,  # Start with no actual stop sequence recorded
-    )  # Build the new run record
-    db.add(new_run)  # Add run to session
-    db.commit()  # Save to DB
-    db.refresh(new_run)  # Reload saved object
-    return _serialize_run(new_run)  # Return created run
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")  # Route validation
 
+    resolved_driver_id = _resolve_run_driver(route)              # Resolve driver from route assignment
+
+    # -----------------------------------------------------------
+    # - Create PLANNED run only
+    # - Do not mark started during creation
+    # -----------------------------------------------------------
+    new_run = run_model.Run(
+        driver_id=resolved_driver_id,                            # Assigned driver
+        route_id=run.route_id,                                   # Linked route
+        run_type=run.run_type,                                   # Run type (AM/PM/etc.)
+        start_time=None,                                         # Not started yet
+        end_time=None,                                           # Not ended yet
+        current_stop_id=None,                                    # No active stop
+        current_stop_sequence=None,                              # No active sequence
+    )
+
+    db.add(new_run)                                              # Add to session
+    db.commit()                                                  # Persist to DB
+    db.refresh(new_run)                                          # Reload instance
+    return _serialize_run(new_run)                               # Return response
 # -----------------------------------------------------------
 # - Start run
 # - Start a run, copy stops, and create runtime assignments
@@ -189,22 +189,68 @@ def create_run(run: RunStart, db: Session = Depends(get_db)):
     "/start",
     response_model=RunOut,
     summary="Start run",
-    description="Start a run for the route, copy the latest stop plan, and create runtime student assignments.",
+    description="Start an existing planned run or create and start a new run for the route, then create runtime student assignments.",
     response_description="Started run",
 )
-def start_run(run: RunStart, db: Session = Depends(get_db)):
-    route = (
-        db.query(route_model.Route)
-        .options(
-            joinedload(route_model.Route.driver_assignments).joinedload(RouteDriverAssignment.driver)
-        )
-        .filter(route_model.Route.id == run.route_id)
-        .first()
-    )  # Load route with assignments
-    if not route:
-        raise HTTPException(status_code=404, detail="Route not found")
+def start_run(
+    run: RunStart | None = None,
+    run_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    if run_id is not None:
+        target_run = (
+            db.query(run_model.Run)
+            .options(
+                joinedload(run_model.Run.driver),
+                joinedload(run_model.Run.route),
+            )
+            .filter(run_model.Run.id == run_id)
+            .first()
+        )  # Load the selected planned run
 
-    resolved_driver_id = _resolve_run_driver(route)  # Derive driver from route assignment
+        if not target_run:
+            raise HTTPException(status_code=404, detail="Run not found")
+
+        if target_run.start_time is not None:
+            raise HTTPException(status_code=400, detail="Run already started")
+
+        route = (
+            db.query(route_model.Route)
+            .options(
+                joinedload(route_model.Route.driver_assignments).joinedload(RouteDriverAssignment.driver)
+            )
+            .filter(route_model.Route.id == target_run.route_id)
+            .first()
+        )  # Load route context for assignment generation
+        if not route:
+            raise HTTPException(status_code=404, detail="Route not found")
+
+        resolved_driver_id = target_run.driver_id  # Preserve the planned run's assigned driver
+    else:
+        if run is None:
+            raise HTTPException(status_code=422, detail="Run payload required")
+
+        route = (
+            db.query(route_model.Route)
+            .options(
+                joinedload(route_model.Route.driver_assignments).joinedload(RouteDriverAssignment.driver)
+            )
+            .filter(route_model.Route.id == run.route_id)
+            .first()
+        )  # Load route with assignments
+        if not route:
+            raise HTTPException(status_code=404, detail="Route not found")
+
+        resolved_driver_id = _resolve_run_driver(route)  # Derive driver from route assignment
+        target_run = run_model.Run(
+            driver_id=resolved_driver_id,  # Route-derived driver
+            route_id=run.route_id,  # Assigned route
+            run_type=run.run_type,  # Flexible run label
+            start_time=None,  # Mark started only after active-run checks
+            current_stop_id=None,  # Start with no actual stop location recorded
+            current_stop_sequence=None,  # No stop reached yet
+        )  # Build a new run when no planned run was selected
+
     driver = db.get(driver_model.Driver, resolved_driver_id)  # Load resolved driver
 
     # -------------------------------------------------------------------------
@@ -213,7 +259,9 @@ def start_run(run: RunStart, db: Session = Depends(get_db)):
     existing_active_run = (
         db.query(run_model.Run)
         .filter(run_model.Run.driver_id == resolved_driver_id)
+        .filter(run_model.Run.start_time.is_not(None))
         .filter(run_model.Run.end_time.is_(None))
+        .filter(run_model.Run.id != target_run.id)
         .first()
     )
 
@@ -227,61 +275,61 @@ def start_run(run: RunStart, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Driver not found")
 
     # -------------------------------------------------------------------------
-    # Create the new run first
+    # Mark the selected run as started
     # -------------------------------------------------------------------------
-    new_run = run_model.Run(
-        driver_id=resolved_driver_id,  # Route-derived driver
-        route_id=run.route_id,  # Assigned route
-        run_type=run.run_type,  # AM / PM / other
-        start_time=datetime.now(timezone.utc).replace(tzinfo=None),  # Start timestamp
-        current_stop_id=None,  # Start with no actual stop location recorded
-        current_stop_sequence=None,  # No stop reached yet
-    )  # Build the started run record
+    target_run.start_time = datetime.now(timezone.utc).replace(tzinfo=None)  # Start timestamp
+    target_run.current_stop_id = None  # Clear any stale planned location
+    target_run.current_stop_sequence = None  # Reset live stop progress
 
-    db.add(new_run)  # Add run to session
-    db.flush()  # Get new_run.id before copying stops
+    if target_run.id is None:
+        db.add(target_run)  # Add run to session
+        db.flush()  # Get generated id for assignment rows
 
     # -------------------------------------------------------------------------
-    # Find the most recent source run on the same route that has stops
+    # Copy stops from the latest prior route run when this run has no stops yet
     # -------------------------------------------------------------------------
-    source_run = (
-        db.query(run_model.Run)
-        .join(stop_model.Stop, stop_model.Stop.run_id == run_model.Run.id)
-        .filter(run_model.Run.route_id == run.route_id)
-        .filter(run_model.Run.id != new_run.id)
-        .order_by(run_model.Run.start_time.desc(), run_model.Run.id.desc())
-        .first()
-    )
+    existing_stop_count = (
+        db.query(stop_model.Stop)
+        .filter(stop_model.Stop.run_id == target_run.id)
+        .count()
+    )  # Determine whether this run already has its own stop plan
 
-    # -------------------------------------------------------------------------
-    # Copy stops from source run into the new run
-    # -------------------------------------------------------------------------
-    if source_run:
-        source_stops = (
-            db.query(stop_model.Stop)
-            .filter(stop_model.Stop.run_id == source_run.id)
-            .order_by(
-                stop_model.Stop.sequence.asc(),
-                stop_model.Stop.id.asc(),
-            )
-            .all()
-        )
+    if existing_stop_count == 0:
+        source_run = (
+            db.query(run_model.Run)
+            .join(stop_model.Stop, stop_model.Stop.run_id == run_model.Run.id)
+            .filter(run_model.Run.route_id == route.id)
+            .filter(run_model.Run.id != target_run.id)
+            .order_by(run_model.Run.start_time.desc(), run_model.Run.id.desc())
+            .first()
+        )  # Find the latest prior run on this route that already has stops
 
-        for stop in source_stops:
-            db.add(
-                stop_model.Stop(
-                    sequence=stop.sequence,  # Keep stop order
-                    type=stop.type,  # Keep stop type
-                    run_id=new_run.id,  # Attach copied stop to new run
-                    name=stop.name,  # Keep stop name
-                    address=stop.address,  # Keep stop address
-                    planned_time=stop.planned_time,  # Keep planned time
-                    latitude=stop.latitude,  # Keep latitude
-                    longitude=stop.longitude,  # Keep longitude
+        if source_run:
+            source_stops = (
+                db.query(stop_model.Stop)
+                .filter(stop_model.Stop.run_id == source_run.id)
+                .order_by(
+                    stop_model.Stop.sequence.asc(),
+                    stop_model.Stop.id.asc(),
                 )
+                .all()
             )
 
-    db.flush()  # Save copied stops so they can be queried for assignment mapping
+            for stop in source_stops:
+                db.add(
+                    stop_model.Stop(
+                        sequence=stop.sequence,  # Keep stop order
+                        type=stop.type,  # Keep stop type
+                        run_id=target_run.id,  # Attach copied stop to the started run
+                        name=stop.name,  # Keep stop name
+                        address=stop.address,  # Keep stop address
+                        planned_time=stop.planned_time,  # Keep planned time
+                        latitude=stop.latitude,  # Keep latitude
+                        longitude=stop.longitude,  # Keep longitude
+                    )
+                )
+
+        db.flush()  # Persist copied stops before building runtime assignments
 
     # -------------------------------------------------------------------------
     # Auto-create StudentRunAssignment rows for this run
@@ -290,27 +338,27 @@ def start_run(run: RunStart, db: Session = Depends(get_db)):
     # -------------------------------------------------------------------------
     route_students = (
         db.query(student_model.Student)
-        .filter(student_model.Student.route_id == new_run.route_id)
+        .filter(student_model.Student.route_id == target_run.route_id)
         .all()
     )  # Load all students assigned to this route
 
     run_stops = (
         db.query(stop_model.Stop)
-        .filter(stop_model.Stop.run_id == new_run.id)
+        .filter(stop_model.Stop.run_id == target_run.id)
         .order_by(stop_model.Stop.sequence.asc(), stop_model.Stop.id.asc())
         .all()
-    )  # Load runtime stops copied into this run
+    )  # Load runtime stops already attached to this run
 
     run_stop_by_sequence = {
         stop.sequence: stop
         for stop in run_stops
-    }  # Map copied run stops by sequence for fallback matching
+    }  # Map runtime stops by sequence for fallback matching
 
     for student in route_students:
         existing_assignment = (
             db.query(StudentRunAssignment)
             .filter(
-                StudentRunAssignment.run_id == new_run.id,
+                StudentRunAssignment.run_id == target_run.id,
                 StudentRunAssignment.student_id == student.id,
             )
             .first()
@@ -326,17 +374,16 @@ def start_run(run: RunStart, db: Session = Depends(get_db)):
 
         assignment = StudentRunAssignment(
             student_id=student.id,  # Student assigned to runtime run
-            run_id=new_run.id,  # Current run id
-            stop_id=assigned_run_stop.id if assigned_run_stop else None,  # Copied runtime stop if matched
-            planned_absent=False,  # Student expected by default
+            run_id=target_run.id,  # Current run id
+            stop_id=assigned_run_stop.id if assigned_run_stop else None,  # Existing runtime stop if matched
         )
 
         db.add(assignment)  # Stage runtime assignment row
 
     db.flush()  # Validate and insert all assignment rows before final commit
-    db.commit()  # Save run, copied stops, and student assignments
-    db.refresh(new_run)  # Reload saved run
-    return _serialize_run(new_run)  # Return started run
+    db.commit()  # Save run and student assignments
+    db.refresh(target_run)  # Reload saved run
+    return _serialize_run(target_run)  # Return started run
 
 # -----------------------------------------------------------
 # - End run
@@ -353,6 +400,8 @@ def end_run(run_id: int, db: Session = Depends(get_db)):
     run = db.get(run_model.Run, run_id)  # Load run
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
+    if run.start_time is None:
+        raise HTTPException(status_code=400, detail="Run is not active")
     if run.end_time:
         raise HTTPException(status_code=400, detail="Run already ended")
 
@@ -391,6 +440,7 @@ def end_run_by_driver(
     active_run = (
         db.query(run_model.Run)                      # Query Run table
         .filter(run_model.Run.driver_id == driver_id)  # Only this driver
+        .filter(run_model.Run.start_time.is_not(None))  # Only started runs
         .filter(run_model.Run.end_time.is_(None))   # Only active runs
         .order_by(run_model.Run.start_time.desc())  # Newest active run first
         .first()
@@ -421,11 +471,11 @@ def end_run_by_driver(
 #   - driver_id  → filter runs belonging to a specific driver
 #   - route_id   → filter runs belonging to a specific route
 #   - run_type   → filter runs by type (ex: AM, PM)
-#   - active     → filter active or completed runs
+#   - active     → filter runs by current active status
 #
 # Notes:
-#   active=True   → runs where end_time IS NULL (still in progress)
-#   active=False  → runs where end_time IS NOT NULL (already ended)
+#   active=True   → runs where start_time IS NOT NULL and end_time IS NULL
+#   active=False  → runs that are not currently active (planned or ended)
 #
 # If no filters are provided, all runs are returned.
 #
@@ -488,12 +538,13 @@ def get_all_runs(
     # -------------------------------------------------------------------------
     if active is True:                     # Only runs currently active
         query = query.filter(
+            run_model.Run.start_time.is_not(None),
             run_model.Run.end_time.is_(None)
         )
 
-    if active is False:                    # Only runs that already ended
+    if active is False:                    # Only runs that are not currently active
         query = query.filter(
-            run_model.Run.end_time.is_not(None)
+            (run_model.Run.start_time.is_(None)) | (run_model.Run.end_time.is_not(None))
         )
 
     # -------------------------------------------------------------------------
@@ -527,7 +578,7 @@ def get_all_runs(
 #
 # Rules:
 #   - driver_id is required
-#   - active run = end_time IS NULL
+#   - active run = start_time IS NOT NULL and end_time IS NULL
 #   - if no active run exists for that driver, return 404
 #   - if multiple active runs exist, return the newest one
 # =============================================================================
@@ -557,6 +608,7 @@ def get_active_run(
     active_run = (
         db.query(run_model.Run)                      # Query Run table
         .filter(run_model.Run.driver_id == driver_id)  # Only this driver
+        .filter(run_model.Run.start_time.is_not(None))  # Only started runs
         .filter(run_model.Run.end_time.is_(None))   # Only active runs
         .order_by(run_model.Run.start_time.desc())  # Newest active run first
         .first()
@@ -646,6 +698,9 @@ def arrive_at_stop(
             detail="Run is already completed",
         )
 
+    if run.start_time is None:  # Planned runs cannot accept live stop updates
+        raise HTTPException(status_code=400, detail="Run is not active")
+
     if run.end_time is not None:                    # If run already ended
         raise HTTPException(status_code=400, detail="Run has already ended")
 
@@ -711,6 +766,9 @@ def advance_to_next_stop(
 
     if not run:                                     # If run does not exist
         raise HTTPException(status_code=404, detail="Run not found")
+
+    if run.start_time is None:                      # Planned runs cannot advance stop progress
+        raise HTTPException(status_code=400, detail="Run is not active")
 
     if run.end_time is not None:                    # If run already ended
         raise HTTPException(status_code=400, detail="Run has already ended")
@@ -1065,8 +1123,13 @@ def complete_run(run_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Run not found",
         )
-    
-    
+
+    if not _is_run_active(run):  # Only active runs can be completed
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Run is not active",
+        )
+
     # -------------------------------------------------------------------------
     # Prevent duplicate completion
     # -------------------------------------------------------------------------
@@ -1605,6 +1668,84 @@ def get_run(run_id: int, db: Session = Depends(get_db)):
 
 
 # -----------------------------------------------------------
+# - Update planned run
+# - Correct the run type before the run has started
+# -----------------------------------------------------------
+@router.put(
+    "/{run_id}",
+    response_model=schemas.RunOut,
+    summary="Update planned run",
+    description="Update the run type for a planned run that has not started yet.",
+    response_description="Updated run",
+)
+def update_run(
+    run_id: int,
+    payload: RunUpdate,
+    db: Session = Depends(get_db),
+):
+
+    # -------------------------------------------------------------------------
+    # Load run with linked driver and route
+    # -------------------------------------------------------------------------
+    run = (
+        db.query(run_model.Run)
+        .options(
+            joinedload(run_model.Run.driver),
+            joinedload(run_model.Run.route),
+        )
+        .filter(run_model.Run.id == run_id)
+        .first()
+    )
+
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    # -------------------------------------------------------------------------
+    # Only planned runs may be updated
+    # -------------------------------------------------------------------------
+    if run.start_time is not None:
+        raise HTTPException(status_code=400, detail="Only planned runs can be updated")
+
+    run.run_type = payload.run_type  # Allow correction of the planned run label only
+
+    db.commit()
+    db.refresh(run)
+    return _serialize_run(run)
+
+
+# -----------------------------------------------------------
+# - Delete planned run
+# - Remove a run only before it has started
+# -----------------------------------------------------------
+@router.delete(
+    "/{run_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete planned run",
+    description="Delete a planned run that has not started yet.",
+    response_description="Run deleted",
+)
+def delete_run(run_id: int, db: Session = Depends(get_db)):
+
+    # -------------------------------------------------------------------------
+    # Load run
+    # -------------------------------------------------------------------------
+    run = db.get(run_model.Run, run_id)
+
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    # -------------------------------------------------------------------------
+    # Only planned runs may be deleted
+    # -------------------------------------------------------------------------
+    if run.start_time is not None:
+        raise HTTPException(status_code=400, detail="Only planned runs can be deleted")
+
+    db.delete(run)
+    db.commit()
+    return None
+
+
+# -----------------------------------------------------------
 # - Get running board
 # - Return the operational running board for one run
 # -----------------------------------------------------------
@@ -1765,7 +1906,7 @@ def get_run_assignments(
             "stop_id": a.stop_id,
             "stop_name": a.stop.name if a.stop else None,
             "sequence": a.stop.sequence if a.stop else None,
-            "run_type": run.run_type.value,  # Convert enum to plain string
+            "run_type": run.run_type,  
         })
 
     return result
@@ -1819,7 +1960,12 @@ def get_run_summary(run_id: int, db: Session = Depends(get_db)):
     # -------------------------------------------------------------------------
     # Determine run status
     # -------------------------------------------------------------------------
-    status = "active" if run.end_time is None else "ended"
+    if run.start_time is None:
+        status = "planned"
+    elif run.end_time is None:
+        status = "active"
+    else:
+        status = "ended"
 
     # -------------------------------------------------------------------------
     # Compute current load

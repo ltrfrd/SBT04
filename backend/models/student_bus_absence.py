@@ -5,11 +5,10 @@
 import enum  # Enum support for source values
 from datetime import datetime, timezone  # Timestamp helpers
 
-from sqlalchemy import Column, Date, DateTime, Enum, ForeignKey, Integer, UniqueConstraint  # SQLAlchemy column types
+from sqlalchemy import Column, Date, DateTime, Enum, ForeignKey, Integer, String, UniqueConstraint  # SQLAlchemy column types
 from sqlalchemy.orm import relationship  # ORM relationship mapping
 
 from database import Base  # Shared declarative base
-from backend.models.run import RunType  # Reuse existing run type convention
 
 
 class StudentBusAbsenceSource(str, enum.Enum):
@@ -24,7 +23,7 @@ class StudentBusAbsence(Base):
     id = Column(Integer, primary_key=True, index=True)  # Unique absence identifier
     student_id = Column(Integer, ForeignKey("students.id", ondelete="CASCADE"), nullable=False, index=True)  # Linked student
     date = Column(Date, nullable=False, index=True)  # Planned no-ride date
-    run_type = Column(Enum(RunType), nullable=False)  # AM / MIDDAY / PM / EXTRA
+    run_type = Column(String, nullable=False)  # Flexible run label matched against the run record
     source = Column(Enum(StudentBusAbsenceSource), nullable=False, default=StudentBusAbsenceSource.PARENT)  # Who reported the absence
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))  # Naive UTC creation timestamp
 
