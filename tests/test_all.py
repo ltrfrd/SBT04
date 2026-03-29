@@ -342,7 +342,7 @@ def test_create_run_uses_single_active_route_assignment(client):
     assert run.json()["start_time"] is None
 
 
-def test_create_run_fails_without_active_route_driver_assignment(client):
+def test_create_run_allows_planned_run_without_active_route_driver_assignment(client):
     route = client.post(
         "/routes/",
         json={"route_number": "NO-DRIVER", "unit_number": "BUS-NO-DRIVER"},
@@ -350,8 +350,13 @@ def test_create_run_fails_without_active_route_driver_assignment(client):
     assert route.status_code in (200, 201)
 
     run = client.post("/runs/", json={"route_id": route.json()["id"], "run_type": "AM"})
-    assert run.status_code == 409
-    assert run.json()["detail"] == "Route has no active driver assignment"
+    assert run.status_code in (200, 201)
+    assert run.json()["route_id"] == route.json()["id"]
+    assert run.json()["run_type"] == "AM"
+    assert run.json()["driver_id"] is None
+    assert run.json()["driver_name"] is None
+    assert run.json()["start_time"] is None
+    assert run.json()["end_time"] is None
 
 
 def test_create_run_allows_multiple_planned_runs_for_same_driver(client):
@@ -431,12 +436,6 @@ def test_create_run_accepts_custom_run_type_string(client):
 
 
 def test_start_run_starts_existing_planned_run_by_id(client):
-    driver = client.post(
-        "/drivers/",
-        json={"name": "Start Existing Driver", "email": "start.existing.driver@test.com", "phone": "10010"},
-    )
-    assert driver.status_code in (200, 201)
-
     route = client.post(
         "/routes/",
         json={"route_number": "START-EXISTING", "unit_number": "BUS-START-EXISTING"},
@@ -444,24 +443,32 @@ def test_start_run_starts_existing_planned_run_by_id(client):
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
 
-    assign = client.post(f"/routes/{route_id}/assign_driver/{driver.json()['id']}")
-    assert assign.status_code in (200, 201)
-
     planned_run = client.post("/runs/", json={"route_id": route_id, "run_type": "Morning"})
     assert planned_run.status_code in (200, 201)
     planned_run_id = planned_run.json()["id"]
+    assert planned_run.json()["driver_id"] is None
     assert planned_run.json()["start_time"] is None
+
+    driver = client.post(
+        "/drivers/",
+        json={"name": "Start Existing Driver", "email": "start.existing.driver@test.com", "phone": "10010"},
+    )
+    assert driver.status_code in (200, 201)
+
+    assign = client.post(f"/routes/{route_id}/assign_driver/{driver.json()['id']}")
+    assert assign.status_code in (200, 201)
 
     started_run = client.post(f"/runs/start?run_id={planned_run_id}")
 
     assert started_run.status_code in (200, 201)
     assert started_run.json()["id"] == planned_run_id
     assert started_run.json()["run_type"] == "Morning"
+    assert started_run.json()["driver_id"] == driver.json()["id"]
     assert started_run.json()["start_time"] is not None
 
     runs_for_route = client.get(f"/runs/?route_id={route_id}")
     assert runs_for_route.status_code == 200
-    assert [run["id"] for run in runs_for_route.json()] == [planned_run_id]
+    assert [run["run_id"] for run in runs_for_route.json()] == [planned_run_id]
 
 
 def test_update_planned_run_succeeds(client):
@@ -644,7 +651,7 @@ def test_create_run_fails_when_route_has_multiple_active_assignments(client, db_
     assert run.json()["detail"] == "Route has multiple active driver assignments"
 
 
-def test_unassign_driver_blocks_future_run_creation(client):
+def test_unassign_driver_blocks_future_run_start(client):
     driver = client.post(
         "/drivers/",
         json={"name": "Unassign Driver", "email": "unassign.driver@test.com", "phone": "10006"},
@@ -659,6 +666,23 @@ def test_unassign_driver_blocks_future_run_creation(client):
     assert unassign.status_code == 204
 
     run = client.post("/runs/", json={"route_id": route_id, "run_type": "AM"})
+    assert run.status_code in (200, 201)
+    assert run.json()["start_time"] is None
+    assert run.json()["driver_id"] is None
+
+    started = client.post(f"/runs/start?run_id={run.json()['id']}")
+    assert started.status_code == 409
+    assert started.json()["detail"] == "Route has no active driver assignment"
+
+
+def test_start_run_fails_without_active_route_driver_assignment(client):
+    route = client.post(
+        "/routes/",
+        json={"route_number": "START-NO-DRIVER", "unit_number": "BUS-START-NO-DRIVER"},
+    )
+    assert route.status_code in (200, 201)
+
+    run = client.post("/runs/start", json={"route_id": route.json()["id"], "run_type": "AM"})
     assert run.status_code == 409
     assert run.json()["detail"] == "Route has no active driver assignment"
 

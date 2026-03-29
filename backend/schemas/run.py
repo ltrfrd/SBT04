@@ -29,7 +29,7 @@ class RunUpdate(BaseModel):
 
 class RunOut(BaseModel):
     id: int  # Run identifier
-    driver_id: int  # Assigned driver ID
+    driver_id: Optional[int] = None  # Assigned driver ID when resolved
     route_id: int  # Assigned route ID
     run_type: str  # Operational run label
     start_time: Optional[datetime] = None  # Run start timestamp when the run has started
@@ -39,6 +39,68 @@ class RunOut(BaseModel):
     driver_name: Optional[str] = None  # Driver display name
     route_number: Optional[str] = None  # Route number for display
     model_config = ConfigDict(from_attributes=True)  # Enable ORM serialization
+
+
+class RunListOut(BaseModel):
+    run_id: int
+    run_type: str
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    driver_id: int | None = None
+    driver_name: str | None = None
+    is_planned: bool
+    is_active: bool
+    is_completed: bool
+    stops_count: int
+    students_count: int
+
+
+class RunDetailRouteOut(BaseModel):
+    route_id: int
+    route_number: str | None = None
+    unit_number: str | None = None
+
+
+class RunDetailDriverOut(BaseModel):
+    driver_id: int | None = None
+    driver_name: str | None = None
+
+
+class RunDetailStopOut(BaseModel):
+    stop_id: int
+    sequence: int
+    type: str
+    name: str | None = None
+    address: str | None = None
+    planned_time: str | None = None
+
+
+class RunDetailStudentOut(BaseModel):
+    student_id: int
+    student_name: str
+    school_id: int | None = None
+    school_name: str | None = None
+    school_code: str | None = None
+    stop_id: int | None = None
+    stop_sequence: int | None = None
+    stop_name: str | None = None
+
+
+class RunDetailOut(BaseModel):
+    id: int
+    driver_id: int | None = None
+    route_id: int
+    run_type: str
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    current_stop_id: int | None = None
+    current_stop_sequence: int | None = None
+    driver_name: str | None = None
+    route_number: str | None = None
+    route: RunDetailRouteOut
+    driver: RunDetailDriverOut
+    stops: list[RunDetailStopOut] = []
+    students: list[RunDetailStudentOut] = []
 
 
 class RunningBoardStudent(BaseModel):
@@ -69,7 +131,7 @@ class RunningBoardResponse(BaseModel):
 
 class RunSummaryOut(BaseModel):
     run_id: int  # Run identifier
-    driver_id: int  # Driver ID
+    driver_id: int | None  # Driver ID when assigned
     driver_name: str | None  # Driver display name
     route_id: int  # Route ID
     route_number: str | None  # Route number
@@ -142,7 +204,7 @@ class RunOccupancySummaryResponse(BaseModel):
 class RunStateOut(BaseModel):
     run_id: int  # Current run ID
     route_id: int  # Parent route ID
-    driver_id: int  # Assigned driver ID
+    driver_id: int | None  # Assigned driver ID when available
     run_type: str  # Flexible run label
     current_stop_id: int | None = None  # Latest known bus location stop ID
     current_stop_sequence: int | None = None  # Latest known bus location sequence

@@ -76,27 +76,64 @@ def create_assignment(payload: StudentRunAssignmentCreate, db: Session = Depends
         raise HTTPException(status_code=400, detail="Integrity error")
 
 # -----------------------------------------------------------
-# - List student run assignments
-# - Return assignments with optional run and student filters
+# - Get run assignments
+# - Return all student assignments for one run
+# -----------------------------------------------------------
+@router.get(
+    "/{run_id}",
+    response_model=List[StudentRunAssignmentOut],
+    summary="Get run assignments",
+    description="Return all student assignments for one run.",
+    response_description="Student run assignments for the run",
+)
+def get_run_assignments(
+    run_id: int,
+    db: Session = Depends(get_db),
+):
+    run = db.get(run_model.Run, run_id)                          # Load run
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")  # Validate run exists
+
+    assignments = (
+        db.query(StudentRunAssignment)
+        .filter(StudentRunAssignment.run_id == run_id)
+        .order_by(StudentRunAssignment.id.asc())
+        .all()
+    )                                                            # Load run assignments
+
+    return assignments                                           # Return assignment list
+
+
+# -----------------------------------------------------------
+# - List student assignments
+# - Return assignments for one student across runs
 # -----------------------------------------------------------
 @router.get(
     "/",
     response_model=List[StudentRunAssignmentOut],
-    summary="List student run assignments",
-    description="Return student run assignments with optional run and student filters.",
-    response_description="Student run assignment list",
+    summary="List student assignments",
+    description="Return student run assignments for one student. student_id is required.",
+    response_description="Student run assignment list for the student",
 )
 def list_assignments(
-    run_id: int | None = None,
     student_id: int | None = None,
     db: Session = Depends(get_db),
 ):
-    query = db.query(StudentRunAssignment)
-    if run_id is not None:
-        query = query.filter(StudentRunAssignment.run_id == run_id)
-    if student_id is not None:
-        query = query.filter(StudentRunAssignment.student_id == student_id)
-    return query.all()
+    if student_id is None:
+        raise HTTPException(status_code=400, detail="student_id is required")  # Require student-scoped lookup
+
+    student = db.get(student_model.Student, student_id)         # Load student
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")  # Validate student exists
+
+    assignments = (
+        db.query(StudentRunAssignment)
+        .filter(StudentRunAssignment.student_id == student_id)
+        .order_by(StudentRunAssignment.id.asc())
+        .all()
+    )                                                            # Load student assignments
+
+    return assignments                                           # Return assignment list
 
 # -----------------------------------------------------------
 # - Delete student run assignment

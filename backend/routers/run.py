@@ -8,7 +8,7 @@ from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-from sqlalchemy.orm import joinedload  # Used for eager loading relationships
+from sqlalchemy.orm import joinedload, selectinload  # Used for eager loading relationships
 from database import get_db
 from backend import schemas
 from backend.models import run as run_model
@@ -20,7 +20,7 @@ from backend.models.student import Student                      # Student model
 from backend.models.stop import Stop                            # Stop model
 from backend.models.associations import StudentRunAssignment  # Runtime rider assignments
 from backend.models.associations import RouteDriverAssignment  # Route-level driver assignments
-from backend.schemas.run import RunStart, RunOut, RunUpdate
+from backend.schemas.run import RunStart, RunOut, RunUpdate, RunDetailOut, RunDetailRouteOut, RunDetailDriverOut, RunDetailStopOut, RunDetailStudentOut, RunListOut
 from backend.models.run_event import RunEvent                  # Run timeline event model
 from backend.models import student as student_model  # Student model for replay names
 from backend.schemas.run import RunReplayOut, RunReplayEventOut, RunReplaySummaryOut
@@ -112,6 +112,20 @@ def _resolve_run_driver(route):
     return assignment.driver_id
 
 
+def _resolve_planned_run_driver(route) -> int | None:
+    try:
+        assignment = resolve_route_driver_assignment(route)  # Use current active route assignment when exactly one exists
+    except ValueError as exc:
+        if str(exc) == "Route has no active driver assignment":
+            return None  # Planned runs may exist before a driver is assigned
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    return assignment.driver_id
+
+
 # -----------------------------------------------------------
 # - Run serializer
 # - Return enriched run payloads with driver and route labels
@@ -132,21 +146,111 @@ def _serialize_run(run: run_model.Run) -> RunOut:
 
 
 # -----------------------------------------------------------
+# - Run detail serializer
+# - Return one run with nested route, stop, and student context
+# -----------------------------------------------------------
+def _serialize_run_detail(run: run_model.Run) -> RunDetailOut:
+    ordered_stops = sorted(
+        run.stops,
+        key=lambda stop: (
+            stop.sequence if stop.sequence is not None else 999999,
+            stop.id,
+        ),
+    )                                                          # Keep stop order stable
+
+    ordered_assignments = sorted(
+        run.student_assignments,
+        key=lambda assignment: (
+            assignment.stop.sequence if assignment.stop and assignment.stop.sequence is not None else 999999,
+            assignment.student.name if assignment.student else "",
+            assignment.id,
+        ),
+    )                                                          # Keep student rows grouped by stop order
+
+    return RunDetailOut(
+        id=run.id,
+        driver_id=run.driver_id,
+        route_id=run.route_id,
+        run_type=run.run_type,
+        start_time=run.start_time,
+        end_time=run.end_time,
+        current_stop_id=run.current_stop_id,
+        current_stop_sequence=run.current_stop_sequence,
+        driver_name=run.driver.name if run.driver else None,
+        route_number=run.route.route_number if run.route else None,
+        route=RunDetailRouteOut(
+            route_id=run.route_id,
+            route_number=run.route.route_number if run.route else None,
+            unit_number=run.route.unit_number if run.route else None,
+        ),
+        driver=RunDetailDriverOut(
+            driver_id=run.driver_id,
+            driver_name=run.driver.name if run.driver else None,
+        ),
+        stops=[
+            RunDetailStopOut(
+                stop_id=stop.id,
+                sequence=stop.sequence,
+                type=stop.type.value if hasattr(stop.type, "value") else str(stop.type),
+                name=stop.name,
+                address=stop.address,
+                planned_time=str(stop.planned_time) if stop.planned_time else None,
+            )
+            for stop in ordered_stops
+        ],
+        students=[
+            RunDetailStudentOut(
+                student_id=assignment.student.id,
+                student_name=assignment.student.name,
+                school_id=assignment.student.school_id,
+                school_name=assignment.student.school.name if assignment.student.school else None,
+                school_code=assignment.student.school.school_code if assignment.student.school else None,
+                stop_id=assignment.stop_id,
+                stop_sequence=assignment.stop.sequence if assignment.stop else None,
+                stop_name=assignment.stop.name if assignment.stop else None,
+            )
+            for assignment in ordered_assignments
+            if assignment.student
+        ],
+    )                                                          # Return nested run detail
+
+
+# -----------------------------------------------------------
+# - Run list serializer
+# - Return summary-level run data for route-scoped listing
+# -----------------------------------------------------------
+def _serialize_run_list_item(run: run_model.Run) -> RunListOut:
+    return RunListOut(
+        run_id=run.id,
+        run_type=run.run_type,
+        start_time=run.start_time,
+        end_time=run.end_time,
+        driver_id=run.driver_id,
+        driver_name=run.driver.name if run.driver else None,
+        is_planned=run.start_time is None,
+        is_active=run.start_time is not None and run.end_time is None,
+        is_completed=run.end_time is not None,
+        stops_count=len(run.stops),
+        students_count=len(run.student_assignments),
+    )                                                          # Return run summary row
+
+
+# -----------------------------------------------------------
 # - Create run
-# - Create a run record directly from the route assignment
+# - Create a planned run record for a route
 # -----------------------------------------------------------
 @router.post(
     "/",                                                         # Route path
     response_model=schemas.RunOut,                               # Response schema
     status_code=status.HTTP_201_CREATED,                         # HTTP 201 on success
     summary="Create run",                                        # Swagger summary
-    description="Create a run record directly for a route using its active driver assignment.",  # Swagger description
+    description="Create a planned run record for a route. A driver assignment is optional until the run is started.",  # Swagger description
     response_description="Created run",                          # Swagger response text
 )
 def create_run(run: RunStart, db: Session = Depends(get_db)):
     # -----------------------------------------------------------
     # - Validate route exists
-    # - Load active driver assignment with route
+    # - Load route context and optional active driver assignment
     # -----------------------------------------------------------
     route = (
         db.query(route_model.Route)                              # Query Route table
@@ -161,7 +265,7 @@ def create_run(run: RunStart, db: Session = Depends(get_db)):
     if not route:
         raise HTTPException(status_code=404, detail="Route not found")  # Route validation
 
-    resolved_driver_id = _resolve_run_driver(route)              # Resolve driver from route assignment
+    resolved_driver_id = _resolve_planned_run_driver(route)      # Planned runs may exist before a driver is assigned
 
     # -----------------------------------------------------------
     # - Create PLANNED run only
@@ -225,7 +329,8 @@ def start_run(
         if not route:
             raise HTTPException(status_code=404, detail="Route not found")
 
-        resolved_driver_id = target_run.driver_id  # Preserve the planned run's assigned driver
+        resolved_driver_id = _resolve_run_driver(route)  # Resolve the active driver at actual start time
+        target_run.driver_id = resolved_driver_id  # Persist the current start-time driver on the run
     else:
         if run is None:
             raise HTTPException(status_code=422, detail="Run payload required")
@@ -483,95 +588,52 @@ def end_run_by_driver(
 #   - driver_name
 #   - route_number
 # =============================================================================
+# -----------------------------------------------------------
+# - List runs by route
+# - Return only runs that belong to the selected route
+# -----------------------------------------------------------
 @router.get(
     "/",
-    response_model=List[schemas.RunOut],
+    response_model=List[RunListOut],
     summary="List runs",
-    description="Return runs with optional driver, route, run type, and active status filters.",
-    response_description="Run list",
+    description="Return summary-level run data for one route only. route_id is required.",
+    response_description="Run summary list",
 )
 def get_all_runs(
-    driver_id: int | None = None,          # Optional filter: driver
-    route_id: int | None = None,           # Optional filter: route
-    run_type: str | None = None,           # Optional filter: run type
-    active: bool | None = None,            # Optional filter: active/ended
+    route_id: int | None = Query(None),    # Required route filter
     db: Session = Depends(get_db)          # Database session dependency
 ):
 
     # -------------------------------------------------------------------------
-    # Start base query with eager-loaded relationships
+    # Validate route filter exists
     # -------------------------------------------------------------------------
-    query = (
-        db.query(run_model.Run)            # Query Run table
+    if route_id is None:
+        raise HTTPException(status_code=400, detail="route_id is required")  # Require route-scoped listing
+
+    route = db.get(route_model.Route, route_id)                 # Load selected route
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")  # Validate route exists
+
+    # -------------------------------------------------------------------------
+    # Load route runs in stable planning order
+    # -------------------------------------------------------------------------
+    runs = (
+        db.query(run_model.Run)
         .options(
-            joinedload(run_model.Run.driver),  # Eager load linked driver
-            joinedload(run_model.Run.route),   # Eager load linked route
+            joinedload(run_model.Run.driver),                   # Include driver label
+            joinedload(run_model.Run.route),                    # Include route label
+            selectinload(run_model.Run.stops),                  # Include stop counts
+            selectinload(run_model.Run.student_assignments),    # Include student counts
         )
-    )
-
-    # -------------------------------------------------------------------------
-    # Apply driver filter
-    # -------------------------------------------------------------------------
-    if driver_id is not None:              # If driver filter provided
-        query = query.filter(
-            run_model.Run.driver_id == driver_id
+        .filter(run_model.Run.route_id == route_id)            # Keep only this route's runs
+        .order_by(
+            run_model.Run.start_time.desc(),                    # Show newest started runs first
+            run_model.Run.id.desc(),                            # Keep planned/history ordering stable
         )
+        .all()
+    )                                                          # Load route runs
 
-    # -------------------------------------------------------------------------
-    # Apply route filter
-    # -------------------------------------------------------------------------
-    if route_id is not None:               # If route filter provided
-        query = query.filter(
-            run_model.Run.route_id == route_id
-        )
-
-    # -------------------------------------------------------------------------
-    # Apply run type filter
-    # -------------------------------------------------------------------------
-    if run_type is not None:               # If run_type filter provided
-        query = query.filter(
-            run_model.Run.run_type == run_type
-        )
-
-    # -------------------------------------------------------------------------
-    # Apply active/ended filter
-    # -------------------------------------------------------------------------
-    if active is True:                     # Only runs currently active
-        query = query.filter(
-            run_model.Run.start_time.is_not(None),
-            run_model.Run.end_time.is_(None)
-        )
-
-    if active is False:                    # Only runs that are not currently active
-        query = query.filter(
-            (run_model.Run.start_time.is_(None)) | (run_model.Run.end_time.is_not(None))
-        )
-
-    # -------------------------------------------------------------------------
-    # Execute query in newest-first order
-    # -------------------------------------------------------------------------
-    runs = query.order_by(
-        run_model.Run.start_time.desc()    # Newest runs first
-    ).all()
-
-    # -------------------------------------------------------------------------
-    # Build enriched response list
-    # -------------------------------------------------------------------------
-    return [
-        schemas.RunOut(
-            id=run.id,                                     # Run ID
-            driver_id=run.driver_id,                       # Driver ID
-            route_id=run.route_id,                         # Route ID
-            run_type=run.run_type,                         # Run type
-            start_time=run.start_time,                     # Start timestamp
-            end_time=run.end_time,                         # End timestamp
-            current_stop_id=run.current_stop_id,           # Current actual stop ID
-            current_stop_sequence=run.current_stop_sequence,  # Current actual stop sequence
-            driver_name=run.driver.name if run.driver else None,            # Driver name
-            route_number=run.route.route_number if run.route else None,     # Route number
-        )
-        for run in runs
-    ]
+    return [_serialize_run_list_item(run) for run in runs]     # Return run summary list
 # =============================================================================
 # GET /runs/active
 # Return the current active run for one driver
@@ -1621,50 +1683,45 @@ def get_run_replay(run_id: int, db: Session = Depends(get_db)):
             total_dropoffs=total_dropoffs,
         ),
     )
-# =============================================================================
-# GET /runs/{run_id}
-# Return one run by ID with enriched display fields
-# =============================================================================
+# -----------------------------------------------------------
+# - Get run detail
+# - Return one run with nested route, stops, and students
+# -----------------------------------------------------------
 @router.get(
     "/{run_id}",
-    response_model=schemas.RunOut,
-    summary="Get run",
-    description="Return one run by id with driver and route display fields.",
-    response_description="Run record",
+    response_model=RunDetailOut,
+    summary="Get run detail",
+    description="Return one run by id with nested route, driver, stop, and runtime student details.",
+    response_description="Run detail",
 )
 def get_run(run_id: int, db: Session = Depends(get_db)):
 
     # -------------------------------------------------------------------------
-    # Load run with linked driver and route
+    # Load run with linked route, stops, and student assignments
     # -------------------------------------------------------------------------
     run = (
-        db.query(run_model.Run)                         # Query Run table
+        db.query(run_model.Run)                                   # Query Run table
         .options(
-            joinedload(run_model.Run.driver),           # Eager load driver
-            joinedload(run_model.Run.route),            # Eager load route
+            joinedload(run_model.Run.driver),                     # Include driver
+            joinedload(run_model.Run.route),                      # Include route
+            selectinload(run_model.Run.stops),                    # Include run stops
+            selectinload(run_model.Run.student_assignments)
+            .selectinload(StudentRunAssignment.stop),             # Include assigned stop linkage
+            selectinload(run_model.Run.student_assignments)
+            .selectinload(StudentRunAssignment.student)
+            .selectinload(student_model.Student.school),          # Include student school context
         )
-        .filter(run_model.Run.id == run_id)             # Match requested run ID
-        .first()
+        .filter(run_model.Run.id == run_id)                       # Match requested run ID
+        .first()                                                  # Load one run
     )
 
-    if not run:                                         # If run not found
-        raise HTTPException(status_code=404, detail="Run not found")
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")  # Validate run exists
 
     # -------------------------------------------------------------------------
-    # Return enriched run response
+    # Return nested run detail response
     # -------------------------------------------------------------------------
-    return schemas.RunOut(
-        id=run.id,                                      # Run ID
-        driver_id=run.driver_id,                        # Driver ID
-        route_id=run.route_id,                          # Route ID
-        run_type=run.run_type,                          # Run type
-        start_time=run.start_time,                      # Start timestamp
-        end_time=run.end_time,                          # End timestamp
-        current_stop_id=run.current_stop_id,            # Current actual stop ID
-        current_stop_sequence=run.current_stop_sequence,  # Current actual stop sequence
-        driver_name=run.driver.name if run.driver else None,              # Driver name
-        route_number=run.route.route_number if run.route else None,       # Route number
-    )
+    return _serialize_run_detail(run)                            # Return run detail
 
 
 # -----------------------------------------------------------

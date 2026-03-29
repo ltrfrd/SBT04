@@ -1,7 +1,7 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from database import get_db
 
@@ -9,11 +9,19 @@ from backend.models.associations import RouteDriverAssignment
 from backend.models.driver import Driver
 from backend.models.route import Route
 from backend.models.school import School
+from backend.models import run as run_model
+from backend.models import student as student_model
+from backend.models.associations import StudentRunAssignment
 from backend.schemas.route import (
     RouteCreate,
+    RouteDetailOut,
+    RouteDetailRunOut,
+    RouteDetailStopOut,
+    RouteDetailStudentOut,
     RouteDriverAssignmentCreate,
     RouteDriverAssignmentOut,
     RouteOut,
+    RouteSchoolOut,
 )
 from backend.utils.route_driver_assignment import resolve_route_driver_assignment
 from datetime import datetime, timezone
@@ -23,7 +31,7 @@ router = APIRouter(prefix="/routes", tags=["Routes"])
 
 # -----------------------------------------------------------
 # - Route serializer
-# - Return stable route payloads with assignment context
+# - Return stable route summary payloads with assignment context
 # -----------------------------------------------------------
 def _serialize_route(route: Route) -> RouteOut:
     active_driver_id = None  # Default when no active driver resolves
@@ -36,11 +44,141 @@ def _serialize_route(route: Route) -> RouteOut:
     except ValueError:
         pass  # Leave unresolved route driver fields empty
 
+    runs_count = len(route.runs)  # Total runs linked to this route
+    active_runs_count = sum(  # Count only active operational runs
+        1
+        for run in route.runs
+        if run.start_time is not None and run.end_time is None
+    )
+    total_stops_count = sum(len(run.stops) for run in route.runs)  # Count all stops across route runs
+    total_students_count = len({  # Count distinct runtime students across all route runs
+        assignment.student_id
+        for run in route.runs
+        for assignment in run.student_assignments
+    })
+
     return RouteOut(
         id=route.id,
         route_number=route.route_number,
         unit_number=route.unit_number,
-        school_ids=[school.id for school in route.schools],
+        school_ids=[school.id for school in sorted(route.schools, key=lambda school: (school.name, school.id))],
+        school_names=[school.name for school in sorted(route.schools, key=lambda school: (school.name, school.id))],
+        schools_count=len(route.schools),
+        active_driver_id=active_driver_id,
+        active_driver_name=active_driver_name,
+        runs_count=runs_count,
+        active_runs_count=active_runs_count,
+        total_stops_count=total_stops_count,
+        total_students_count=total_students_count,
+    )
+
+
+# -----------------------------------------------------------
+# - Route detail serializer
+# - Return the full nested route detail payload
+# -----------------------------------------------------------
+def _serialize_route_detail(route: Route) -> RouteDetailOut:
+    active_driver_id = None  # Default when no active driver resolves
+    active_driver_name = None  # Default when no active driver resolves
+
+    try:
+        active_assignment = resolve_route_driver_assignment(route)  # Resolve current route driver
+        active_driver_id = active_assignment.driver_id  # Resolved driver identifier
+        active_driver_name = active_assignment.driver.name if active_assignment.driver else None  # Resolved driver name
+    except ValueError:
+        pass  # Leave unresolved route driver fields empty
+
+    ordered_runs = sorted(  # Keep detail output stable and newest-first
+        route.runs,
+        key=lambda run: (run.start_time or datetime.min, run.id),
+        reverse=True,
+    )
+
+    serialized_runs = []  # Final run detail rows
+
+    for run in ordered_runs:
+        ordered_stops = sorted(  # Stable stop order per run
+            run.stops,
+            key=lambda stop: (
+                stop.sequence if stop.sequence is not None else 999999,
+                stop.id,
+            ),
+        )
+
+        stop_student_counts = {}  # stop_id -> runtime student count
+        for assignment in run.student_assignments:
+            if assignment.stop_id is None:
+                continue
+            stop_student_counts[assignment.stop_id] = stop_student_counts.get(assignment.stop_id, 0) + 1
+
+        serialized_stops = [
+            RouteDetailStopOut(
+                stop_id=stop.id,
+                sequence=stop.sequence,
+                type=stop.type.value if hasattr(stop.type, "value") else str(stop.type),
+                name=stop.name,
+                address=stop.address,
+                planned_time=stop.planned_time,
+                student_count=stop_student_counts.get(stop.id, 0),
+            )
+            for stop in ordered_stops
+        ]
+
+        ordered_assignments = sorted(  # Stable student order by assigned stop then row id
+            run.student_assignments,
+            key=lambda assignment: (
+                assignment.stop.sequence if assignment.stop and assignment.stop.sequence is not None else 999999,
+                assignment.student.name if assignment.student else "",
+                assignment.id,
+            ),
+        )
+
+        serialized_students = []
+        for assignment in ordered_assignments:
+            if not assignment.student:
+                continue
+
+            serialized_students.append(
+                RouteDetailStudentOut(
+                    student_id=assignment.student.id,
+                    student_name=assignment.student.name,
+                    school_id=assignment.student.school_id,
+                    school_name=assignment.student.school.name if assignment.student.school else None,
+                    school_code=assignment.student.school.school_code if assignment.student.school else None,
+                    stop_id=assignment.stop_id,
+                    stop_sequence=assignment.stop.sequence if assignment.stop else None,
+                    stop_name=assignment.stop.name if assignment.stop else None,
+                )
+            )
+
+        serialized_runs.append(
+            RouteDetailRunOut(
+                run_id=run.id,
+                run_type=run.run_type,
+                start_time=run.start_time,
+                end_time=run.end_time,
+                driver_id=run.driver_id,
+                driver_name=run.driver.name if run.driver else None,
+                is_planned=run.start_time is None,
+                is_active=run.start_time is not None and run.end_time is None,
+                is_completed=run.is_completed,
+                stops=serialized_stops,
+                students=serialized_students,
+            )
+        )
+
+    return RouteDetailOut(
+        id=route.id,
+        route_number=route.route_number,
+        unit_number=route.unit_number,
+        schools=[
+            RouteSchoolOut(
+                school_id=school.id,
+                school_name=school.name,
+                school_code=school.school_code,
+            )
+            for school in sorted(route.schools, key=lambda school: (school.name, school.id))
+        ],
         active_driver_id=active_driver_id,
         active_driver_name=active_driver_name,
         driver_assignments=[
@@ -51,8 +189,12 @@ def _serialize_route(route: Route) -> RouteOut:
                 driver_name=assignment.driver.name if assignment.driver else None,
                 active=assignment.active,
             )
-            for assignment in route.driver_assignments
+            for assignment in sorted(
+                route.driver_assignments,
+                key=lambda assignment: (not assignment.active, assignment.id),
+            )
         ],
+        runs=serialized_runs,
     )
 
 # -----------------------------------------------------------
@@ -96,54 +238,77 @@ def create_route(route: RouteCreate, db: Session = Depends(get_db)):
         )
 
     db_route = Route(**payload)                                  # Create route after uniqueness check
-    db.add(db_route)
-    db.flush()
+    db.add(db_route)                                             # Add route to session
+    db.flush()                                                   # Allocate route id before school linking
 
     if school_ids:
-        db_route.schools = db.query(School).filter(School.id.in_(school_ids)).all()
+        db_route.schools = db.query(School).filter(School.id.in_(school_ids)).all()  # Attach requested schools
 
-    db.commit()
-    db.refresh(db_route)
-    return _serialize_route(db_route)
+    db.commit()                                                  # Persist route and optional schools
+    db.refresh(db_route)                                         # Reload committed route
+    return _serialize_route(db_route)                            # Return route summary
 
 
 # -----------------------------------------------------------
-# - Get all routes
-# - Return route collection with assignment context
+# - List routes
+# - Return route summaries for navigation and selection
 # -----------------------------------------------------------
-@router.get("/", response_model=List[RouteOut])                   # FIX: match POST behavior
+@router.get(
+    "/",
+    response_model=List[RouteOut],
+    summary="List routes",
+    description="Return lightweight route summaries with school, driver, run, stop, and student counts for navigation.",
+    response_description="Route summary list",
+)
 def get_routes(db: Session = Depends(get_db)):
     routes = (
         db.query(Route)
         .options(
-            joinedload(Route.schools),
-            joinedload(Route.driver_assignments).joinedload(RouteDriverAssignment.driver),
+            selectinload(Route.schools),                         # Load school summary fields
+            selectinload(Route.driver_assignments).selectinload(RouteDriverAssignment.driver),  # Load active driver context
+            selectinload(Route.runs).selectinload(run_model.Run.stops),  # Load stop counts per run
+            selectinload(Route.runs).selectinload(run_model.Run.student_assignments),  # Load runtime student counts
         )
+        .order_by(Route.route_number.asc(), Route.id.asc())      # Keep route list stable
         .all()
     )
-    return [_serialize_route(route) for route in routes]
+    return [_serialize_route(route) for route in routes]         # Return summary collection
 
 # -----------------------------------------------------------
-# - Get one route by id
-# - Return route details with assignment context
+# - Get route detail
+# - Return full nested route details for one selected route
 # -----------------------------------------------------------
-@router.get("/{route_id}", response_model=RouteOut)
+@router.get(
+    "/{route_id}",
+    response_model=RouteDetailOut,
+    summary="Get route detail",
+    description="Return one route with nested schools, driver assignments, runs, stops, and runtime student details.",
+    response_description="Route detail",
+)
 def get_route(route_id: int, db: Session = Depends(get_db)):
     route = (
         db.query(Route)
         .options(
-            joinedload(Route.schools),                           # Include linked schools
-            joinedload(Route.driver_assignments).joinedload(RouteDriverAssignment.driver),  # Include driver assignments
+            selectinload(Route.schools),                         # Include linked schools
+            selectinload(Route.driver_assignments).selectinload(RouteDriverAssignment.driver),  # Include driver assignments
+            selectinload(Route.runs).selectinload(run_model.Run.driver),  # Include run driver data
+            selectinload(Route.runs).selectinload(run_model.Run.stops),  # Include run stops
+            selectinload(Route.runs).selectinload(run_model.Run.student_assignments).selectinload(StudentRunAssignment.stop),  # Include assigned runtime stops
+            selectinload(Route.runs).selectinload(run_model.Run.student_assignments).selectinload(StudentRunAssignment.student).selectinload(student_model.Student.school),  # Include assigned students and schools
         )
         .filter(Route.id == route_id)                           # Match requested route id
         .first()
     )
     if not route:
-        raise HTTPException(status_code=404, detail="Route not found")
+        raise HTTPException(status_code=404, detail="Route not found")  # Validate route exists
 
-    return _serialize_route(route)                              # Return normalized route payload
+    return _serialize_route_detail(route)                       # Return full route detail payload
 
 
+# -----------------------------------------------------------
+# - Update route
+# - Modify one route while preserving uniqueness rules
+# -----------------------------------------------------------
 @router.put("/{route_id}", response_model=RouteOut)
 def update_route(route_id: int, route_in: RouteCreate, db: Session = Depends(get_db)):
     route = (
@@ -190,6 +355,10 @@ def update_route(route_id: int, route_in: RouteCreate, db: Session = Depends(get
     return _serialize_route(route)
 
 
+# -----------------------------------------------------------
+# - Delete route
+# - Remove one route by id
+# -----------------------------------------------------------
 @router.delete("/{route_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_route(route_id: int, db: Session = Depends(get_db)):
     route = db.get(Route, route_id)
@@ -200,6 +369,10 @@ def delete_route(route_id: int, db: Session = Depends(get_db)):
     return None
 
 
+# -----------------------------------------------------------
+# - List route schools
+# - Return the schools linked to one route
+# -----------------------------------------------------------
 @router.get("/{route_id}/schools", response_model=List[dict])
 def get_route_schools(route_id: int, db: Session = Depends(get_db)):
     route = db.get(Route, route_id)
@@ -332,7 +505,7 @@ def get_route_drivers(route_id: int, db: Session = Depends(get_db)):
 
 
 # -----------------------------------------------------------
-# Route driver assignment removal
+# - Unassign driver from route
 # - Deactivate active assignments for one route and driver
 # -----------------------------------------------------------
 @router.delete("/{route_id}/unassign_driver/{driver_id}", status_code=status.HTTP_204_NO_CONTENT)

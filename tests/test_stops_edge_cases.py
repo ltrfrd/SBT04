@@ -1,3 +1,6 @@
+import pytest
+
+
 def _setup_run(client):
     r = client.post("/drivers/", json={"name": "D", "email": "d@d.com", "phone": "1"})
     assert r.status_code in (200, 201)
@@ -64,3 +67,78 @@ def test_admin_endpoints_require_token(client):
 
     r = client.post(f"/stops/normalize/{run_id}")
     assert r.status_code == 403
+
+
+@pytest.mark.parametrize(
+    ("stop_type", "expected_type"),
+    [
+        ("pickup", "pickup"),
+        ("PICKUP", "pickup"),
+        ("PickUp", "pickup"),
+        ("pick up", "pickup"),
+        ("pick-up", "pickup"),
+        ("dropoff", "dropoff"),
+        ("DROPOFF", "dropoff"),
+        ("DropOff", "dropoff"),
+        ("drop off", "dropoff"),
+        ("drop-off", "dropoff"),
+    ],
+)
+def test_stop_create_normalizes_flexible_type_values(client, stop_type, expected_type):
+    run_id = _setup_run(client)
+
+    response = client.post(
+        "/stops/",
+        json={
+            "run_id": run_id,
+            "name": f"{stop_type} stop",
+            "latitude": 1,
+            "longitude": 1,
+            "type": stop_type,
+        },
+    )
+
+    assert response.status_code in (200, 201)
+    assert response.json()["type"] == expected_type
+
+
+def test_stop_update_normalizes_flexible_type_values(client):
+    run_id = _setup_run(client)
+
+    created = client.post(
+        "/stops/",
+        json={
+            "run_id": run_id,
+            "name": "Original Stop",
+            "latitude": 1,
+            "longitude": 1,
+            "type": "pickup",
+        },
+    )
+    assert created.status_code in (200, 201)
+    stop_id = created.json()["id"]
+
+    updated = client.put(
+        f"/stops/{stop_id}",
+        json={"type": "Drop-Off"},
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["type"] == "dropoff"
+
+
+def test_stop_rejects_invalid_type_value(client):
+    run_id = _setup_run(client)
+
+    response = client.post(
+        "/stops/",
+        json={
+            "run_id": run_id,
+            "name": "Invalid Stop",
+            "latitude": 1,
+            "longitude": 1,
+            "type": "bus stop",
+        },
+    )
+
+    assert response.status_code == 422

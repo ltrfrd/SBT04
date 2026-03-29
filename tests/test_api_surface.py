@@ -1,5 +1,6 @@
 from tests.conftest import client
 
+
 def _create_route_with_assignment(client, route_number: str, unit_number: str, driver_id: int):
     r = client.post("/routes/", json={"route_number": route_number, "unit_number": unit_number})
     assert r.status_code in (200, 201)
@@ -64,6 +65,199 @@ def test_routes_crud(client):
     assert r.status_code in (200, 204)
     r = client.get(f"/routes/{route_id}")
     assert r.status_code == 404
+
+
+# -----------------------------------------------------------
+# - Route list summary fields
+# - Return useful route navigation data without full nesting
+# -----------------------------------------------------------
+def test_routes_list_returns_summary_fields(client):
+    school = client.post(
+        "/schools/",
+        json={"name": "Summary School", "address": "10 Summary Way", "school_code": "216"},
+    )
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]
+
+    driver = client.post("/drivers/", json={"name": "Summary Driver", "email": "summary@x.com", "phone": "1"})
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]
+
+    route = client.post(
+        "/routes/",
+        json={"route_number": "RSUM-1", "unit_number": "BUS-SUM-1", "school_ids": [school_id]},
+    )
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    assign = client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
+    assert assign.status_code in (200, 201)
+
+    run = client.post("/runs/start", json={"route_id": route_id, "run_type": "Morning"})
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    stop = client.post(
+        "/stops/",
+        json={"run_id": run_id, "name": "Summary Stop", "latitude": 1, "longitude": 1, "type": "pickup", "sequence": 1},
+    )
+    assert stop.status_code in (200, 201)
+    stop_id = stop.json()["id"]
+
+    student = client.post(
+        "/students/",
+        json={"name": "Summary Student", "school_id": school_id, "route_id": route_id, "stop_id": stop_id},
+    )
+    assert student.status_code in (200, 201)
+    student_id = student.json()["id"]
+
+    assignment = client.post(
+        "/student-run-assignments/",
+        json={"student_id": student_id, "run_id": run_id, "stop_id": stop_id},
+    )
+    assert assignment.status_code == 201
+
+    response = client.get("/routes/")
+    assert response.status_code == 200
+
+    route_summary = next(item for item in response.json() if item["id"] == route_id)
+
+    assert route_summary["route_number"] == "RSUM-1"
+    assert route_summary["unit_number"] == "BUS-SUM-1"
+    assert route_summary["school_ids"] == [school_id]
+    assert route_summary["school_names"] == ["Summary School"]
+    assert route_summary["schools_count"] == 1
+    assert route_summary["active_driver_id"] == driver_id
+    assert route_summary["active_driver_name"] == "Summary Driver"
+    assert route_summary["runs_count"] == 1
+    assert route_summary["active_runs_count"] == 1
+    assert route_summary["total_stops_count"] == 1
+    assert route_summary["total_students_count"] == 1
+
+
+# -----------------------------------------------------------
+# - Route detail nesting
+# - Return schools, runs, stops, and students in one route view
+# -----------------------------------------------------------
+def test_route_detail_returns_nested_route_data(client):
+    school = client.post(
+        "/schools/",
+        json={"name": "Detail School", "address": "20 Detail Ave", "school_code": "237"},
+    )
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]
+
+    driver = client.post("/drivers/", json={"name": "Detail Driver", "email": "detail@x.com", "phone": "2"})
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]
+
+    route = client.post(
+        "/routes/",
+        json={"route_number": "RDET-1", "unit_number": "BUS-DET-1", "school_ids": [school_id]},
+    )
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    assign = client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
+    assert assign.status_code in (200, 201)
+
+    run = client.post("/runs/start", json={"route_id": route_id, "run_type": "Afternoon"})
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    stop = client.post(
+        "/stops/",
+        json={
+            "run_id": run_id,
+            "name": "Detail Stop",
+            "address": "30 Detail St",
+            "planned_time": "14:10:00",
+            "latitude": 2,
+            "longitude": 2,
+            "type": "dropoff",
+            "sequence": 1,
+        },
+    )
+    assert stop.status_code in (200, 201)
+    stop_id = stop.json()["id"]
+
+    student = client.post(
+        "/students/",
+        json={"name": "Detail Student", "school_id": school_id, "route_id": route_id, "stop_id": stop_id},
+    )
+    assert student.status_code in (200, 201)
+    student_id = student.json()["id"]
+
+    assignment = client.post(
+        "/student-run-assignments/",
+        json={"student_id": student_id, "run_id": run_id, "stop_id": stop_id},
+    )
+    assert assignment.status_code == 201
+
+    response = client.get(f"/routes/{route_id}")
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["id"] == route_id
+    assert data["route_number"] == "RDET-1"
+    assert data["unit_number"] == "BUS-DET-1"
+    assert data["active_driver_id"] == driver_id
+    assert data["active_driver_name"] == "Detail Driver"
+    assert data["schools"] == [
+        {"school_id": school_id, "school_name": "Detail School", "school_code": "237"}
+    ]
+    assert len(data["driver_assignments"]) == 1
+    assert data["driver_assignments"][0]["driver_id"] == driver_id
+    assert len(data["runs"]) == 1
+
+    run_detail = data["runs"][0]
+    assert run_detail["run_id"] == run_id
+    assert run_detail["run_type"] == "Afternoon"
+    assert run_detail["driver_id"] == driver_id
+    assert run_detail["driver_name"] == "Detail Driver"
+    assert run_detail["is_planned"] is False
+    assert run_detail["is_active"] is True
+    assert run_detail["stops"] == [
+        {
+            "stop_id": stop_id,
+            "sequence": 1,
+            "type": "dropoff",
+            "name": "Detail Stop",
+            "address": "30 Detail St",
+            "planned_time": "14:10:00",
+            "student_count": 1,
+        }
+    ]
+    assert run_detail["students"] == [
+        {
+            "student_id": student_id,
+            "student_name": "Detail Student",
+            "school_id": school_id,
+            "school_name": "Detail School",
+            "school_code": "237",
+            "stop_id": stop_id,
+            "stop_sequence": 1,
+            "stop_name": "Detail Stop",
+        }
+    ]
+
+
+# -----------------------------------------------------------
+# - Empty route detail
+# - Return clean empty arrays when related data is missing
+# -----------------------------------------------------------
+def test_route_detail_returns_empty_arrays_for_empty_route(client):
+    route = client.post("/routes/", json={"route_number": "REMPTY-1", "unit_number": "BUS-EMPTY-1"})
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    response = client.get(f"/routes/{route_id}")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["schools"] == []
+    assert data["driver_assignments"] == []
+    assert data["runs"] == []
 
 
 def test_students_crud(client):
@@ -135,3 +329,131 @@ def test_route_update_rejects_duplicate_route_number(client):
 
     assert response.status_code == 409                                               # Duplicate route number blocked
     assert response.json()["detail"] == "Route number already exists"                # Match API error message
+
+
+# -----------------------------------------------------------
+# - Run detail endpoint
+# - Return nested route, stop, and student data for one run
+# -----------------------------------------------------------
+def test_run_detail_returns_nested_run_data(client):
+    school = client.post(
+        "/schools/",
+        json={"name": "Run Detail School", "address": "50 Run Detail Rd", "school_code": "310"},
+    )
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]
+
+    driver = client.post("/drivers/", json={"name": "Run Detail Driver", "email": "run.detail@x.com", "phone": "3"})
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]
+
+    route_id = _create_route_with_assignment(client, "RUN-DETAIL-1", "BUS-RUN-DETAIL-1", driver_id)
+
+    run = client.post("/runs/start", json={"route_id": route_id, "run_type": "Morning"})
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    stop = client.post(
+        "/stops/",
+        json={"run_id": run_id, "sequence": 1, "type": "pickup", "name": "Run Detail Stop", "address": "51 Run Detail Rd", "planned_time": "07:05:00", "latitude": 1, "longitude": 1},
+    )
+    assert stop.status_code in (200, 201)
+    stop_id = stop.json()["id"]
+
+    student = client.post(
+        "/students/",
+        json={"name": "Run Detail Student", "school_id": school_id, "route_id": route_id, "stop_id": stop_id},
+    )
+    assert student.status_code in (200, 201)
+    student_id = student.json()["id"]
+
+    assignment = client.post(
+        "/student-run-assignments/",
+        json={"student_id": student_id, "run_id": run_id, "stop_id": stop_id},
+    )
+    assert assignment.status_code == 201
+
+    response = client.get(f"/runs/{run_id}")
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["id"] == run_id
+    assert data["route"]["route_id"] == route_id
+    assert data["route"]["route_number"] == "RUN-DETAIL-1"
+    assert data["route"]["unit_number"] == "BUS-RUN-DETAIL-1"
+    assert data["driver"]["driver_id"] == driver_id
+    assert data["driver"]["driver_name"] == "Run Detail Driver"
+    assert data["stops"] == [
+        {
+            "stop_id": stop_id,
+            "sequence": 1,
+            "type": "pickup",
+            "name": "Run Detail Stop",
+            "address": "51 Run Detail Rd",
+            "planned_time": "07:05:00",
+        }
+    ]
+    assert data["students"] == [
+        {
+            "student_id": student_id,
+            "student_name": "Run Detail Student",
+            "school_id": school_id,
+            "school_name": "Run Detail School",
+            "school_code": "310",
+            "stop_id": stop_id,
+            "stop_sequence": 1,
+            "stop_name": "Run Detail Stop",
+        }
+    ]
+
+
+# -----------------------------------------------------------
+# - Route-scoped run list
+# - Require route_id and reject legacy list modes
+# -----------------------------------------------------------
+def test_runs_list_requires_route_id_and_returns_route_runs_only(client):
+    driver = client.post("/drivers/", json={"name": "Run List Driver", "email": "run.list@x.com", "phone": "4"})
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]
+
+    route_one_id = _create_route_with_assignment(client, "RUN-LIST-1", "BUS-RUN-LIST-1", driver_id)
+    route_two_id = _create_route_with_assignment(client, "RUN-LIST-2", "BUS-RUN-LIST-2", driver_id)
+
+    run_one = client.post("/runs/", json={"route_id": route_one_id, "run_type": "Morning"})
+    run_two = client.post("/runs/", json={"route_id": route_two_id, "run_type": "Afternoon"})
+    assert run_one.status_code in (200, 201)
+    assert run_two.status_code in (200, 201)
+
+    missing_route = client.get("/runs/")
+    assert missing_route.status_code == 400
+    assert missing_route.json()["detail"] == "route_id is required"
+
+    route_one_runs = client.get(f"/runs/?route_id={route_one_id}")
+    assert route_one_runs.status_code == 200
+    assert route_one_runs.json() == [
+        {
+            "run_id": run_one.json()["id"],
+            "run_type": "Morning",
+            "start_time": None,
+            "end_time": None,
+            "driver_id": driver_id,
+            "driver_name": "Run List Driver",
+            "is_planned": True,
+            "is_active": False,
+            "is_completed": False,
+            "stops_count": 0,
+            "students_count": 0,
+        }
+    ]
+
+    no_driver_filter = client.get(f"/runs/?driver_id={driver_id}")
+    assert no_driver_filter.status_code == 400
+    assert no_driver_filter.json()["detail"] == "route_id is required"
+
+    no_run_type_filter = client.get("/runs/?run_type=Morning")
+    assert no_run_type_filter.status_code == 400
+    assert no_run_type_filter.json()["detail"] == "route_id is required"
+
+    no_active_filter = client.get("/runs/?active=true")
+    assert no_active_filter.status_code == 400
+    assert no_active_filter.json()["detail"] == "route_id is required"

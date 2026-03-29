@@ -1,8 +1,10 @@
 # ===========================================================
 # backend/schemas/route.py - BST Route Schemas
+# -----------------------------------------------------------
+# Pydantic models for route summary and detail responses.
 # ===========================================================
 
-from datetime import date
+from datetime import datetime, time
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict
@@ -46,15 +48,95 @@ class RouteCreate(BaseModel):
 
 
 # -----------------------------------------------------------
-# Schema for reading route data (GET / Response)
+# Route summary response
+# - Lightweight route list item for navigation and selection
 # -----------------------------------------------------------
 class RouteOut(BaseModel):
     id: int
     route_number: str
     unit_number: Optional[str] = None
     school_ids: Optional[List[int]] = None
+    school_names: List[str] = []
+    schools_count: int = 0
     active_driver_id: Optional[int] = None
     active_driver_name: Optional[str] = None
+    runs_count: int = 0
+    active_runs_count: int = 0
+    total_stops_count: int = 0
+    total_students_count: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# -----------------------------------------------------------
+# Route detail school response
+# - School rows nested under one route detail response
+# -----------------------------------------------------------
+class RouteSchoolOut(BaseModel):
+    school_id: int
+    school_name: str
+    school_code: str | None = None
+
+
+# -----------------------------------------------------------
+# Route detail stop response
+# - Stop rows nested under one run in route detail output
+# -----------------------------------------------------------
+class RouteDetailStopOut(BaseModel):
+    stop_id: int
+    sequence: int
+    type: str
+    name: str | None = None
+    address: str | None = None
+    planned_time: time | None = None
+    student_count: int = 0
+
+
+# -----------------------------------------------------------
+# Route detail student response
+# - Runtime student assignment rows nested under one run
+# -----------------------------------------------------------
+class RouteDetailStudentOut(BaseModel):
+    student_id: int
+    student_name: str
+    school_id: int | None = None
+    school_name: str | None = None
+    school_code: str | None = None
+    stop_id: int | None = None
+    stop_sequence: int | None = None
+    stop_name: str | None = None
+
+
+# -----------------------------------------------------------
+# Route detail run response
+# - Full nested run details for one selected route
+# -----------------------------------------------------------
+class RouteDetailRunOut(BaseModel):
+    run_id: int
+    run_type: str
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    driver_id: int | None = None
+    driver_name: str | None = None
+    is_planned: bool
+    is_active: bool
+    is_completed: bool
+    stops: List[RouteDetailStopOut] = []
+    students: List[RouteDetailStudentOut] = []
+
+
+# -----------------------------------------------------------
+# Route detail response
+# - Full nested route payload for one selected route
+# -----------------------------------------------------------
+class RouteDetailOut(BaseModel):
+    id: int
+    route_number: str
+    unit_number: str | None = None
+    schools: List[RouteSchoolOut] = []
+    active_driver_id: int | None = None
+    active_driver_name: str | None = None
     driver_assignments: List[RouteDriverAssignmentOut] = []
+    runs: List[RouteDetailRunOut] = []
 
     model_config = ConfigDict(from_attributes=True)

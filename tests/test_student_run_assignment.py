@@ -189,3 +189,232 @@ def test_create_student_run_assignment_duplicate_returns_409(client):  # Test du
     })  # Keep response for assertion
 
     assert second_response.status_code == 409  # Same student cannot be assigned twice in one run
+
+
+# -----------------------------------------------------------
+# - Get run assignments
+# - Return all student assignments for one run
+# -----------------------------------------------------------
+def test_get_student_run_assignments_by_run_returns_all_students(client):
+
+    # -------------------------------------------------------------------------
+    # Create driver
+    # -------------------------------------------------------------------------
+    driver = client.post("/drivers/", json={
+        "name": "Read Driver",
+        "email": "read_driver@test.com",
+        "phone": "7805555001"
+    }).json()
+
+    # -------------------------------------------------------------------------
+    # Create school
+    # -------------------------------------------------------------------------
+    school = client.post("/schools/", json={
+        "name": "Read School",
+        "address": "500 School Street",
+        "phone": "7805555002"
+    }).json()
+
+    # -------------------------------------------------------------------------
+    # Create route and run
+    # -------------------------------------------------------------------------
+    route = client.post("/routes/", json={
+        "route_number": "500",
+        "unit_number": "BUS-500",
+        "school_ids": [school["id"]]
+    }).json()
+    client.post(f"/routes/{route['id']}/assign_driver/{driver['id']}")
+
+    run = client.post("/runs/", json={
+        "route_id": route["id"],
+        "run_type": "AM"
+    }).json()
+
+    # -------------------------------------------------------------------------
+    # Create two stops
+    # -------------------------------------------------------------------------
+    stop_1 = client.post("/stops/", json={
+        "run_id": run["id"],
+        "type": "pickup",
+        "sequence": 1,
+        "name": "Read Stop 1",
+        "address": "501 Stop Street",
+        "planned_time": "07:10:00",
+        "latitude": 53.51,
+        "longitude": -113.51
+    }).json()
+
+    stop_2 = client.post("/stops/", json={
+        "run_id": run["id"],
+        "type": "pickup",
+        "sequence": 2,
+        "name": "Read Stop 2",
+        "address": "502 Stop Street",
+        "planned_time": "07:20:00",
+        "latitude": 53.52,
+        "longitude": -113.52
+    }).json()
+
+    # -------------------------------------------------------------------------
+    # Create two students
+    # -------------------------------------------------------------------------
+    student_1 = client.post("/students/", json={
+        "name": "Student One",
+        "grade": "5",
+        "school_id": school["id"],
+        "route_id": route["id"],
+        "stop_id": stop_1["id"]
+    }).json()
+
+    student_2 = client.post("/students/", json={
+        "name": "Student Two",
+        "grade": "6",
+        "school_id": school["id"],
+        "route_id": route["id"],
+        "stop_id": stop_2["id"]
+    }).json()
+
+    # -------------------------------------------------------------------------
+    # Create two assignments for the same run
+    # -------------------------------------------------------------------------
+    first_assignment = client.post("/student-run-assignments/", json={
+        "student_id": student_1["id"],
+        "run_id": run["id"],
+        "stop_id": stop_1["id"]
+    })
+    assert first_assignment.status_code == 201
+
+    second_assignment = client.post("/student-run-assignments/", json={
+        "student_id": student_2["id"],
+        "run_id": run["id"],
+        "stop_id": stop_2["id"]
+    })
+    assert second_assignment.status_code == 201
+
+    # -------------------------------------------------------------------------
+    # Read all assignments for the run
+    # -------------------------------------------------------------------------
+    response = client.get(f"/student-run-assignments/{run['id']}")
+    data = response.json()
+
+    assert response.status_code == 200
+    assert [item["student_id"] for item in data] == [student_1["id"], student_2["id"]]
+    assert all(item["run_id"] == run["id"] for item in data)
+
+
+# -----------------------------------------------------------
+# - Get student assignments
+# - Return assignments for one student across runs
+# -----------------------------------------------------------
+def test_get_student_run_assignments_by_student_lookup(client):
+
+    # -------------------------------------------------------------------------
+    # Create driver
+    # -------------------------------------------------------------------------
+    driver = client.post("/drivers/", json={
+        "name": "Lookup Driver",
+        "email": "lookup_driver@test.com",
+        "phone": "7805556001"
+    }).json()
+
+    # -------------------------------------------------------------------------
+    # Create school
+    # -------------------------------------------------------------------------
+    school = client.post("/schools/", json={
+        "name": "Lookup School",
+        "address": "600 School Street",
+        "phone": "7805556002"
+    }).json()
+
+    # -------------------------------------------------------------------------
+    # Create route and two runs
+    # -------------------------------------------------------------------------
+    route = client.post("/routes/", json={
+        "route_number": "600",
+        "unit_number": "BUS-600",
+        "school_ids": [school["id"]]
+    }).json()
+    client.post(f"/routes/{route['id']}/assign_driver/{driver['id']}")
+
+    run_1 = client.post("/runs/", json={
+        "route_id": route["id"],
+        "run_type": "AM"
+    }).json()
+
+    run_2 = client.post("/runs/", json={
+        "route_id": route["id"],
+        "run_type": "PM"
+    }).json()
+
+    # -------------------------------------------------------------------------
+    # Create one stop per run
+    # -------------------------------------------------------------------------
+    stop_1 = client.post("/stops/", json={
+        "run_id": run_1["id"],
+        "type": "pickup",
+        "sequence": 1,
+        "name": "Lookup Stop 1",
+        "address": "601 Stop Street",
+        "planned_time": "07:10:00",
+        "latitude": 53.61,
+        "longitude": -113.61
+    }).json()
+
+    stop_2 = client.post("/stops/", json={
+        "run_id": run_2["id"],
+        "type": "pickup",
+        "sequence": 1,
+        "name": "Lookup Stop 2",
+        "address": "602 Stop Street",
+        "planned_time": "15:10:00",
+        "latitude": 53.62,
+        "longitude": -113.62
+    }).json()
+
+    # -------------------------------------------------------------------------
+    # Create one student
+    # -------------------------------------------------------------------------
+    student = client.post("/students/", json={
+        "name": "Lookup Student",
+        "grade": "7",
+        "school_id": school["id"],
+        "route_id": route["id"],
+        "stop_id": stop_1["id"]
+    }).json()
+
+    # -------------------------------------------------------------------------
+    # Create assignments across both runs
+    # -------------------------------------------------------------------------
+    first_assignment = client.post("/student-run-assignments/", json={
+        "student_id": student["id"],
+        "run_id": run_1["id"],
+        "stop_id": stop_1["id"]
+    })
+    assert first_assignment.status_code == 201
+
+    second_assignment = client.post("/student-run-assignments/", json={
+        "student_id": student["id"],
+        "run_id": run_2["id"],
+        "stop_id": stop_2["id"]
+    })
+    assert second_assignment.status_code == 201
+
+    # -------------------------------------------------------------------------
+    # Read assignments for the student
+    # -------------------------------------------------------------------------
+    response = client.get(f"/student-run-assignments/?student_id={student['id']}")
+    data = response.json()
+
+    assert response.status_code == 200
+    assert [item["run_id"] for item in data] == [run_1["id"], run_2["id"]]
+
+
+# -----------------------------------------------------------
+# - Require student lookup filter
+# - Reject empty student assignment list requests
+# -----------------------------------------------------------
+def test_list_student_run_assignments_requires_student_id(client):
+    response = client.get("/student-run-assignments/")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "student_id is required"

@@ -17,7 +17,7 @@ class Run(Base):
     __tablename__ = "runs"  # Persist runs in the runs table
 
     id = Column(Integer, primary_key=True, index=True)  # Store unique run ID
-    driver_id = Column(Integer, ForeignKey("drivers.id", ondelete="RESTRICT"), nullable=False)  # Store assigned driver ID
+    driver_id = Column(Integer, ForeignKey("drivers.id", ondelete="RESTRICT"), nullable=True)  # Store assigned driver ID when the run is started or preassigned
     route_id = Column(Integer, ForeignKey("routes.id", ondelete="CASCADE"), nullable=False)  # Store assigned route ID
     run_type = Column(String, nullable=False)  # Store flexible operational run label
     start_time = Column(DateTime, nullable=True)  # Store when the run started
