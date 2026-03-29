@@ -199,7 +199,7 @@ def route_report(route_id: int, request: Request, db: Session = Depends(get_db))
 # -----------------------------------------------------------
 def _get_run_workspace_status(run: run_model.Run) -> str:
     if run.start_time is None:
-        return "planned"                                     # Planned runs exist before start
+        return "ready"                                       # Driver-facing label for a run that has not started yet
     if run.end_time is None:
         return "active"                                      # Started but not ended yet
     return "ended"                                           # Historical completed run
@@ -264,7 +264,7 @@ def _build_route_workspace(route: route_model.Route) -> dict:
                 }
             )
 
-        status = _get_run_workspace_status(run)              # Planned / active / ended summary label
+        status = _get_run_workspace_status(run)              # Ready / active / ended summary label
         run_rows.append(
             {
                 "id": run.id,
@@ -276,9 +276,9 @@ def _build_route_workspace(route: route_model.Route) -> dict:
                 "student_count": len(run.student_assignments),
                 "current_stop_id": run.current_stop_id,
                 "current_stop_sequence": run.current_stop_sequence,
-                "can_start": run.start_time is None,         # Start only from not-yet-started runs
-                "can_update": run.start_time is None,        # Only planned runs remain editable
-                "can_delete": run.start_time is None,        # Only planned runs remain deletable
+                "can_start": run.start_time is None,         # Start only from ready runs
+                "can_update": run.start_time is None,        # Non-started runs remain editable in backend flows
+                "can_delete": run.start_time is None,        # Non-started runs remain deletable in backend flows
                 "can_end": status == "active",               # Preserve active end-run behavior
                 "stops": stop_rows,
             }

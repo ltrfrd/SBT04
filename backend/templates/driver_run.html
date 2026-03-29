@@ -31,7 +31,7 @@
         <div>
           <p class="text-uppercase text-muted fw-semibold mb-1">Driver Route Workspace</p>
           <h1 class="h3 mb-1"><i class="bi bi-person-badge me-2 text-primary"></i>{{ driver_name }}</h1>
-          <p class="text-muted mb-0">Route-first view with runs, stops, and assigned students.</p>
+          <p class="text-muted mb-0">Choose a route, review any run, then start the run when you are ready.</p>
         </div>
         <div class="d-flex gap-2">
           <a href="/dashboard" class="btn btn-outline-secondary">
@@ -92,7 +92,7 @@
           <div>
             <p class="text-uppercase small fw-semibold text-success mb-1">Live Active Run</p>
             <h3 class="h5 mb-1">{{ workspace.active_run.run_type }}</h3>
-            <p class="text-muted mb-0">Current route activity and end-run control stay available here.</p>
+            <p class="text-muted mb-0">Live run actions stay available only for the active run.</p>
           </div>
           <div>
             <button type="button" class="btn btn-danger" id="endActiveRunButton" data-run-id="{{ workspace.active_run.id }}" data-reload-url="/driver_run/{{ driver_id }}?route_id={{ workspace.id }}">
@@ -134,7 +134,7 @@
       <div class="section-card p-3 p-lg-4">
         <div class="d-flex justify-content-between align-items-center mb-3">
           <h3 class="h4 mb-0"><i class="bi bi-diagram-3 me-2 text-primary"></i>Runs for {{ workspace.route_number }}</h3>
-          <span class="text-muted small">Open a run, then a stop, to see assigned students.</span>
+          <span class="text-muted small">Open any run, then a stop, to review assigned students.</span>
         </div>
 
         {% if workspace.runs %}
@@ -157,7 +157,7 @@
                       <div class="small text-muted">Run #{{ run.id }}</div>
                     </div>
                     <div class="d-flex flex-wrap gap-2">
-                      <span class="badge status-badge {% if run.status == 'active' %}text-bg-success{% elif run.status == 'planned' %}text-bg-warning{% else %}text-bg-secondary{% endif %}">
+                      <span class="badge status-badge {% if run.status == 'active' %}text-bg-success{% elif run.status == 'ready' %}text-bg-warning{% else %}text-bg-secondary{% endif %}">
                         {{ run.status|title }}
                       </span>
                       <span class="badge text-bg-light">{{ run.stop_count }} stops</span>
@@ -173,7 +173,7 @@
                   <div class="small text-muted">
                     {% if run.start_time %}<span class="me-3"><strong>Started:</strong> {{ run.start_time }}</span>{% endif %}
                     {% if run.end_time %}<span><strong>Ended:</strong> {{ run.end_time }}</span>{% endif %}
-                    {% if not run.start_time %}<span><strong>Planned:</strong> Not started yet</span>{% endif %}
+                    {% if not run.start_time %}<span><strong>Ready:</strong> Not started yet</span>{% endif %}
                   </div>
                   <div class="d-flex flex-wrap gap-2">
                     {% if run.can_start %}

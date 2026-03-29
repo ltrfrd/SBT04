@@ -202,7 +202,7 @@ def _serialize_route_detail(route: Route) -> RouteDetailOut:
 # - Document duplicate route_number conflict in Swagger
 # -----------------------------------------------------------
 @router.post(
-    "/",                                                          # FIX: remove trailing slash to avoid 405 redirect issue
+    "/",                                                          # Keep route collection path stable
     response_model=RouteOut,                                     # Successful response model
     summary="Create route",                                      # Clear Swagger title
     description=(                                                # Explain real route creation flow
@@ -421,10 +421,6 @@ def _assign_driver_to_route(
 
     return new_assignment
 
-# -----------------------------------------------------------
-# - Assign driver to route endpoint
-# - Calls helper to enforce assignment rule
-# -----------------------------------------------------------
 # -----------------------------------------------------------
 # - Assign one active driver to a route
 # - Swagger should describe the real assignment workflow

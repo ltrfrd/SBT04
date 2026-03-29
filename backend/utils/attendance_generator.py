@@ -1,6 +1,6 @@
 # -----------------------------------------------------------
-# Attendance Generator
-# - Provide attendance-layer summaries using the existing report logic
+# - Attendance generator
+# - Build attendance-layer summaries behind the /reports compatibility layer
 # -----------------------------------------------------------
 from sqlalchemy.orm import Session  # Database session type
 from datetime import date, datetime, time # Date filter type
@@ -17,20 +17,9 @@ from backend.models.run import Run  # Import locally to avoid circular dependenc
 from backend.models.run_event import RunEvent  # Run event history
 from backend.models.associations import StudentRunAssignment  # Runtime assignments
 from backend.utils.student_bus_absence import has_student_bus_absence  # Absence check
-from backend.utils import attendance_generator  # Attendance utility functions
 from backend.models import school as school_model  # School model
-from fastapi import APIRouter, Depends, HTTPException, status  # FastAPI components
-from sqlalchemy.orm import Session  # Database session type
 from backend.models.school_attendance_verification import SchoolAttendanceVerification  # Read confirmation state
-from database import get_db  # Shared DB dependency
-from backend.utils import attendance_generator  # Attendance utility functions
-from backend.routers import student_bus_absence  # Re-export planned absence router through attendance layer
 from backend.utils.route_driver_assignment import get_route_driver_name, resolve_route_driver_assignment
-
-router = APIRouter(
-    prefix="/reports",  # Keep existing path stable during the rename phase
-    tags=["Attendance"],  # Rename outward-facing API label
-)
 
 def driver_summary(db: Session, driver_id: int) -> dict:
     drv = db.get(driver_model.Driver, driver_id)  # Load driver
@@ -180,7 +169,37 @@ def generate_attendance(
     if attendance_type == "payroll" and start and end:
         return payroll_summary(db, start, end)  # Return payroll attendance summary
     if attendance_type == "run" and ref_id:
-        return run_attendance_summary(db, ref_id)  # Run-level attendance summary
+        run = db.get(Run, ref_id)  # Load run for run-level attendance
+        if not run:
+            return {"error": "Run not found"}  # Preserve error-style contract
+
+        assignments = (
+            db.query(StudentRunAssignment)
+            .filter(StudentRunAssignment.run_id == run.id)
+            .all()
+        )  # Load run assignments
+
+        events = (
+            db.query(RunEvent)
+            .filter(RunEvent.run_id == run.id)
+            .all()
+        )  # Load run events
+
+        absence_lookup = {}  # Cache planned absences by student
+        for assignment in assignments:
+            absence_lookup[assignment.student_id] = has_student_bus_absence(
+                assignment.student_id,  # Student identifier
+                run,  # Run object
+                db,  # Database session
+            )
+
+        return run_attendance_summary(
+            db,
+            run,
+            assignments,
+            events,
+            absence_lookup,
+        )  # Return run attendance summary
     if attendance_type == "date" and start and end:               # Date-based attendance request
         return date_summary(db, start, end)                       # Generate daily attendance summary
     if attendance_type == "school" and ref_id:                   # School-based attendance request
@@ -273,16 +292,16 @@ def run_attendance_summary(db, run, assignments, events, absence_lookup):
 
     return {
         "route_number": run.route.route_number if run.route else None,  # Operational route identifier
-        "run_type": run.run_type,                                       # AM / PM run
+        "run_type": run.run_type,                                       # Flexible run label
         "students": results,                                            # Student-level attendance
         "totals": totals,                                               # Run totals
         "stop_totals": stop_totals,                                     # Stop-level totals
     }
 
-# -----------------------------------------------------------  # Attendance summary by date
-# Date attendance summary                                     # Dispatch daily attendance view
-# -----------------------------------------------------------  # Section separator
-
+# -----------------------------------------------------------
+# - Date attendance summary
+# - Build attendance output for one requested date window
+# -----------------------------------------------------------
 def date_summary(db: Session, start: date, end: date):        # Build attendance for a specific date
     day_start = datetime.combine(start, time.min)             # Start of requested day
     day_end = datetime.combine(end, time.max)                 # End of requested day
@@ -327,8 +346,8 @@ def date_summary(db: Session, start: date, end: date):        # Build attendance
         "runs": results,                                       # Run attendance payloads
     }
 # -----------------------------------------------------------
-# School Status Normalizer
-# Convert operational attendance states into school-facing states
+# - School status normalizer
+# - Convert operational attendance states into school-facing status
 # -----------------------------------------------------------
 def normalize_school_status(status: str) -> str:
     """Convert detailed attendance state to present/absent for schools."""  # School-safe status view
@@ -339,11 +358,9 @@ def normalize_school_status(status: str) -> str:
     return "absent"                                                          # Hide operational absence reason
 
 # -----------------------------------------------------------
-# Attendance summary by school
-# School attendance summary
-# School-level attendance view
+# - School attendance summary
+# - Build school-facing attendance grouped by route and run
 # -----------------------------------------------------------
-# Section separator
 def school_summary(db: Session, school_id: int):  # Build attendance for a school
     routes = (  # Load routes serving the school
         db.query(route_model.Route)  # Query routes
@@ -481,7 +498,7 @@ def school_summary(db: Session, school_id: int):  # Build attendance for a schoo
                     "route_id": route.id,                                   # Route identifier for navigation
                     "route_number": route.route_number,                     # Grouping key
                     "driver_name": run.driver.name if run.driver else "Unassigned",  # Display driver
-                    "run_type": str(run.run_type).split(".")[-1] if run.run_type else None,  # Safe enum text
+                    "run_type": run.run_type,                                   # Flexible run label
                     "date": run.start_time.date().isoformat() if run.start_time else None,    # Run date
                     "students": school_students_rows,                       # Current school-facing rows
                     "total_students": len(school_students_rows),            # Total visible students
@@ -601,53 +618,3 @@ def school_single_run_summary(db: Session, school_id: int, run_id: int):
             }
 
     return {"error": "Run not found for school"}  # Reject unrelated runs
-# -----------------------------------------------------------
-# - Run Attendance Report
-# - Return attendance status for each student in a run
-# -----------------------------------------------------------
-@router.get("/run/{run_id}", status_code=status.HTTP_200_OK)
-def get_run_attendance(run_id: int, db: Session = Depends(get_db)):
-    """Return student attendance status for a specific run."""  # Attendance-layer view
-
-    run = db.query(Run).filter(Run.id == run_id).first()  # Load run
-    if not run:
-        raise HTTPException(status_code=404, detail="Run not found")  # Preserve missing behavior
-
-    assignments = (
-        db.query(StudentRunAssignment)
-        .filter(StudentRunAssignment.run_id == run_id)
-        .all()
-    )  # Load run assignments
-
-    events = (
-        db.query(RunEvent)
-        .filter(RunEvent.run_id == run_id)
-        .all()
-    )  # Load run events
-
-    absence_lookup = {}  # Cache planned absences
-
-    run_date = run.start_time.date()  # Authoritative run date
-
-    for a in assignments:
-        absence_lookup[a.student_id] = has_student_bus_absence(
-            db,
-            a.student_id,
-            run_date,
-            run.run_type,
-        )  # Determine planned absence
-
-    attendance = attendance_generator.run_attendance_summary(
-        db,
-        run,
-        assignments,
-        events,
-        absence_lookup,
-    )  # Build attendance list
-
-    return {
-        "run_id": run_id,  # Run identifier
-        "run_type": run.run_type,  # AM/PM
-        "student_count": len(attendance),  # Total students considered
-        "students": attendance,  # Student attendance status list
-    }

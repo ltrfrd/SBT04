@@ -1,7 +1,5 @@
-# -----------------------------------------------------------
-# - Attendance Router
-# - Expose attendance-layer endpoints using the existing report behavior
-# - Standard library
+# - Attendance router
+# - Expose attendance endpoints while keeping /reports compatibility
 # -----------------------------------------------------------
 from datetime import date, datetime, timezone   # Date filter type # UTC timestamp for confirmation save
 from datetime import timedelta # Date arithmetic
@@ -143,7 +141,7 @@ def get_run_attendance(run_id: int, db: Session = Depends(get_db)):
 
     return {
         "route_number": run.route.route_number if run.route else None,  # Operational route identifier
-        "run_type": run.run_type,                                       # AM / PM
+        "run_type": run.run_type,                                       # Flexible run label
         "students": attendance_data["students"],                        # Student attendance list
         "totals": attendance_data["totals"],                            # Run-level attendance totals
         "stop_totals": attendance_data["stop_totals"],                  # Stop-level attendance totals
@@ -216,14 +214,14 @@ def get_school_attendance(
 
 # -----------------------------------------------------------
 # - Confirm school attendance
-# - Persist school-side confirmation for one run
+# - Create or refresh school confirmation for one school/run pair
 # -----------------------------------------------------------
 @router.post(
     "/school/{school_id}/confirm/{run_id}",                   # Endpoint path with school + run ids
     status_code=status.HTTP_200_OK,                           # HTTP 200 on success
     summary="Confirm school attendance",                      # Swagger title
-    description="Persist school confirmation for a specific run.",  # Swagger description
-    response_description="Attendance confirmation saved",     # Swagger response text
+    description="Create or refresh school confirmation for a specific school and run.",  # Swagger description
+    response_description="School attendance confirmation saved",  # Swagger response text
 )
 def confirm_school_attendance(
     school_id: int,  # Requested school ID
@@ -326,7 +324,7 @@ def get_absences_by_date(
                 "student_id": absence.student_id,                                     # Student ID
                 "student_name": absence.student.name if absence.student else None,    # Student name
                 "date": absence.date,                                                 # Absence date
-                "run_type": absence.run_type,                                         # AM / PM
+                "run_type": absence.run_type,                                         # Flexible run label
                 "source": absence.source,                                             # Parent / school / system
                 "created_at": absence.created_at,                                     # Creation timestamp
             }
@@ -369,7 +367,7 @@ def get_absences_by_school(
             {
                 "student_name": absence.student.name if absence.student else None, # Student name
                 "date": absence.date,                                              # Absence date
-                "run_type": absence.run_type,                                      # AM / PM
+                "run_type": absence.run_type,                                      # Flexible run label
             }
         )
 
@@ -431,7 +429,7 @@ def get_absences_by_run(
 
     return {
         "route_number": run.route.route_number if run.route else None,            # Route number
-        "run_type": run.run_type,                                                 # AM / PM
+        "run_type": run.run_type,                                                 # Flexible run label
         "date": run.start_time.date(),                                            # Run service date
         "total_absences": len(results),                                           # Total absences
         "absences": results,                                                      # Absence list
@@ -489,7 +487,7 @@ def get_school_attendance_by_date(
                 {
                     "student_name": assignment.student.name if assignment.student else None,  # Student name
                     "status": "present" if assignment.picked_up else "absent",                # School-facing status
-                    "run_type": run.run_type,                                                  # AM / PM
+                    "run_type": run.run_type,                                                  # Flexible run label
                 }
             )
     return {
@@ -687,4 +685,3 @@ def update_school_status(                                  # Handler function
 student_bus_absence_router = student_bus_absence.router  # Keep absence under attendance module ownership
 
 __all__ = ["router", "student_bus_absence_router"]  # Export attendance router and absence compatibility router
-

@@ -274,7 +274,7 @@ def create_run(run: RunStart, db: Session = Depends(get_db)):
     new_run = run_model.Run(
         driver_id=resolved_driver_id,                            # Assigned driver
         route_id=run.route_id,                                   # Linked route
-        run_type=run.run_type,                                   # Run type (AM/PM/etc.)
+        run_type=run.run_type,                                   # Flexible run label
         start_time=None,                                         # Not started yet
         end_time=None,                                           # Not ended yet
         current_stop_id=None,                                    # No active stop
@@ -285,6 +285,7 @@ def create_run(run: RunStart, db: Session = Depends(get_db)):
     db.commit()                                                  # Persist to DB
     db.refresh(new_run)                                          # Reload instance
     return _serialize_run(new_run)                               # Return response
+
 # -----------------------------------------------------------
 # - Start run
 # - Start a run, copy stops, and create runtime assignments
@@ -567,27 +568,6 @@ def end_run_by_driver(
 
     return active_run                               # Return ended run
 
-# =============================================================================
-# GET /runs/
-# ---------------------------------------------------------------------------
-# Returns a list of runs.
-#
-# Supports optional filters:
-#   - driver_id  → filter runs belonging to a specific driver
-#   - route_id   → filter runs belonging to a specific route
-#   - run_type   → filter runs by type (ex: AM, PM)
-#   - active     → filter runs by current active status
-#
-# Notes:
-#   active=True   → runs where start_time IS NOT NULL and end_time IS NULL
-#   active=False  → runs that are not currently active (planned or ended)
-#
-# If no filters are provided, all runs are returned.
-#
-# Enriched fields returned:
-#   - driver_name
-#   - route_number
-# =============================================================================
 # -----------------------------------------------------------
 # - List runs by route
 # - Return only runs that belong to the selected route
@@ -879,29 +859,15 @@ def advance_to_next_stop(
 
     return run                                      # Return updated run
 
-# =============================================================================
-# POST /runs/{run_id}/pickup_student
-# -----------------------------------------------------------------------------
-# Mark a student as picked up during an active run.
-#
-# Purpose:
-#   - confirm boarding at the current stop
-#   - store pickup timestamp
-#   - mark student as onboard
-#
-# Validation:
-#   - run must exist
-#   - run must be started / active
-#   - run must currently be at a stop
-#   - student must be assigned to this run
-#   - student's assigned stop must match current stop sequence
-#   - student must not already be picked up
-# =============================================================================
+# -----------------------------------------------------------
+# - Pick up student
+# - Record boarding at the run's current actual stop
+# -----------------------------------------------------------
 @router.post(
     "/{run_id}/pickup_student",
     response_model=PickupStudentResponse,
     summary="Pick up student",
-    description="Mark a student as picked up at the run's current stop and log a PICKUP event.",
+    description="Mark a student as picked up at the run's current actual stop and log a PICKUP event.",
     response_description="Pickup confirmation",
 )
 def pickup_student(
@@ -949,10 +915,9 @@ def pickup_student(
     # -------------------------------------------------------------------------
     # Load the student assignment for this run
     # -------------------------------------------------------------------------
-    # joinedload() is used so the assigned stop is available immediately.
     assignment = (
         db.query(StudentRunAssignment)
-        .options(joinedload(StudentRunAssignment.stop))
+        .options(joinedload(StudentRunAssignment.stop))  # Load assigned stop context for runtime views
         .filter(
             StudentRunAssignment.run_id == run_id,
             StudentRunAssignment.student_id == payload.student_id,
@@ -976,7 +941,7 @@ def pickup_student(
         )
 
     # -------------------------------------------------------------------------
-    # Mark pickup fields
+    # Mark pickup fields using the current actual stop
     # -------------------------------------------------------------------------
     now = datetime.now(timezone.utc)  # Current UTC timestamp (timezone-aware)
     
@@ -987,7 +952,7 @@ def pickup_student(
 
     # -----------------------------------------------------------
     # Log pickup event
-    # - Records actual stop used for dropoff
+    # - Records actual stop used for pickup
     # -----------------------------------------------------------
     event = RunEvent(
         run_id=run.id,
@@ -1015,30 +980,15 @@ def pickup_student(
         picked_up_at=assignment.picked_up_at,
     )
 
-# =============================================================================
-# POST /runs/{run_id}/dropoff_student
-# -----------------------------------------------------------------------------
-# Mark a student as dropped off during an active run.
-#
-# Purpose:
-#   - confirm drop-off at the current stop
-#   - store drop-off timestamp
-#   - mark student as no longer onboard
-#
-# Validation:
-#   - run must exist
-#   - run must be started / active
-#   - run must currently be at a stop
-#   - student must be assigned to this run
-#   - student's assigned stop must match current stop sequence
-#   - student must currently be onboard
-#   - student must not already be dropped off
-# =============================================================================
+# -----------------------------------------------------------
+# - Drop off student
+# - Record drop-off at the run's current actual stop
+# -----------------------------------------------------------
 @router.post(
     "/{run_id}/dropoff_student",
     response_model=DropoffStudentResponse,
     summary="Drop off student",
-    description="Mark a student as dropped off at the run's current stop and log a DROPOFF event.",
+    description="Mark a student as dropped off at the run's current actual stop and log a DROPOFF event.",
     response_description="Drop-off confirmation",
 )
 def dropoff_student(
@@ -1088,11 +1038,11 @@ def dropoff_student(
         )
 
     # -------------------------------------------------------------------------
-    # Load the student's runtime assignment and assigned stop
+    # Load the student's runtime assignment
     # -------------------------------------------------------------------------
     assignment = (
         db.query(StudentRunAssignment)
-        .options(joinedload(StudentRunAssignment.stop))
+        .options(joinedload(StudentRunAssignment.stop))  # Load assigned stop context for runtime views
         .filter(
             StudentRunAssignment.run_id == run_id,
             StudentRunAssignment.student_id == payload.student_id,
@@ -1125,7 +1075,7 @@ def dropoff_student(
         )
 
     # -------------------------------------------------------------------------
-    # Mark drop-off fields
+    # Mark drop-off fields using the current actual stop
     # -------------------------------------------------------------------------
     now = datetime.now(timezone.utc)  # Current UTC timestamp (timezone-aware)
 
@@ -2013,6 +1963,7 @@ def get_run_summary(run_id: int, db: Session = Depends(get_db)):
         db.query(StudentRunAssignment)
         .filter(StudentRunAssignment.run_id == run_id)
     ), run).all()  # Exclude planned absences from summary counts
+    occupancy_counts = _build_run_occupancy_counts(assignments)  # Reuse shared onboard/load counts
 
     # -------------------------------------------------------------------------
     # Determine run status
@@ -2027,7 +1978,7 @@ def get_run_summary(run_id: int, db: Session = Depends(get_db)):
     # -------------------------------------------------------------------------
     # Compute current load
     # -------------------------------------------------------------------------
-    current_load = len(assignments)
+    current_load = occupancy_counts["total_currently_onboard"]  # Current load means students onboard now
 
     # -------------------------------------------------------------------------
     # Return summary
@@ -2046,3 +1997,4 @@ def get_run_summary(run_id: int, db: Session = Depends(get_db)):
         total_assigned_students=len(assignments),
         current_load=current_load,
     )
+
