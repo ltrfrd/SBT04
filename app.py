@@ -195,7 +195,12 @@ def route_report(route_id: int, request: Request, db: Session = Depends(get_db))
 
 
 # -----------------------------------------------------------
-# DRIVER RUN PAGE
+# - Driver workspace helpers
+# - Build route-first driver workspace state
+# -----------------------------------------------------------
+# -----------------------------------------------------------
+# - Resolve run workspace status
+# - Convert raw run timestamps into driver-facing status labels
 # -----------------------------------------------------------
 def _get_run_workspace_status(run: run_model.Run) -> str:
     if run.start_time is None:
@@ -205,12 +210,20 @@ def _get_run_workspace_status(run: run_model.Run) -> str:
     return "ended"                                           # Historical completed run
 
 
-def _build_route_workspace(route: route_model.Route) -> dict:
+# -----------------------------------------------------------
+# - Build route workspace
+# - Serialize route, run, stop, and rider details for the driver page
+# -----------------------------------------------------------
+def _build_route_workspace(route: route_model.Route, selected_run_id: int | None = None) -> dict:
     active_assignment = next(                                # Route-level assigned driver for header display
         (assignment for assignment in route.driver_assignments if assignment.active),
         None,
     )
 
+    # -----------------------------------------------------------
+    # - Order route runs
+    # - Keep run list stable for route-first browsing
+    # -----------------------------------------------------------
     ordered_runs = sorted(                                   # Show the newest run context first
         route.runs,
         key=lambda run: (run.start_time or datetime.min, run.id),
@@ -220,6 +233,10 @@ def _build_route_workspace(route: route_model.Route) -> dict:
     run_rows = []                                            # Final nested run workspace rows
 
     for run in ordered_runs:
+        # -----------------------------------------------------------
+        # - Order run stops
+        # - Keep stop sequence stable for running-board review
+        # -----------------------------------------------------------
         ordered_stops = sorted(                              # Stable stop order inside each run
             run.stops,
             key=lambda stop: (
@@ -230,6 +247,10 @@ def _build_route_workspace(route: route_model.Route) -> dict:
 
         assignments_by_stop: dict[int, list[dict]] = {}     # Stop -> student rows for the template
 
+        # -----------------------------------------------------------
+        # - Group riders by stop
+        # - Build stop-level running-board rows from runtime assignments
+        # -----------------------------------------------------------
         for assignment in sorted(
             run.student_assignments,
             key=lambda item: (
@@ -246,24 +267,35 @@ def _build_route_workspace(route: route_model.Route) -> dict:
                     "student_name": assignment.student.name, # Driver-facing student display
                     "grade": assignment.student.grade,       # Compact rider detail
                     "school_name": assignment.student.school.name if assignment.student.school else None,  # School context
+                    "notification_distance_meters": assignment.student.notification_distance_meters,  # Rider alert distance
                 }
             )
 
         stop_rows = []                                       # Ordered stop rows for this run
 
+        # -----------------------------------------------------------
+        # - Serialize stop rows
+        # - Expose running-board stop details already available in the repo
+        # -----------------------------------------------------------
         for stop in ordered_stops:
             stop_students = assignments_by_stop.get(stop.id, [])
             stop_rows.append(
                 {
                     "id": stop.id,
                     "sequence": stop.sequence,
+                    "type": stop.type.value if hasattr(stop.type, "value") else str(stop.type),  # Pickup or dropoff label
                     "name": stop.name,
                     "address": stop.address,
+                    "planned_time": stop.planned_time,       # Planned stop time when available
                     "student_count": len(stop_students),
                     "students": stop_students,
                 }
             )
 
+        # -----------------------------------------------------------
+        # - Serialize run row
+        # - Keep review state and live-action flags separate
+        # -----------------------------------------------------------
         status = _get_run_workspace_status(run)              # Ready / active / ended summary label
         run_rows.append(
             {
@@ -284,7 +316,14 @@ def _build_route_workspace(route: route_model.Route) -> dict:
             }
         )
 
+    # -----------------------------------------------------------
+    # - Resolve selected and active runs
+    # - Keep review browsing independent from active-run controls
+    # -----------------------------------------------------------
     active_run = next((run for run in run_rows if run["status"] == "active"), None)  # At most one active run per driver
+    selected_run = next((run for run in run_rows if run["id"] == selected_run_id), None) if selected_run_id is not None else None
+    if selected_run is None and run_rows:
+        selected_run = run_rows[0]                            # Default to the first route run so stop details remain visible
 
     return {
         "id": route.id,
@@ -301,24 +340,38 @@ def _build_route_workspace(route: route_model.Route) -> dict:
         "assigned_driver_name": active_assignment.driver.name if active_assignment and active_assignment.driver else None,
         "runs": run_rows,
         "active_run": active_run,
+        "selected_run": selected_run,
     }
 
 
+# -----------------------------------------------------------
+# - Driver run workspace page
+# - Render route-first route, run, and run-review navigation
+# -----------------------------------------------------------
 @app.get("/driver_run/{driver_id}", response_class=HTMLResponse)
 def driver_run_view(
     driver_id: int,
     request: Request,
     route_id: int | None = None,
+    run_id: int | None = None,
     db: Session = Depends(get_db),
     current_driver: driver_model.Driver = Depends(get_current_driver)
 ):
     """Render the route-first driver workspace."""
+    # -----------------------------------------------------------
+    # - Validate driver access
+    # - Require an authenticated driver to open their own workspace
+    # -----------------------------------------------------------
     if not current_driver:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     if current_driver.id != driver_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
+    # -----------------------------------------------------------
+    # - Load active run
+    # - Preserve live-run context without forcing navigation
+    # -----------------------------------------------------------
     active_run = (
         db.query(run_model.Run)
         .options(joinedload(run_model.Run.route))
@@ -326,8 +379,12 @@ def driver_run_view(
         .filter(run_model.Run.start_time.is_not(None))
         .filter(run_model.Run.end_time.is_(None))
         .first()
-    )                                                        # Current active run for route preselection
+    )                                                        # Current active run for live workspace context
 
+    # -----------------------------------------------------------
+    # - Load assigned routes
+    # - Preload route, run, stop, and rider details for the workspace
+    # -----------------------------------------------------------
     available_routes = (
         db.query(route_model.Route)
         .options(
@@ -345,18 +402,19 @@ def driver_run_view(
         .all()
     )                                                        # Driver-selectable route workspace choices
 
-    selected_route = None                                    # Default when the driver has no assigned route yet
-
+    # -----------------------------------------------------------
+    # - Resolve selected route
+    # - Keep route selection explicit for flexible route-first browsing
+    # -----------------------------------------------------------
+    selected_route = None                                    # Keep route selection explicit for route-first browsing
     if route_id is not None:
         selected_route = next((route for route in available_routes if route.id == route_id), None)
 
-    if selected_route is None and active_run and active_run.route_id is not None:
-        selected_route = next((route for route in available_routes if route.id == active_run.route_id), None)
-
-    if selected_route is None and available_routes:
-        selected_route = available_routes[0]
-
-    workspace = _build_route_workspace(selected_route) if selected_route else None
+    # -----------------------------------------------------------
+    # - Build selected workspace
+    # - Include selected run review state when present
+    # -----------------------------------------------------------
+    workspace = _build_route_workspace(selected_route, run_id) if selected_route else None
 
     return templates.TemplateResponse(
         request,                                              # Request must be first
@@ -368,6 +426,8 @@ def driver_run_view(
             "selected_route_id": selected_route.id if selected_route else None,
             "workspace": workspace,
             "active_run_id": active_run.id if active_run else None,
+            "active_route_id": active_run.route_id if active_run else None,
+            "selected_run_id": run_id,
             "today": datetime.now().date().isoformat(),
         }
     )

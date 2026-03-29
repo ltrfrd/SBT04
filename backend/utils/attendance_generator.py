@@ -328,7 +328,13 @@ def date_summary(db: Session, start: date, end: date):        # Build attendance
             .all()                                                    # Execute query
         )
 
-        absence_lookup = {}                                           # Placeholder absence lookup for now
+        absence_lookup = {}                                           # Cache planned absences by student
+        for assignment in assignments:
+            absence_lookup[assignment.student_id] = has_student_bus_absence(
+                assignment.student_id,                                # Student identifier
+                run,                                                  # Current run object
+                db,                                                   # Database session
+            )
 
         summary = run_attendance_summary(                             # Build run attendance summary
             db,                                                       # Database session

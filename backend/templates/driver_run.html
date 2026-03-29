@@ -20,6 +20,12 @@
     .stop-row { border: 1px solid #edf1f5; border-radius: 14px; background: #fff; }
     .student-item { border: 1px solid #eef1f4; border-radius: 12px; background: #fbfcfd; }
     .live-panel { border: 1px solid #d9ebdf; background: #f6fbf7; border-radius: 16px; }
+    .board-summary { border: 1px solid #e7ecf2; border-radius: 14px; background: #f8fafc; }
+    .board-stop { border: 1px solid #dfe7f1; border-radius: 18px; background: linear-gradient(180deg, #ffffff, #f9fbfd); }
+    .board-sequence { width: 52px; height: 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center; background: #0d6efd; color: #fff; font-weight: 700; }
+    .board-students { border-top: 1px solid #edf1f5; }
+    .board-student-row + .board-student-row { border-top: 1px solid #eef2f6; }
+    .board-label { font-size: 0.72rem; letter-spacing: 0.04em; text-transform: uppercase; color: #6c757d; }
     #map { height: 320px; border-radius: 16px; }
     .toast-stack { position: fixed; bottom: 1rem; right: 1rem; z-index: 9999; min-width: 320px; }
   </style>
@@ -34,6 +40,11 @@
           <p class="text-muted mb-0">Choose a route, review any run, then start the run when you are ready.</p>
         </div>
         <div class="d-flex gap-2">
+          {% if selected_route_id %}
+          <a href="/driver_run/{{ driver_id }}" class="btn btn-outline-primary">
+            <i class="bi bi-grid me-1"></i> Route List
+          </a>
+          {% endif %}
           <a href="/dashboard" class="btn btn-outline-secondary">
             <i class="bi bi-arrow-left me-1"></i> Back to Dashboard
           </a>
@@ -41,23 +52,61 @@
       </div>
 
       <div class="section-card p-3 p-lg-4 mb-4">
-        <form method="get" action="/driver_run/{{ driver_id }}" class="row g-3 align-items-end">
-          <div class="col-lg-8">
-            <label for="route_id" class="form-label fw-semibold">Select Route</label>
-            <select id="route_id" name="route_id" class="form-select" onchange="this.form.submit()">
-              <option value="">Choose an assigned route</option>
-              {% for route in available_routes %}
-              <option value="{{ route.id }}" {% if selected_route_id == route.id %}selected{% endif %}>
-                {{ route.route_number }}{% if route.unit_number %} - {{ route.unit_number }}{% endif %}
-              </option>
-              {% endfor %}
-            </select>
+        <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-2 mb-3">
+          <div>
+            <h2 class="h5 mb-1"><i class="bi bi-signpost-split me-2 text-primary"></i>Assigned Routes</h2>
+            <p class="text-muted mb-0">Open a route first, then review any run under it.</p>
           </div>
-          <div class="col-lg-4">
-            <div class="text-muted small">Active date: {{ today }}</div>
+          <div class="text-muted small">Active date: {{ today }}</div>
+        </div>
+
+        {% if available_routes %}
+        <div class="row g-3">
+          {% for route in available_routes %}
+          <div class="col-lg-4 col-md-6">
+            <div class="section-card h-100 p-3 {% if selected_route_id == route.id %}border-primary{% endif %}">
+              <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                <div>
+                  <div class="fw-semibold">{{ route.route_number }}</div>
+                  <div class="small text-muted">{{ route.unit_number or "No unit number" }}</div>
+                </div>
+                {% if active_route_id == route.id %}
+                <span class="badge text-bg-success">Active Run</span>
+                {% endif %}
+              </div>
+              <div class="small text-muted mb-3">
+                {{ route.runs|length }} runs
+              </div>
+              <a href="/driver_run/{{ driver_id }}?route_id={{ route.id }}" class="btn {% if selected_route_id == route.id %}btn-primary{% else %}btn-outline-primary{% endif %} btn-sm">
+                <i class="bi bi-arrow-right-circle me-1"></i> Open Route
+              </a>
+            </div>
           </div>
-        </form>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-muted">No assigned routes are available.</div>
+        {% endif %}
       </div>
+
+      {% if active_run_id and active_route_id %}
+      <div class="section-card p-3 p-lg-4 mb-4">
+        <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3">
+          <div>
+            <p class="text-uppercase small fw-semibold text-success mb-1">Active Run Available</p>
+            <p class="text-muted mb-0">You can keep browsing routes and runs, then return to the live run at any time.</p>
+          </div>
+          <div class="d-flex flex-wrap gap-2">
+            <a href="/driver_run/{{ driver_id }}?route_id={{ active_route_id }}" class="btn btn-outline-success btn-sm">
+              <i class="bi bi-list-ul me-1"></i> Active Route Runs
+            </a>
+            <a href="/driver_run/{{ driver_id }}?route_id={{ active_route_id }}&run_id={{ active_run_id }}" class="btn btn-success btn-sm">
+              <i class="bi bi-play-circle me-1"></i> Return to Active Run
+            </a>
+          </div>
+        </div>
+      </div>
+      {% endif %}
 
       {% if workspace %}
       <div class="route-banner p-4 mb-4">
@@ -134,114 +183,53 @@
       <div class="section-card p-3 p-lg-4">
         <div class="d-flex justify-content-between align-items-center mb-3">
           <h3 class="h4 mb-0"><i class="bi bi-diagram-3 me-2 text-primary"></i>Runs for {{ workspace.route_number }}</h3>
-          <span class="text-muted small">Open any run, then a stop, to review assigned students.</span>
+          <span class="text-muted small">All runs stay visible. Open any run to review details.</span>
         </div>
 
         {% if workspace.runs %}
-        <div class="accordion" id="runAccordion">
+        <div class="row g-3">
           {% for run in workspace.runs %}
-          <div class="accordion-item border-0 mb-3">
-            <h2 class="accordion-header" id="run-heading-{{ run.id }}">
-              <button
-                class="accordion-button collapsed rounded-4 border"
-                type="button"
-                data-bs-toggle="collapse"
-                data-bs-target="#run-collapse-{{ run.id }}"
-                aria-expanded="false"
-                aria-controls="run-collapse-{{ run.id }}"
-              >
-                <div class="w-100 pe-3">
-                  <div class="d-flex flex-column flex-lg-row justify-content-between gap-2 align-items-lg-center">
-                    <div>
-                      <div class="fw-semibold">{{ run.run_type }}</div>
-                      <div class="small text-muted">Run #{{ run.id }}</div>
-                    </div>
-                    <div class="d-flex flex-wrap gap-2">
-                      <span class="badge status-badge {% if run.status == 'active' %}text-bg-success{% elif run.status == 'ready' %}text-bg-warning{% else %}text-bg-secondary{% endif %}">
-                        {{ run.status|title }}
-                      </span>
-                      <span class="badge text-bg-light">{{ run.stop_count }} stops</span>
-                      <span class="badge text-bg-light">{{ run.student_count }} students</span>
-                    </div>
+          <div class="col-12">
+            <div class="section-card p-3 {% if selected_run_id == run.id %}border-primary{% endif %}">
+              <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-center">
+                <div>
+                  <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+                    <div class="fw-semibold">{{ run.run_type }}</div>
+                    <span class="badge status-badge {% if run.status == 'active' %}text-bg-success{% elif run.status == 'ready' %}text-bg-warning{% else %}text-bg-secondary{% endif %}">
+                      {{ run.status|title }}
+                    </span>
                   </div>
-                </div>
-              </button>
-            </h2>
-            <div id="run-collapse-{{ run.id }}" class="accordion-collapse collapse" aria-labelledby="run-heading-{{ run.id }}" data-bs-parent="#runAccordion">
-              <div class="accordion-body bg-white border border-top-0 rounded-bottom-4">
-                <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-3">
                   <div class="small text-muted">
-                    {% if run.start_time %}<span class="me-3"><strong>Started:</strong> {{ run.start_time }}</span>{% endif %}
-                    {% if run.end_time %}<span><strong>Ended:</strong> {{ run.end_time }}</span>{% endif %}
-                    {% if not run.start_time %}<span><strong>Ready:</strong> Not started yet</span>{% endif %}
-                  </div>
-                  <div class="d-flex flex-wrap gap-2">
-                    {% if run.can_start %}
-                    <button
-                      type="button"
-                      class="btn btn-success btn-sm start-run-button"
-                      data-run-id="{{ run.id }}"
-                      data-reload-url="/driver_run/{{ driver_id }}?route_id={{ workspace.id }}"
-                    >
-                      <i class="bi bi-play-fill me-1"></i> Start Run
-                    </button>
-                    {% endif %}
+                    <span class="me-3">Run #{{ run.id }}</span>
+                    <span class="me-3">{{ run.stop_count }} stops</span>
+                    <span>{{ run.student_count }} students</span>
                   </div>
                 </div>
-
-                {% if run.stops %}
-                <div class="accordion" id="stopAccordion-{{ run.id }}">
-                  {% for stop in run.stops %}
-                  <div class="accordion-item border-0 mb-2">
-                    <div class="stop-row">
-                      <h3 class="accordion-header" id="stop-heading-{{ stop.id }}">
-                        <button
-                          class="accordion-button collapsed bg-transparent shadow-none rounded-4"
-                          type="button"
-                          data-bs-toggle="collapse"
-                          data-bs-target="#stop-collapse-{{ stop.id }}"
-                          aria-expanded="false"
-                          aria-controls="stop-collapse-{{ stop.id }}"
-                        >
-                          <div class="w-100 pe-3">
-                            <div class="d-flex flex-column flex-lg-row justify-content-between gap-2 align-items-lg-center">
-                              <div>
-                                <div class="fw-semibold">Stop {{ stop.sequence }}{% if stop.name %}: {{ stop.name }}{% endif %}</div>
-                                <div class="small text-muted">{{ stop.address or "No address provided" }}</div>
-                              </div>
-                              <span class="badge text-bg-light">{{ stop.student_count }} students</span>
-                            </div>
-                          </div>
-                        </button>
-                      </h3>
-                      <div id="stop-collapse-{{ stop.id }}" class="accordion-collapse collapse" aria-labelledby="stop-heading-{{ stop.id }}" data-bs-parent="#stopAccordion-{{ run.id }}">
-                        <div class="accordion-body pt-0">
-                          {% if stop.students %}
-                          <div class="row g-2 mt-1">
-                            {% for student in stop.students %}
-                            <div class="col-md-6">
-                              <div class="student-item p-3 h-100">
-                                <div class="fw-semibold">{{ student.student_name }}</div>
-                                <div class="small text-muted">
-                                  {% if student.grade %}<span class="me-2">Grade {{ student.grade }}</span>{% endif %}
-                                  <span>{{ student.school_name or "No school" }}</span>
-                                </div>
-                              </div>
-                            </div>
-                            {% endfor %}
-                          </div>
-                          {% else %}
-                          <div class="text-muted small">No students assigned to this stop for this run.</div>
-                          {% endif %}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  {% endfor %}
+                <div class="small text-muted">
+                  {% if run.start_time %}<span class="me-3"><strong>Started:</strong> {{ run.start_time }}</span>{% endif %}
+                  {% if run.end_time %}<span><strong>Ended:</strong> {{ run.end_time }}</span>{% endif %}
+                  {% if not run.start_time %}<span><strong>Ready:</strong> Not started yet</span>{% endif %}
                 </div>
-                {% else %}
-                <div class="text-muted small">No stops have been added to this run yet.</div>
-                {% endif %}
+                <div class="d-flex flex-wrap gap-2">
+                  <a href="/driver_run/{{ driver_id }}?route_id={{ workspace.id }}&run_id={{ run.id }}" class="btn {% if selected_run_id == run.id %}btn-primary{% else %}btn-outline-primary{% endif %} btn-sm">
+                    <i class="bi bi-eye me-1"></i> {% if selected_run_id == run.id %}Reviewing{% else %}Review Run{% endif %}
+                  </a>
+                  {% if run.id == active_run_id and selected_run_id != run.id %}
+                  <a href="/driver_run/{{ driver_id }}?route_id={{ workspace.id }}&run_id={{ run.id }}" class="btn btn-outline-success btn-sm">
+                    <i class="bi bi-arrow-repeat me-1"></i> Return to Active Run
+                  </a>
+                  {% endif %}
+                  {% if run.can_start %}
+                  <button
+                    type="button"
+                    class="btn btn-success btn-sm start-run-button"
+                    data-run-id="{{ run.id }}"
+                    data-reload-url="/driver_run/{{ driver_id }}?route_id={{ workspace.id }}&run_id={{ run.id }}"
+                  >
+                    <i class="bi bi-play-fill me-1"></i> Start Run
+                  </button>
+                  {% endif %}
+                </div>
               </div>
             </div>
           </div>
@@ -251,10 +239,158 @@
         <div class="text-muted">No runs exist for this route yet.</div>
         {% endif %}
       </div>
+
+      <div class="section-card p-3 p-lg-4 mt-4">
+        <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-2 mb-3">
+          <h3 class="h4 mb-0"><i class="bi bi-card-list me-2 text-primary"></i>Run Review</h3>
+          {% if workspace.selected_run %}
+          <a href="/driver_run/{{ driver_id }}?route_id={{ workspace.id }}" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left me-1"></i> Back to Runs List
+          </a>
+          {% endif %}
+        </div>
+
+        {% if workspace.selected_run %}
+        {% set run = workspace.selected_run %}
+        <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-3">
+          <div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+              <h4 class="h5 mb-0">{{ run.run_type }}</h4>
+              <span class="badge status-badge {% if run.status == 'active' %}text-bg-success{% elif run.status == 'ready' %}text-bg-warning{% else %}text-bg-secondary{% endif %}">
+                {{ run.status|title }}
+              </span>
+            </div>
+            <div class="small text-muted">
+              <span class="me-3">Run #{{ run.id }}</span>
+              <span class="me-3">{{ run.stop_count }} stops</span>
+              <span>{{ run.student_count }} students</span>
+            </div>
+          </div>
+          <div class="d-flex flex-wrap gap-2">
+            {% if run.can_start %}
+            <button
+              type="button"
+              class="btn btn-success btn-sm start-run-button"
+              data-run-id="{{ run.id }}"
+              data-reload-url="/driver_run/{{ driver_id }}?route_id={{ workspace.id }}&run_id={{ run.id }}"
+            >
+              <i class="bi bi-play-fill me-1"></i> Start Run
+            </button>
+            {% endif %}
+            {% if run.id == active_run_id %}
+            <a href="#endActiveRunButton" class="btn btn-outline-success btn-sm">
+              <i class="bi bi-lightning-charge me-1"></i> Active Run Controls
+            </a>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="row g-3 mb-4">
+          <div class="col-md-3 col-6">
+            <div class="board-summary p-3 h-100">
+              <div class="board-label mb-1">Run Type</div>
+              <div class="fw-semibold">{{ run.run_type }}</div>
+            </div>
+          </div>
+          <div class="col-md-3 col-6">
+            <div class="board-summary p-3 h-100">
+              <div class="board-label mb-1">Status</div>
+              <div class="fw-semibold">{{ run.status|title }}</div>
+            </div>
+          </div>
+          <div class="col-md-3 col-6">
+            <div class="board-summary p-3 h-100">
+              <div class="board-label mb-1">Stops</div>
+              <div class="fw-semibold">{{ run.stop_count }}</div>
+            </div>
+          </div>
+          <div class="col-md-3 col-6">
+            <div class="board-summary p-3 h-100">
+              <div class="board-label mb-1">Assigned Riders</div>
+              <div class="fw-semibold">{{ run.student_count }}</div>
+            </div>
+          </div>
+        </div>
+
+        {% if run.stops %}
+        <div class="d-flex flex-column gap-3">
+          {% for stop in run.stops %}
+          <div class="board-stop p-3 p-lg-4">
+            <div class="d-flex flex-column flex-lg-row gap-3 justify-content-between">
+              <div class="d-flex gap-3">
+                <div class="board-sequence">#{{ stop.sequence }}</div>
+                <div>
+                  <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                    <div class="fw-semibold">
+                      {% if stop.name %}{{ stop.name }}{% else %}Unnamed Stop{% endif %}
+                    </div>
+                    <span class="badge text-bg-light">{{ stop.type|title }}</span>
+                    <span class="badge text-bg-light">{{ stop.student_count }} riders</span>
+                  </div>
+                  <div class="small text-muted mb-2">{{ stop.address or "No address provided" }}</div>
+                  <div class="d-flex flex-wrap gap-3 small text-muted">
+                    <span><strong>Sequence:</strong> {{ stop.sequence }}</span>
+                    <span><strong>Planned Time:</strong> {{ stop.planned_time or "Not set" }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="board-students mt-3 pt-3">
+                <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-2 mb-3">
+                  <div class="fw-semibold">Assigned Riders</div>
+                  <div class="small text-muted">Running-board view for this stop</div>
+                </div>
+
+                {% if stop.students %}
+                <div class="d-flex flex-column">
+                  {% for student in stop.students %}
+                  <div class="board-student-row py-3">
+                    <div class="row g-2 align-items-center">
+                      <div class="col-lg-4">
+                        <div class="fw-semibold">{{ student.student_name }}</div>
+                        <div class="small text-muted">Student #{{ student.student_id }}</div>
+                      </div>
+                      <div class="col-lg-3">
+                        <div class="board-label mb-1">School</div>
+                        <div>{{ student.school_name or "No school" }}</div>
+                      </div>
+                      <div class="col-lg-2 col-6">
+                        <div class="board-label mb-1">Grade</div>
+                        <div>{{ student.grade or "N/A" }}</div>
+                      </div>
+                      <div class="col-lg-3 col-6">
+                        <div class="board-label mb-1">Alert Distance</div>
+                        <div>
+                          {% if student.notification_distance_meters is not none %}
+                          {{ student.notification_distance_meters }} m
+                          {% else %}
+                          N/A
+                          {% endif %}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-muted small">No students assigned to this stop for this run.</div>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-muted small">No stops have been added to this run yet.</div>
+        {% endif %}
+        {% else %}
+        <div class="text-muted">Select any run above to review its stops and assigned students.</div>
+        {% endif %}
+      </div>
       {% else %}
       <div class="section-card p-4 text-center">
-        <h2 class="h5 mb-2">No assigned route selected</h2>
-        <p class="text-muted mb-0">Choose one of your assigned routes above to open the workspace.</p>
+        <h2 class="h5 mb-2">Select a route to continue</h2>
+        <p class="text-muted mb-0">Start from your assigned routes above, then open any run under that route for review.</p>
       </div>
       {% endif %}
     </div>

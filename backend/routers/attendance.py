@@ -403,6 +403,11 @@ def get_absences_by_run(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Run not found",
         )
+    if run.start_time is None:                                                    # Reject runs that have not started yet
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Run has not started yet",
+        )
 
     absences = (
         db.query(StudentBusAbsence)                                               # Query planned absences
@@ -466,6 +471,7 @@ def get_school_attendance_by_date(
     runs = (
         db.query(Run)                                                            # Query runs
         .filter(Run.route.has(Route.schools.any(School.id == school_id)))        # Only runs whose route includes this school       
+        .filter(Run.start_time >= target_date)                                   # On or after start of requested day
         .filter(Run.start_time < (target_date + timedelta(days=1)))              # Before next day
         .order_by(Run.start_time.asc(), Run.id.asc())                            # Stable ordering
         .all()                                                                   # Materialize list
