@@ -11,8 +11,8 @@ This repo should be understood as one connected system with three cooperating co
 - dispatch and run execution
 - attendance and reporting
 
-## 2. What Changed From SBT03
-The change from the earlier SBT03 framing is workflow-focused, not engine-focused.
+## 2. What Changed In SBT04
+The current SBT04 framing is workflow-focused, not engine-focused.
 
 SBT04 shifts the visible operator experience toward:
 
@@ -32,7 +32,7 @@ The route-first workflow also includes context creation endpoints for normal ope
 - `POST /routes/{route_id}/runs`
 - `POST /runs/{run_id}/stops`
 
-This direction is partially implemented in the backend and continues to be expanded and refined.
+This direction is already implemented in the current backend surface and continues to be refined.
 
 Those endpoints create `Student` records and create `StudentRunAssignment` internally so operators do not have to manually manage assignment rows.
 
