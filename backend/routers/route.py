@@ -474,7 +474,7 @@ def _assign_driver_to_route(
     "/{route_id}/assign_driver/{driver_id}",                     # Route + driver selected from path
     response_model=RouteDriverAssignmentOut,                     # Return the activated assignment
     summary="Assign active driver to route",                     # Clear Swagger title
-    description=(                                                # Explain exact SBT03 behavior
+    description=(                                                # Explain current route-driver workflow
         "Assign a driver to a route as the single active assignment. "
         "If another active driver assignment already exists for the route, "
         "it is automatically deactivated. No request body is required."
