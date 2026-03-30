@@ -142,9 +142,6 @@ def _get_run_stop_student_context_or_404(
     if not assignment:
         raise HTTPException(status_code=400, detail="Student is not assigned to run")
 
-    if assignment.stop_id != stop_id:
-        raise HTTPException(status_code=400, detail="Student is not assigned to stop")
-
     return run, stop, student, assignment
 
 

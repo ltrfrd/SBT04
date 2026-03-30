@@ -16,6 +16,7 @@ import pytest                                                      # Pytest fram
 from datetime import datetime, timezone                            # Time utilities
 from sqlalchemy.orm import Session, sessionmaker                   # DB session tools
 from backend.models.associations import StudentRunAssignment       # Runtime assignment model
+from backend.models.student import Student                         # Direct student verification model
 from database import engine                                        # DB engine
 import uuid
 
@@ -3335,4 +3336,110 @@ def test_generic_student_update_endpoint_remains_compatible(client):
     assert updated.json()["grade"] == "5"
     assert updated.json()["route_id"] == route["id"]
     assert updated.json()["stop_id"] == stop.json()["id"]
+
+
+# -----------------------------------------------------------
+# - Context student drift repair
+# - Repair same-run stop drift while preserving invalid-context guards
+# -----------------------------------------------------------
+def test_context_student_update_repairs_same_run_assignment_drift(client, db_engine):
+    school = client.post(
+        "/schools/",
+        json={
+            "name": "Drift Repair School",
+            "address": "103 Drift Repair Way",
+        },
+    )
+    assert school.status_code in (200, 201)
+
+    driver = client.post(
+        "/drivers/",
+        json={
+            "name": "Drift Repair Driver",
+            "email": "drift.repair.driver@test.com",
+            "phone": "10103",
+        },
+    )
+    assert driver.status_code in (200, 201)
+
+    route = _create_route_with_assignment_flow(
+        client,
+        "DRIFT-REPAIR-ROUTE",
+        "BUS-DRIFT-REPAIR",
+        driver_id=driver.json()["id"],
+        school_ids=[school.json()["id"]],
+    )
+
+    run = client.post("/runs/", json={"route_id": route["id"], "run_type": "AM"})
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    stop_a = client.post(
+        "/stops/",
+        json={
+            "run_id": run_id,
+            "sequence": 1,
+            "type": "pickup",
+            "name": "Authoritative Stop",
+        },
+    )
+    stop_b = client.post(
+        "/stops/",
+        json={
+            "run_id": run_id,
+            "sequence": 2,
+            "type": "pickup",
+            "name": "Drifted Stop",
+        },
+    )
+    assert stop_a.status_code in (200, 201)
+    assert stop_b.status_code in (200, 201)
+
+    student = client.post(
+        f"/runs/{run_id}/stops/{stop_a.json()['id']}/students",
+        json={
+            "name": "Drift Repair Student",
+            "grade": "4",
+            "school_id": school.json()["id"],
+        },
+    )
+    assert student.status_code == 201
+    student_id = student.json()["id"]
+
+    with Session(db_engine) as db:
+        stored_student = db.get(Student, student_id)
+        stored_assignment = (
+            db.query(StudentRunAssignment)
+            .filter(StudentRunAssignment.run_id == run_id)
+            .filter(StudentRunAssignment.student_id == student_id)
+            .first()
+        )
+        assert stored_student is not None
+        assert stored_assignment is not None
+
+        stored_student.stop_id = stop_b.json()["id"]             # Drift student pointer within same valid run
+        stored_assignment.stop_id = stop_b.json()["id"]          # Drift runtime assignment within same valid run
+        db.commit()
+
+    updated = client.put(
+        f"/runs/{run_id}/stops/{stop_a.json()['id']}/students/{student_id}",
+        json={"name": "Drift Repair Student Updated"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["stop_id"] == stop_a.json()["id"]
+    assert updated.json()["route_id"] == route["id"]
+
+    with Session(db_engine) as db:
+        stored_student = db.get(Student, student_id)
+        stored_assignment = (
+            db.query(StudentRunAssignment)
+            .filter(StudentRunAssignment.run_id == run_id)
+            .filter(StudentRunAssignment.student_id == student_id)
+            .first()
+        )
+        assert stored_student is not None
+        assert stored_assignment is not None
+        assert stored_student.stop_id == stop_a.json()["id"]
+        assert stored_student.route_id == route["id"]
+        assert stored_assignment.stop_id == stop_a.json()["id"]
      

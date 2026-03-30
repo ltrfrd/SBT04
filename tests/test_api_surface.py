@@ -1,4 +1,7 @@
 from tests.conftest import client
+from sqlalchemy.orm import Session
+from backend.models.associations import StudentRunAssignment
+from backend.models.student import Student
 
 
 def _create_route_with_assignment(client, route_number: str, unit_number: str, driver_id: int):
@@ -364,7 +367,7 @@ def test_create_student_inside_run_stop_context_creates_assignment(client):
 # - Stop-context student update
 # - Update student fields while keeping planning stop alignment
 # -----------------------------------------------------------
-def test_update_student_inside_run_stop_context_updates_fields_and_resyncs_stop(client):
+def test_update_student_inside_run_stop_context_updates_fields_and_repairs_same_run_assignment_drift(client, db_engine):
     primary_school = client.post("/schools/", json={"name": "Primary Context School", "address": "72 Context Way"})
     secondary_school = client.post("/schools/", json={"name": "Secondary Context School", "address": "73 Context Way"})
     assert primary_school.status_code in (200, 201)
@@ -407,12 +410,20 @@ def test_update_student_inside_run_stop_context_updates_fields_and_resyncs_stop(
     assert student.status_code == 201
     student_id = student.json()["id"]
 
-    generic_drift = client.put(
-        f"/students/{student_id}",
-        json={"stop_id": stop_two.json()["id"]},
-    )
-    assert generic_drift.status_code == 200
-    assert generic_drift.json()["stop_id"] == stop_two.json()["id"]
+    with Session(db_engine) as db:
+        stored_student = db.get(Student, student_id)
+        stored_assignment = (
+            db.query(StudentRunAssignment)
+            .filter(StudentRunAssignment.run_id == run_id)
+            .filter(StudentRunAssignment.student_id == student_id)
+            .first()
+        )
+        assert stored_student is not None
+        assert stored_assignment is not None
+
+        stored_student.stop_id = stop_two.json()["id"]           # Drift legacy planning pointer inside same run
+        stored_assignment.stop_id = stop_two.json()["id"]        # Drift runtime assignment inside same run
+        db.commit()
 
     updated = client.put(
         f"/runs/{run_id}/stops/{stop_one.json()['id']}/students/{student_id}",
@@ -562,10 +573,8 @@ def test_update_student_inside_run_stop_context_rejects_wrong_run_or_stop_pairin
     assert run_two.status_code in (200, 201)
 
     stop_one = client.post("/stops/", json={"run_id": run_one.json()["id"], "sequence": 1, "type": "pickup", "name": "Stop One"})
-    stop_one_other = client.post("/stops/", json={"run_id": run_one.json()["id"], "sequence": 2, "type": "pickup", "name": "Stop One Other"})
     stop_two = client.post("/stops/", json={"run_id": run_two.json()["id"], "sequence": 1, "type": "pickup", "name": "Stop Two"})
     assert stop_one.status_code in (200, 201)
-    assert stop_one_other.status_code in (200, 201)
     assert stop_two.status_code in (200, 201)
 
     student = client.post(
@@ -582,11 +591,100 @@ def test_update_student_inside_run_stop_context_rejects_wrong_run_or_stop_pairin
     assert wrong_run.json()["detail"] == "Stop does not belong to run"
 
     wrong_stop = client.put(
-        f"/runs/{run_one.json()['id']}/stops/{stop_one_other.json()['id']}/students/{student.json()['id']}",
+        f"/runs/{run_one.json()['id']}/stops/{stop_two.json()['id']}/students/{student.json()['id']}",
         json={"name": "Wrong Stop"},
     )
     assert wrong_stop.status_code == 400
-    assert wrong_stop.json()["detail"] == "Student is not assigned to stop"
+    assert wrong_stop.json()["detail"] == "Stop does not belong to run"
+
+
+def test_update_student_inside_run_stop_context_rejects_missing_assignment_for_run(client):
+    school = client.post("/schools/", json={"name": "Missing Assignment School", "address": "95 Missing Way"})
+    assert school.status_code in (200, 201)
+
+    driver = client.post("/drivers/", json={"name": "Missing Assignment Driver", "email": "missing.assignment@x.com", "phone": "8a"})
+    assert driver.status_code in (200, 201)
+
+    route_id = _create_route_with_assignment(client, "MISS-ASN-1", "BUS-MISS-ASN-1", driver.json()["id"])
+    route_update = client.put(
+        f"/routes/{route_id}",
+        json={"route_number": "MISS-ASN-1", "unit_number": "BUS-MISS-ASN-1", "school_ids": [school.json()["id"]]},
+    )
+    assert route_update.status_code == 200
+
+    run = client.post("/runs/", json={"route_id": route_id, "run_type": "AM"})
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    stop = client.post("/stops/", json={"run_id": run_id, "sequence": 1, "type": "pickup", "name": "Missing Assignment Stop"})
+    assert stop.status_code in (200, 201)
+
+    student = client.post(
+        "/students/",
+        json={
+            "name": "Missing Assignment Student",
+            "grade": "6",
+            "school_id": school.json()["id"],
+            "route_id": route_id,
+            "stop_id": stop.json()["id"],
+        },
+    )
+    assert student.status_code in (200, 201)
+
+    response = client.put(
+        f"/runs/{run_id}/stops/{stop.json()['id']}/students/{student.json()['id']}",
+        json={"name": "Should Fail"},
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Student is not assigned to run"
+
+
+def test_update_student_inside_run_stop_context_rejects_student_from_different_route(client):
+    school = client.post("/schools/", json={"name": "Different Route School", "address": "96 Different Way"})
+    assert school.status_code in (200, 201)
+
+    driver = client.post("/drivers/", json={"name": "Different Route Driver", "email": "different.route@x.com", "phone": "8b"})
+    assert driver.status_code in (200, 201)
+
+    route_one_id = _create_route_with_assignment(client, "DIFF-ROUTE-1", "BUS-DIFF-1", driver.json()["id"])
+    route_two_id = _create_route_with_assignment(client, "DIFF-ROUTE-2", "BUS-DIFF-2", driver.json()["id"])
+
+    route_one_update = client.put(
+        f"/routes/{route_one_id}",
+        json={"route_number": "DIFF-ROUTE-1", "unit_number": "BUS-DIFF-1", "school_ids": [school.json()["id"]]},
+    )
+    route_two_update = client.put(
+        f"/routes/{route_two_id}",
+        json={"route_number": "DIFF-ROUTE-2", "unit_number": "BUS-DIFF-2", "school_ids": [school.json()["id"]]},
+    )
+    assert route_one_update.status_code == 200
+    assert route_two_update.status_code == 200
+
+    run = client.post("/runs/", json={"route_id": route_one_id, "run_type": "AM"})
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    stop = client.post("/stops/", json={"run_id": run_id, "sequence": 1, "type": "pickup", "name": "Different Route Stop"})
+    assert stop.status_code in (200, 201)
+
+    student = client.post(
+        "/students/",
+        json={
+            "name": "Different Route Student",
+            "grade": "7",
+            "school_id": school.json()["id"],
+            "route_id": route_two_id,
+            "stop_id": stop.json()["id"],
+        },
+    )
+    assert student.status_code in (200, 201)
+
+    response = client.put(
+        f"/runs/{run_id}/stops/{stop.json()['id']}/students/{student.json()['id']}",
+        json={"name": "Should Also Fail"},
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Student does not belong to run route"
 
 
 def test_update_student_inside_run_stop_context_validates_route_school_membership(client):

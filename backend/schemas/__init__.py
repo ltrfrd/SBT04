@@ -42,7 +42,7 @@ from .route import (
 # -------------------------------------------------------------------------
 # Stop schemas
 # -------------------------------------------------------------------------
-from .stop import RunStopCreate, StopCreate, StopOut  # Stop creation and response schemas
+from .stop import RunStopCreate, RunStopUpdate, StopCreate, StopOut  # Stop creation and response schemas
 
 
 # -------------------------------------------------------------------------
@@ -132,6 +132,7 @@ __all__ = [
 
     "StopCreate",
     "RunStopCreate",
+    "RunStopUpdate",
     "StopOut",
 
     "RunOut",
