@@ -2068,29 +2068,71 @@ def get_running_board(run_id: int, db: Session = Depends(get_db)):
 
     # -------------------------------------------------------------------------
     # Build running board rows
-    # -------------------------------------------------------------------------
-    running_stops = []  # Final stop list
-    cumulative_load = 0  # Running onboard count
+    # - Add display info and stop type awareness
+    # -----------------------------------------------------------
+    running_stops = []                                             # Final stop list
+    cumulative_load = 0                                            # Running onboard count
 
-    for stop in stops:  # Iterate through ordered stops
+    for stop in stops:                                             # Iterate through ordered stops
 
-        stop_students = assignments_by_stop.get(stop.id, [])  # Students for stop
-        student_count = len(stop_students)  # Riders boarding here
+        stop_students = assignments_by_stop.get(stop.id, [])       # Students for stop
+        student_count = len(stop_students)                         # Riders boarding here
 
-        load_change = student_count  # Boardings at this stop
-        cumulative_load += load_change  # Update onboard count
+        load_change = student_count                                # Boardings at this stop
+        cumulative_load += load_change                             # Update onboard count
 
+        # -------------------------------------------------------
+        # Determine display name (NEW)
+        # -------------------------------------------------------
+        if stop.type in ["SCHOOL_ARRIVE", "SCHOOL_DEPART"] and stop.school:
+            display_name = stop.school.name                        # School name
+            is_school_stop = True                                  # Flag
+        else:
+            display_name = stop.name or f"STOP {stop.sequence}"    # Default STOP N
+            is_school_stop = False                                 # Flag
+
+        # -----------------------------------------------------------
+    # - Build running board rows
+    # - Add display info for each stop
+    # -----------------------------------------------------------
+    running_stops = []                                             # Final stop list
+    cumulative_load = 0                                            # Running onboard count
+
+    for stop in stops:                                             # Iterate through ordered stops
+
+        stop_students = assignments_by_stop.get(stop.id, [])       # Students for stop
+        student_count = len(stop_students)                         # Riders boarding here
+
+        load_change = student_count                                # Boardings at this stop
+        cumulative_load += load_change                             # Update onboard count
+
+        # -------------------------------------------------------
+        # Resolve display info
+        # -------------------------------------------------------
+        if stop.type in ["SCHOOL_ARRIVE", "SCHOOL_DEPART"] and stop.school:
+            display_name = stop.school.name                        # School stop display
+            is_school_stop = True                                  # School-stop flag
+        else:
+            display_name = stop.name or f"STOP {stop.sequence}"    # Default stop name
+            is_school_stop = False                                 # Regular stop flag
+
+        # -------------------------------------------------------
+        # Append running board row
+        # -------------------------------------------------------
         running_stops.append(
             RunningBoardStop(
-                stop_id=stop.id,  # Stop ID
-                sequence=stop.sequence,  # Stop order
+                stop_id=stop.id,                                   # Stop ID
+                sequence=stop.sequence,                            # Stop order
+                stop_type=stop.type,                               # Stop type
+                is_school_stop=is_school_stop,                     # School-stop marker
+                display_name=display_name,                         # UI display name
                 planned_time=str(stop.planned_time) if stop.planned_time else None,  # Time
-                lat=stop.latitude,  # Latitude
-                lng=stop.longitude,  # Longitude
-                student_count_at_stop=student_count,  # Riders here
-                load_change=load_change,  # Boardings
-                cumulative_load=cumulative_load,  # Bus load after stop
-                students=stop_students,  # Student list
+                lat=stop.latitude,                                 # Latitude
+                lng=stop.longitude,                                # Longitude
+                student_count_at_stop=student_count,               # Riders here
+                load_change=load_change,                           # Boardings
+                cumulative_load=cumulative_load,                   # Load after stop
+                students=stop_students,                            # Student list
             )
         )
 
@@ -2246,4 +2288,3 @@ def get_run_summary(run_id: int, db: Session = Depends(get_db)):
         total_assigned_students=len(assignments),
         current_load=current_load,
     )
-

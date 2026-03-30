@@ -150,6 +150,9 @@ class RunningBoardStudent(BaseModel):
 class RunningBoardStop(BaseModel):
     stop_id: int  # Stop database ID
     sequence: int  # Stop order within the run
+    stop_type: str
+    is_school_stop: bool
+    display_name: str
     planned_time: str | None  # Planned arrival time if available
     lat: float | None  # Stop latitude
     lng: float | None  # Stop longitude
