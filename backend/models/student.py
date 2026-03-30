@@ -31,3 +31,7 @@ class Student(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+
+    @property
+    def school_name(self) -> str | None:
+        return self.school.name if self.school else None

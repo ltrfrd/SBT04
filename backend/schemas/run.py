@@ -8,7 +8,25 @@
 from datetime import datetime  # Datetime types used in API schemas
 from typing import List, Optional  # Optional and collection typing
 
-from pydantic import BaseModel, ConfigDict, Field  # Pydantic schema helpers
+import re
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator  # Pydantic schema helpers
+
+
+# -----------------------------------------------------------
+# Run label normalization helpers
+# Keep run_type flexible but consistently stored
+# -----------------------------------------------------------
+RUN_TYPE_PATTERN = re.compile(r"^[A-Z0-9]+(?:[ -][A-Z0-9]+)*$")
+
+
+def normalize_run_type(value: str) -> str:
+    normalized = " ".join(value.strip().upper().split())
+    if not normalized:
+        raise ValueError("run_type is required")
+    if not RUN_TYPE_PATTERN.fullmatch(normalized):
+        raise ValueError("run_type may contain only letters, numbers, spaces, and hyphens")
+    return normalized
 
 
 # -----------------------------
@@ -20,11 +38,32 @@ class RunStart(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    @field_validator("run_type")
+    @classmethod
+    def validate_run_type(cls, value: str) -> str:
+        return normalize_run_type(value)
+
+
+class RouteRunCreate(BaseModel):
+    run_type: str = Field(min_length=1)  # Flexible run label within selected route
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("run_type")
+    @classmethod
+    def validate_run_type(cls, value: str) -> str:
+        return normalize_run_type(value)
+
 
 class RunUpdate(BaseModel):
     run_type: str = Field(min_length=1)  # Updated flexible run label
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("run_type")
+    @classmethod
+    def validate_run_type(cls, value: str) -> str:
+        return normalize_run_type(value)
 
 
 class RunOut(BaseModel):
@@ -71,6 +110,7 @@ class RunDetailStopOut(BaseModel):
     sequence: int
     type: str
     name: str | None = None
+    school_id: int | None = None
     address: str | None = None
     planned_time: str | None = None
 
@@ -80,7 +120,6 @@ class RunDetailStudentOut(BaseModel):
     student_name: str
     school_id: int | None = None
     school_name: str | None = None
-    school_code: str | None = None
     stop_id: int | None = None
     stop_sequence: int | None = None
     stop_name: str | None = None

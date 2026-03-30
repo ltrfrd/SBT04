@@ -90,7 +90,7 @@ def route_summary(db: Session, route_id: int) -> dict:
                     "id": st.id,
                     "run_id": run.id,
                     "sequence": st.sequence,
-                    "type": st.type.value,
+                    "type": st.type.value if hasattr(st.type, "value") else str(st.type),
                 }
             )  # Preserve existing stop payload shape
 

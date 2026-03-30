@@ -72,20 +72,28 @@ def test_admin_endpoints_require_token(client):
 @pytest.mark.parametrize(
     ("stop_type", "expected_type"),
     [
-        ("pickup", "pickup"),
-        ("PICKUP", "pickup"),
-        ("PickUp", "pickup"),
-        ("pick up", "pickup"),
-        ("pick-up", "pickup"),
-        ("dropoff", "dropoff"),
-        ("DROPOFF", "dropoff"),
-        ("DropOff", "dropoff"),
-        ("drop off", "dropoff"),
-        ("drop-off", "dropoff"),
+        ("pickup", "PICKUP"),
+        ("PICKUP", "PICKUP"),
+        ("PickUp", "PICKUP"),
+        ("pick up", "PICKUP"),
+        ("pick-up", "PICKUP"),
+        ("dropoff", "DROPOFF"),
+        ("DROPOFF", "DROPOFF"),
+        ("DropOff", "DROPOFF"),
+        ("drop off", "DROPOFF"),
+        ("drop-off", "DROPOFF"),
+        ("school arrive", "SCHOOL_ARRIVE"),
+        ("school-depart", "SCHOOL_DEPART"),
     ],
 )
 def test_stop_create_normalizes_flexible_type_values(client, stop_type, expected_type):
     run_id = _setup_run(client)
+    school_id = None
+
+    if "school" in stop_type:
+        school = client.post("/schools/", json={"name": "Normalize School", "address": "1 School Way"})
+        assert school.status_code in (200, 201)
+        school_id = school.json()["id"]
 
     response = client.post(
         "/stops/",
@@ -95,6 +103,7 @@ def test_stop_create_normalizes_flexible_type_values(client, stop_type, expected
             "latitude": 1,
             "longitude": 1,
             "type": stop_type,
+            "school_id": school_id,
         },
     )
 
@@ -124,7 +133,7 @@ def test_stop_update_normalizes_flexible_type_values(client):
     )
 
     assert updated.status_code == 200
-    assert updated.json()["type"] == "dropoff"
+    assert updated.json()["type"] == "DROPOFF"
 
 
 def test_stop_rejects_invalid_type_value(client):
@@ -142,3 +151,15 @@ def test_stop_rejects_invalid_type_value(client):
     )
 
     assert response.status_code == 422
+
+
+def test_school_stop_requires_school_id(client):
+    run_id = _setup_run(client)
+
+    response = client.post(
+        "/runs/{}/stops".format(run_id),
+        json={"type": "SCHOOL_ARRIVE"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "school_id is required for school stops"

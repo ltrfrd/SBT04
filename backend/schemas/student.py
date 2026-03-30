@@ -3,8 +3,7 @@
 # -----------------------------------------------------------
 # Pydantic models for Student creation and output responses.
 # ===========================================================
-
-from pydantic import AliasPath, BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 
 
@@ -37,7 +36,7 @@ class StudentOut(StudentBase):
     """Returned in API responses."""
 
     id: int  # Auto-generated unique ID
-    school_code: Optional[str] = Field(default=None, validation_alias=AliasPath("school", "school_code"))
+    school_name: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)  # ORM to schema conversion
 

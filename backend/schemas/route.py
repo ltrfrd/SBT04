@@ -7,7 +7,7 @@
 from datetime import datetime, time
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 # -----------------------------------------------------------
@@ -48,6 +48,18 @@ class RouteCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # -----------------------------------------------------------
+    # Route number normalization
+    # Keep visible route identity trimmed and predictable
+    # -----------------------------------------------------------
+    @field_validator("route_number")
+    @classmethod
+    def normalize_route_number(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("route_number is required")
+        return normalized
+
 
 # -----------------------------------------------------------
 # Route summary response
@@ -79,7 +91,6 @@ class RouteOut(BaseModel):
 class RouteSchoolOut(BaseModel):
     school_id: int
     school_name: str
-    school_code: str | None = None
 
 
 # -----------------------------------------------------------
@@ -91,6 +102,7 @@ class RouteDetailStopOut(BaseModel):
     sequence: int
     type: str
     name: str | None = None
+    school_id: int | None = None
     address: str | None = None
     planned_time: time | None = None
     student_count: int = 0
@@ -105,7 +117,6 @@ class RouteDetailStudentOut(BaseModel):
     student_name: str
     school_id: int | None = None
     school_name: str | None = None
-    school_code: str | None = None
     stop_id: int | None = None
     stop_sequence: int | None = None
     stop_name: str | None = None

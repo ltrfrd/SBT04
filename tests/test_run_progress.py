@@ -103,7 +103,7 @@ def test_start_run_copies_stops_from_latest_route_run(client):
         "/runs/start",
         json={
             "route_id": route_id,
-            "run_type": "AM",
+            "run_type": "PM",
         },
     )
     assert new_run_response.status_code in (200, 201)
@@ -243,7 +243,7 @@ def test_run_state_uses_stored_current_stop_sequence(client):
         "/runs/start",
         json={
             "route_id": route_id,
-            "run_type": "AM",
+            "run_type": "PM",
         },
     )
     assert active_run_res.status_code in (200, 201)

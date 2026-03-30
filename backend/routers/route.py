@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from database import get_db
 
+from backend import schemas
 from backend.models.associations import RouteDriverAssignment
 from backend.models.driver import Driver
 from backend.models.route import Route
@@ -23,6 +24,7 @@ from backend.schemas.route import (
     RouteOut,
     RouteSchoolOut,
 )
+from backend.schemas.run import RouteRunCreate
 from backend.utils.route_driver_assignment import resolve_route_driver_assignment
 from datetime import datetime, timezone
 
@@ -119,6 +121,7 @@ def _serialize_route_detail(route: Route) -> RouteDetailOut:
                 sequence=stop.sequence,
                 type=stop.type.value if hasattr(stop.type, "value") else str(stop.type),
                 name=stop.name,
+                school_id=stop.school_id,
                 address=stop.address,
                 planned_time=stop.planned_time,
                 student_count=stop_student_counts.get(stop.id, 0),
@@ -146,7 +149,6 @@ def _serialize_route_detail(route: Route) -> RouteDetailOut:
                     student_name=assignment.student.name,
                     school_id=assignment.student.school_id,
                     school_name=assignment.student.school.name if assignment.student.school else None,
-                    school_code=assignment.student.school.school_code if assignment.student.school else None,
                     stop_id=assignment.stop_id,
                     stop_sequence=assignment.stop.sequence if assignment.stop else None,
                     stop_name=assignment.stop.name if assignment.stop else None,
@@ -179,7 +181,6 @@ def _serialize_route_detail(route: Route) -> RouteDetailOut:
             RouteSchoolOut(
                 school_id=school.id,
                 school_name=school.name,
-                school_code=school.school_code,
             )
             for school in sorted(route.schools, key=lambda school: (school.name, school.id))
         ],
@@ -357,6 +358,46 @@ def update_route(route_id: int, route_in: RouteCreate, db: Session = Depends(get
     db.commit()
     db.refresh(route)
     return _serialize_route(route)
+
+
+# -----------------------------------------------------------
+# Route-context run creation
+# Create a run inside the selected route context
+# -----------------------------------------------------------
+@router.post(
+    "/{route_id}/runs",
+    response_model=schemas.RunOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create run inside route",
+    description="Create a planned run inside the selected route context without sending route_id again.",
+    response_description="Created run",
+)
+def create_route_run(
+    route_id: int,
+    payload: RouteRunCreate,
+    db: Session = Depends(get_db),
+):
+    from backend.routers import run as run_router  # Local import avoids circular import at module load time
+
+    route = (
+        db.query(Route)
+        .options(
+            joinedload(Route.driver_assignments).joinedload(RouteDriverAssignment.driver)
+        )
+        .filter(Route.id == route_id)
+        .first()
+    )
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
+
+    new_run = run_router._create_planned_run(                  # Reuse shared run creation rules
+        route=route,                                           # Parent route context
+        run_type=payload.run_type,                             # Normalized run label
+        db=db,                                                 # Shared DB session
+    )
+    db.commit()
+    db.refresh(new_run)
+    return run_router._serialize_run(new_run)
 
 
 # -----------------------------------------------------------

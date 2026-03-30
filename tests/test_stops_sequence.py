@@ -118,3 +118,48 @@ def test_stop_delete_normalizes_gap_free(client):
 
     assert names == ["A", "C"]
     assert seqs == [1, 2]
+
+
+def test_run_context_stop_creation_auto_assigns_sequence_and_default_name(client):
+    driver_id = _create_driver(client)
+    route_id = _create_route(client, driver_id)
+    run_id = _create_run(client, driver_id, route_id)
+
+    first = client.post(f"/runs/{run_id}/stops", json={"type": "pickup"})
+    second = client.post(f"/runs/{run_id}/stops", json={"type": "dropoff"})
+
+    assert first.status_code in (200, 201)
+    assert second.status_code in (200, 201)
+    assert first.json()["sequence"] == 1
+    assert first.json()["name"] == "STOP 1"
+    assert second.json()["sequence"] == 2
+    assert second.json()["name"] == "STOP 2"
+
+
+def test_run_context_stop_creation_supports_school_stops(client):
+    driver_id = _create_driver(client)
+    route_id = _create_route(client, driver_id)
+    school = client.post("/schools/", json={"name": "Central School", "address": "9 School Way"})
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]
+    assign = client.put(f"/routes/{route_id}", json={"route_number": "R1", "unit_number": "Bus-01", "school_ids": [school_id]})
+    assert assign.status_code == 200
+    run_id = _create_run(client, driver_id, route_id)
+
+    arrive = client.post(
+        f"/runs/{run_id}/stops",
+        json={"type": "school_arrive", "school_id": school_id},
+    )
+    depart = client.post(
+        f"/runs/{run_id}/stops",
+        json={"type": "SCHOOL_DEPART", "school_id": school_id},
+    )
+
+    assert arrive.status_code in (200, 201)
+    assert depart.status_code in (200, 201)
+    assert arrive.json()["type"] == "SCHOOL_ARRIVE"
+    assert arrive.json()["name"] == "Central School"
+    assert arrive.json()["school_id"] == school_id
+    assert depart.json()["type"] == "SCHOOL_DEPART"
+    assert depart.json()["name"] == "Central School"
+    assert depart.json()["sequence"] == 2

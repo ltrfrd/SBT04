@@ -22,12 +22,12 @@ from backend.models.student import Student                      # Student model
 from backend.models.stop import Stop                            # Stop model
 from backend.models.associations import StudentRunAssignment  # Runtime rider assignments
 from backend.models.associations import RouteDriverAssignment  # Route-level driver assignments
-from backend.schemas.run import RunStart, RunOut, RunUpdate, RunDetailOut, RunDetailRouteOut, RunDetailDriverOut, RunDetailStopOut, RunDetailStudentOut, RunListOut
+from backend.schemas.run import RunStart, RunOut, RunUpdate, RunDetailOut, RunDetailRouteOut, RunDetailDriverOut, RunDetailStopOut, RunDetailStudentOut, RunListOut, normalize_run_type
 from backend.models.run_event import RunEvent                  # Run timeline event model
 from backend.models import student as student_model  # Student model for replay names
 from backend.schemas.run import RunReplayOut, RunReplayEventOut, RunReplaySummaryOut
 from backend.schemas.run import RunTimelineOut                 # Timeline response schema
-from backend.schemas.stop import StopOut
+from backend.schemas.stop import RunStopCreate, StopOut
 from backend.schemas.run import (  # Running board response schemas
     RunningBoardResponse,
     RunningBoardStop,
@@ -129,6 +129,19 @@ def _create_stop_context_student(
     if not school:
         raise HTTPException(status_code=404, detail="School not found")
 
+    route = (
+        db.query(route_model.Route)
+        .options(selectinload(route_model.Route.schools))
+        .filter(route_model.Route.id == run.route_id)
+        .first()
+    )  # Load route-school assignments for conservative validation
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
+
+    route_school_ids = {school.id for school in route.schools}
+    if payload.school_id not in route_school_ids:
+        raise HTTPException(status_code=400, detail="School is not assigned to the run route")
+
     student = Student(
         name=payload.name,
         grade=payload.grade,
@@ -180,6 +193,61 @@ def _resolve_planned_run_driver(route) -> int | None:
         ) from exc
 
     return assignment.driver_id
+
+
+# -----------------------------------------------------------
+# Run creation helpers
+# Normalize flexible run labels and enforce one label per route
+# -----------------------------------------------------------
+def _assert_unique_route_run_type(
+    *,
+    route_id: int,
+    normalized_run_type: str,
+    db: Session,
+    exclude_run_id: int | None = None,
+) -> None:
+    existing_runs = (
+        db.query(run_model.Run)
+        .filter(run_model.Run.route_id == route_id)
+        .all()
+    )
+
+    for existing_run in existing_runs:
+        if exclude_run_id is not None and existing_run.id == exclude_run_id:
+            continue
+
+        if normalize_run_type(existing_run.run_type) == normalized_run_type:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Run label already exists for this route",
+            )
+
+
+def _create_planned_run(
+    *,
+    route: route_model.Route,
+    run_type: str,
+    db: Session,
+) -> run_model.Run:
+    normalized_run_type = normalize_run_type(run_type)          # Store normalized flexible label
+    _assert_unique_route_run_type(
+        route_id=route.id,
+        normalized_run_type=normalized_run_type,
+        db=db,
+    )
+    resolved_driver_id = _resolve_planned_run_driver(route)     # Planned runs may exist before a driver is assigned
+
+    new_run = run_model.Run(                                    # Create run under current route context
+        driver_id=resolved_driver_id,                           # Inherit current route driver when available
+        route_id=route.id,                                      # Inherit route automatically
+        run_type=normalized_run_type,                           # Store normalized flexible run label
+        start_time=None,                                        # Planned only until explicitly started
+        end_time=None,                                          # Not completed
+        current_stop_id=None,                                   # No live stop yet
+        current_stop_sequence=None,                             # No live sequence yet
+    )
+    db.add(new_run)
+    return new_run
 
 
 # -----------------------------------------------------------
@@ -249,6 +317,7 @@ def _serialize_run_detail(run: run_model.Run) -> RunDetailOut:
                 sequence=stop.sequence,
                 type=stop.type.value if hasattr(stop.type, "value") else str(stop.type),
                 name=stop.name,
+                school_id=stop.school_id,
                 address=stop.address,
                 planned_time=str(stop.planned_time) if stop.planned_time else None,
             )
@@ -260,7 +329,6 @@ def _serialize_run_detail(run: run_model.Run) -> RunDetailOut:
                 student_name=assignment.student.name,
                 school_id=assignment.student.school_id,
                 school_name=assignment.student.school.name if assignment.student.school else None,
-                school_code=assignment.student.school.school_code if assignment.student.school else None,
                 stop_id=assignment.stop_id,
                 stop_sequence=assignment.stop.sequence if assignment.stop else None,
                 stop_name=assignment.stop.name if assignment.stop else None,
@@ -321,23 +389,11 @@ def create_run(run: RunStart, db: Session = Depends(get_db)):
     if not route:
         raise HTTPException(status_code=404, detail="Route not found")  # Route validation
 
-    resolved_driver_id = _resolve_planned_run_driver(route)      # Planned runs may exist before a driver is assigned
-
-    # -----------------------------------------------------------
-    # - Create PLANNED run only
-    # - Do not mark started during creation
-    # -----------------------------------------------------------
-    new_run = run_model.Run(
-        driver_id=resolved_driver_id,                            # Assigned driver
-        route_id=run.route_id,                                   # Linked route
+    new_run = _create_planned_run(                               # Reuse normalized planned run workflow
+        route=route,                                             # Selected route context
         run_type=run.run_type,                                   # Flexible run label
-        start_time=None,                                         # Not started yet
-        end_time=None,                                           # Not ended yet
-        current_stop_id=None,                                    # No active stop
-        current_stop_sequence=None,                              # No active sequence
+        db=db,                                                   # Shared DB session
     )
-
-    db.add(new_run)                                              # Add to session
     db.commit()                                                  # Persist to DB
     db.refresh(new_run)                                          # Reload instance
     return _serialize_run(new_run)                               # Return response
@@ -404,6 +460,11 @@ def start_run(
             raise HTTPException(status_code=404, detail="Route not found")
 
         resolved_driver_id = _resolve_run_driver(route)  # Derive driver from route assignment
+        _assert_unique_route_run_type(
+            route_id=route.id,
+            normalized_run_type=run.run_type,
+            db=db,
+        )
         target_run = run_model.Run(
             driver_id=resolved_driver_id,  # Route-derived driver
             route_id=run.route_id,  # Assigned route
@@ -758,6 +819,32 @@ def get_run_stops(run_id: int, db: Session = Depends(get_db)):
     )
 
     return stops  # Return ordered stop list
+
+
+# -----------------------------------------------------------
+# Run-context stop creation
+# Create a stop inside the selected run context
+# -----------------------------------------------------------
+@router.post(
+    "/{run_id}/stops",
+    response_model=StopOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create stop inside run",
+    description="Create a stop inside the selected run context without sending run_id in the body.",
+    response_description="Created stop",
+)
+def create_stop_inside_run(
+    run_id: int,
+    payload: RunStopCreate,
+    db: Session = Depends(get_db),
+):
+    from backend.routers import stop as stop_router  # Local import avoids circular import at module load time
+
+    return stop_router.create_run_stop(                          # Reuse shared stop workflow rules
+        run_id=run_id,                                          # Parent run context from path
+        payload=payload,                                        # Context payload without run_id
+        db=db,                                                  # Shared DB session
+    )
 
 
 # -----------------------------------------------------------
@@ -1869,6 +1956,12 @@ def update_run(
     if run.start_time is not None:
         raise HTTPException(status_code=400, detail="Only planned runs can be updated")
 
+    _assert_unique_route_run_type(
+        route_id=run.route_id,
+        normalized_run_type=payload.run_type,
+        db=db,
+        exclude_run_id=run.id,
+    )
     run.run_type = payload.run_type  # Allow correction of the planned run label only
 
     db.commit()
@@ -2007,7 +2100,7 @@ def get_running_board(run_id: int, db: Session = Depends(get_db)):
     return RunningBoardResponse(
         run_id=run.id,  # Run identifier
         route_id=run.route_id,  # Parent route
-        run_name=getattr(run, "name", None),  # Optional run label
+        run_name=f"{run.route.route_number} {run.run_type}".strip() if run.route and run.route.route_number else run.run_type,  # Route-number display label
         total_stops=len(stops),  # Stop count
         total_assigned_students=len(assignments),  # Rider count
         stops=running_stops,  # Running board rows

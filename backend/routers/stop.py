@@ -11,10 +11,11 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from backend.deps.admin import require_admin
+from backend.models import school as school_model
 from backend.models import stop as stop_model
 from backend.models import run as run_model
-from backend.models.stop import Stop
-from backend.schemas.stop import StopCreate, StopOut, StopUpdate, StopReorder
+from backend.models.stop import Stop, StopType
+from backend.schemas.stop import RunStopCreate, StopCreate, StopOut, StopUpdate, StopReorder
 from backend.utils.db_errors import raise_conflict_if_unique
 
 # -----------------------------------------------------------
@@ -100,6 +101,90 @@ def normalize_run_sequences(db: Session, run_id: int) -> None:
     for s in stops:
         s.sequence = desired_by_id[s.id]  # Apply contiguous sequence values
     db.flush()  # Persist normalized sequence order
+
+
+# -----------------------------------------------------------
+# Stop workflow helpers
+# Validate school-stop rules and assign stable default values
+# -----------------------------------------------------------
+def _get_next_stop_sequence(db: Session, run_id: int, requested_sequence: int | None) -> int:
+    max_seq = (
+        db.query(func.max(stop_model.Stop.sequence))
+        .filter(stop_model.Stop.run_id == run_id)
+        .scalar()
+    ) or 0
+
+    if requested_sequence is None:
+        return max_seq + 1
+
+    target = max(1, min(requested_sequence, max_seq + 1))
+    if target <= max_seq:
+        shift_block_up(db, run_id, target, max_seq)
+    db.expire_all()
+    return target
+
+
+def _build_stop_payload(
+    *,
+    run_id: int,
+    payload: StopCreate | RunStopCreate | StopUpdate,
+    db: Session,
+    existing_stop: stop_model.Stop | None = None,
+) -> dict:
+    stop_type = payload.type if payload.type is not None else existing_stop.type if existing_stop else None
+    if stop_type is None:
+        raise HTTPException(status_code=422, detail="type is required")
+
+    final_run_id = payload.run_id if getattr(payload, "run_id", None) is not None else run_id
+    if final_run_id is None:
+        raise HTTPException(status_code=422, detail="run_id is required")
+
+    school_id = payload.school_id if payload.school_id is not None else None
+    name = payload.name.strip() if isinstance(payload.name, str) and payload.name.strip() else None
+    sequence = payload.sequence if payload.sequence is not None else existing_stop.sequence if existing_stop else None
+
+    school = None
+    if stop_type in {StopType.SCHOOL_ARRIVE, StopType.SCHOOL_DEPART}:
+        if school_id is None:
+            raise HTTPException(status_code=400, detail="school_id is required for school stops")
+
+        school = db.get(school_model.School, school_id)
+        if not school:
+            raise HTTPException(status_code=404, detail="School not found")
+
+        name = school.name                                      # School stop names always come from school name only
+    else:
+        school_id = None                                        # Regular stops never keep a school pointer
+
+    if existing_stop is None:
+        sequence = _get_next_stop_sequence(db, final_run_id, payload.sequence)
+
+        if not name:
+            if stop_type in {StopType.PICKUP, StopType.DROPOFF}:
+                name = f"STOP {sequence}"                       # Operator-facing numbered fallback
+            elif school:
+                name = school.name
+
+    elif existing_stop is not None:
+        if name is None:
+            if stop_type in {StopType.SCHOOL_ARRIVE, StopType.SCHOOL_DEPART} and school:
+                name = school.name
+            else:
+                name = existing_stop.name
+        if school_id is None:
+            school_id = existing_stop.school_id
+
+    return {
+        "run_id": final_run_id,
+        "sequence": sequence,
+        "type": stop_type,
+        "name": name,
+        "school_id": school_id,
+        "address": payload.address if payload.address is not None else existing_stop.address if existing_stop else None,
+        "planned_time": payload.planned_time if payload.planned_time is not None else existing_stop.planned_time if existing_stop else None,
+        "latitude": payload.latitude if payload.latitude is not None else existing_stop.latitude if existing_stop else None,
+        "longitude": payload.longitude if payload.longitude is not None else existing_stop.longitude if existing_stop else None,
+    }
 
 # -----------------------------------------------------------
 # - Validate run sequences
@@ -207,29 +292,49 @@ def create_stop(payload: StopCreate, db: Session = Depends(get_db)):
         if not run:
             raise HTTPException(status_code=404, detail="Run not found")
 
-        max_seq = (
-            db.query(func.max(stop_model.Stop.sequence))
-            .filter(stop_model.Stop.run_id == payload.run_id)
-            .scalar()
+        data = _build_stop_payload(                             # Apply shared stop workflow rules
+            run_id=payload.run_id,                              # Parent run from generic payload
+            payload=payload,                                    # Incoming stop request
+            db=db,                                              # Shared DB session
         )
-        max_seq = max_seq or 0
 
-        if payload.sequence is None:
-            seq = max_seq + 1
-        else:
-            target = max(1, min(payload.sequence, max_seq + 1))
-            if target <= max_seq:
-                shift_block_up(db, payload.run_id, target, max_seq)
-            db.expire_all()
-            seq = target
+        stop = stop_model.Stop(**data)
+        db.add(stop)
+        db.commit()
+        db.refresh(stop)
+        return stop
 
-        data = payload.model_dump()
-        data["sequence"] = seq
+    except IntegrityError as e:
+        db.rollback()
+        raise_conflict_if_unique(
+            db,
+            e,
+            constraint_name="uq_stops_run_sequence",
+            sqlite_columns=("run_id", "sequence"),
+            detail="Stop sequence conflict for this run",
+        )
+        raise HTTPException(status_code=400, detail="Integrity error")
 
-        if not data.get("name") and data.get("address"):
-            data["name"] = data["address"]
-        if not data.get("name"):
-            data["name"] = f"Stop {seq}"
+
+# -----------------------------------------------------------
+# Run-context stop creation helper
+# Create a stop inside the selected run context
+# -----------------------------------------------------------
+def create_run_stop(
+    run_id: int,
+    payload: RunStopCreate,
+    db: Session,
+):
+    try:
+        run = db.get(run_model.Run, run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Run not found")
+
+        data = _build_stop_payload(                             # Apply shared stop workflow rules
+            run_id=run_id,                                      # Parent run from path context
+            payload=payload,                                    # Incoming contextual payload
+            db=db,                                              # Shared DB session
+        )
 
         stop = stop_model.Stop(**data)
         db.add(stop)
@@ -287,6 +392,13 @@ def update_stop(
         raise HTTPException(status_code=404, detail="Stop not found")
 
     updates = stop_in.model_dump(exclude_none=True)
+    if "type" in updates or "school_id" in updates or "name" in updates:
+        updates = _build_stop_payload(                          # Reapply school-stop naming rules on update
+            run_id=stop.run_id,                                # Existing run context
+            payload=stop_in,                                   # Partial update payload
+            db=db,                                             # Shared DB session
+            existing_stop=stop,                                # Update current stop in place
+        )
     for key, value in updates.items():
         setattr(stop, key, value)
 

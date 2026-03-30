@@ -42,7 +42,7 @@ from .route import (
 # -------------------------------------------------------------------------
 # Stop schemas
 # -------------------------------------------------------------------------
-from .stop import StopCreate, StopOut  # Stop creation and response schemas
+from .stop import RunStopCreate, StopCreate, StopOut  # Stop creation and response schemas
 
 
 # -------------------------------------------------------------------------
@@ -68,6 +68,7 @@ from .run import (
     RunDetailRouteOut,
     RunDetailStopOut,
     RunDetailStudentOut,
+    RouteRunCreate,
     RunOut,          # Standard run response schema
     RunSummaryOut,   # Operational run summary schema
 )
@@ -126,6 +127,7 @@ __all__ = [
     "RouteDriverAssignmentOut",
 
     "StopCreate",
+    "RunStopCreate",
     "StopOut",
 
     "RunOut",
@@ -135,6 +137,7 @@ __all__ = [
     "RunDetailDriverOut",
     "RunDetailStopOut",
     "RunDetailStudentOut",
+    "RouteRunCreate",
     "RunSummaryOut",
 
     "DispatchCreate",

@@ -1,206 +1,266 @@
-SBT03 - Repository Structure
-============================
+SBT04
+School bus transport and operations system with a workflow-first configuration
+surface, a stable dispatch engine, and a stable attendance/reporting layer.
 
-FROZEN REQUIREMENTS
--------------------
-The repo is operating under frozen requirements.
+===============================================================================
+WORKFLOW FLOW
+===============================================================================
 
-- Document the working system as it exists now
-- Do not assume planned redesigns
-- Do not treat layered compatibility as accidental drift
-- Keep compatibility behavior visible in docs
+Operator workflow target:
 
+Route -> Run -> Stop -> Students
 
-LAYERED RENAME: REPORT -> ATTENDANCE
------------------------------------
-The rename from `report` to `attendance` is intentional and is being done in layers.
+Supporting configuration steps:
+- assign schools to route
+- assign driver to route
 
-- `backend/routers/attendance.py` is the active attendance/reporting router
-- `/reports/...` compatibility remains intentional and supported
-- `backend/routers/report.py` remains in the repo as a compatibility bridge
-- `backend/utils/report_generator.py` remains in the repo as a compatibility bridge
-- Legacy report naming is part of the current transition layer
+Important rule:
+- operators should work in routes, runs, stops, and students
+- operators should not think in StudentRunAssignment rows
 
+===============================================================================
+INTERNAL VS OPERATOR
+===============================================================================
 
-ROOT
-----
-`app.py`
-- Main FastAPI integration center
-- Registers routers, templates, auth/session behavior, and workspace views
+Operator-facing layer:
+- Route
+- Run
+- Stop
+- Student
+- School identity via school_id + school_name
+- Route-school assignment
+- Route-driver assignment
 
-`database.py`
-- SQLAlchemy engine, session factory, declarative base, and `get_db`
+Internal runtime layer:
+- StudentRunAssignment
+- pickup/dropoff state
+- onboard state
+- running board source data
+- attendance/report derivation state
 
-`alembic.ini`
-- Alembic configuration
+StudentRunAssignment warning:
+- INTERNAL ONLY
 
-`alembic/`
-- Migration environment and version history
+Workflow context endpoints:
+- POST /routes/{route_id}/runs
+- POST /runs/{run_id}/stops
+- POST /runs/{run_id}/stops/{stop_id}/students
+- POST /runs/{run_id}/stops/{stop_id}/students/bulk
+- NOT FOR OPERATOR WORKFLOW
+- internal runtime engine
+- still exists in the backend
+- still exposed by router for compatibility and advanced/internal use
+- should not be used as the main UI planning object
 
-`README.md`
-- High-level system guide
+===============================================================================
+ROOT LEVEL
+===============================================================================
 
-`structure.txt`
-- Technical repo map
+.
+|-- alembic/                       Migration environment and version history
+|-- backend/                       Main FastAPI application package
+|-- frontend/                      Separate React/Vite frontend scaffold
+|-- tests/                         Automated test suite
+|-- .env                           Local development environment values
+|-- .gitignore                     Git ignore rules
+|-- alembic.ini                    Alembic configuration
+|-- app.py                         FastAPI entry point, pages, WebSocket, router registration
+|-- database.py                    SQLAlchemy engine, session, Base, and DB dependency
+|-- README.md                      Main SBT04 project documentation
+|-- requirements.txt               Python dependency list
+|-- structure.txt                  Repo structure guide
+|-- sbt.db                         Local SQLite database when present
 
-`requirements.txt`
-- Python dependencies
+Notes:
+- Local virtual environments, cache folders, and pytest temp folders may exist in
+  development but are not part of the application architecture.
+- The repo folder name may still be historical, but the project documentation and
+  workflow framing are SBT04.
 
+===============================================================================
+backend/
+===============================================================================
+
+Layer note:
+- configuration-related: routes, runs, stops, students, schools, drivers
+- dispatch-related: live run state, GPS, running board, driver workspace
+- attendance-related: reports, school confirmations, absence-aware summaries
 
 backend/
---------
-Primary application package.
+|-- __init__.py                    Backend package marker
+|-- config.py                      Environment-driven settings
+|
+|-- deps/                          Shared FastAPI dependencies
+|   |-- admin.py                   Admin token guard for protected endpoints
+|
+|-- models/                        SQLAlchemy models
+|   |-- __init__.py                Model export hub
+|   |-- associations.py            Route-school link, route-driver assignment, StudentRunAssignment
+|   |-- dispatch.py                Dispatch/payroll persistence
+|   |-- driver.py                  Driver model
+|   |-- route.py                   Route planning container
+|   |-- run.py                     Run model for operational execution
+|   |-- run_event.py               Run event timeline model
+|   |-- school.py                  School model
+|   |-- school_attendance_verification.py
+|   |                              School confirmation model
+|   |-- stop.py                    Stop model with per-run ordering
+|   |-- student.py                 Student model with school, route, and stop references
+|   |-- student_bus_absence.py     Planned no-ride model
+|
+|-- routers/                       FastAPI routers
+|   |-- __init__.py                Router export hub
+|   |-- attendance.py              Attendance/report endpoints under /reports
+|   |-- dispatch.py                Dispatch and payroll endpoints
+|   |-- driver.py                  Driver CRUD and route lookup
+|   |-- report.py                  Compatibility layer re-exporting attendance router
+|   |-- route.py                   Route CRUD, route detail, school assignment, driver assignment
+|   |-- run.py                     Run CRUD, lifecycle, running board, replay, stop-context student workflow
+|   |-- school.py                  School CRUD and route assignment
+|   |-- stop.py                    Stop CRUD, reorder, normalize, validate
+|   |-- student.py                 Student CRUD and filtered lookup
+|   |-- student_bus_absence.py     Planned no-ride endpoints
+|   |-- student_run_assignment.py  Explicit assignment router kept for compatibility/internal use
+|
+|-- schemas/                       Pydantic request and response contracts
+|   |-- __init__.py                Schema export hub
+|   |-- dispatch.py                Dispatch and payroll schemas
+|   |-- driver.py                  Driver schemas
+|   |-- route.py                   Route summary/detail and nested route-run-stop-student schemas
+|   |-- run.py                     Run detail, state, replay, running board, pickup/dropoff schemas
+|   |-- school.py                  School schemas
+|   |-- stop.py                    Stop create/update/reorder schemas
+|   |-- student.py                 Student CRUD plus stop-context single/bulk add schemas
+|   |-- student_bus_absence.py     Planned no-ride schemas
+|   |-- student_run_assignment.py  Runtime assignment schemas
+|
+|-- templates/                     Server-rendered HTML templates
+|   |-- static/                    Static assets used by templates
+|   |-- dashboard.html             Dashboard page
+|   |-- driver_run.html            Main driver route/run workspace
+|   |-- route_report.html          Route report page
+|   |-- school_attendance_routes.html
+|   |                              School mobile route selection page
+|   |-- school_attendance_runs.html
+|   |                              School mobile run selection page
+|   |-- school_mobile_report.html  School mobile attendance page
+|   |-- summary_report.html        Summary/payroll-oriented report page
+|
+|-- utils/                         Shared application helpers
+|   |-- __init__.py                Utils package marker
+|   |-- attendance_generator.py    Attendance and reporting aggregation logic
+|   |-- auth.py                    Session-based auth helpers
+|   |-- db_errors.py               Database error helpers
+|   |-- gps_tools.py               GPS, ETA, and progress helpers
+|   |-- report_generator.py        Compatibility re-export of attendance generator logic
+|   |-- route_driver_assignment.py Route-driver resolution helpers
+|   |-- student_bus_absence.py     Planned no-ride filtering helpers
 
-`backend/config.py`
-- Shared configuration module
+backend/ architecture note:
+- Route is the planning container.
+- Run belongs to route.
+- Stop belongs to run.
+- Students are increasingly managed from stop context.
+- StudentRunAssignment remains the internal runtime engine.
 
-`backend/models/`
-- ORM data layer
-- Defines operational entities and association tables
+Real workflow-related endpoint note:
+- run router already contains stop-context student endpoints
+- single add: POST /runs/{run_id}/stops/{stop_id}/students
+- bulk add:   POST /runs/{run_id}/stops/{stop_id}/students/bulk
+- student_run_assignment router still exists for compatibility/internal use
 
-Key model files:
-- `driver.py` -> driver records
-- `school.py` -> schools, including optional `school_code`
-- `student.py` -> students and school linkage
-- `route.py` -> routes and route-school relationship
-- `run.py` -> runs as the core operational unit
-- `stop.py` -> ordered stops under runs
-- `run_event.py` -> runtime event history
-- `dispatch.py` -> dispatch and payroll-related models
-- `student_bus_absence.py` -> planned bus absences
-- `school_attendance_verification.py` -> per-school, per-run confirmation
-- `associations.py` -> association models
+===============================================================================
+frontend/
+===============================================================================
 
-Important association models:
-- `StudentRunAssignment` -> runtime source of truth for which students belong to a run
-- `RouteDriverAssignment` -> route-driver ownership model
-
-
-`backend/schemas/`
-- Pydantic validation and response layer
-- Defines request and response contracts used by routers
-
-Key schema files:
-- `run.py` -> run lifecycle, list, and detail payloads
-- `route.py` -> route summary and route detail payloads
-- `student_run_assignment.py` -> runtime assignment payloads
-- `student_bus_absence.py` -> planned absence payloads
-- `student.py` -> student payloads, including school-facing data such as `school_code`
-- `school.py` -> school payloads including optional `school_code`
-- `stop.py` -> stop input/output payloads
-
-
-`backend/routers/`
-- FastAPI API layer
-- Owns CRUD, runtime operations, and attendance/report compatibility endpoints
-
-Core routers:
-- `driver.py` -> driver management
-- `school.py` -> school management
-- `student.py` -> student management
-- `route.py` -> route summary/detail APIs
-- `stop.py` -> stop validation, normalization, CRUD, and reorder APIs
-- `run.py` -> run lifecycle, run summaries, run details, and operational actions
-- `dispatch.py` -> dispatch/payroll APIs
-- `student_run_assignment.py` -> runtime assignment APIs
-- `student_bus_absence.py` -> planned absence APIs
-
-Attendance/report layer:
-- `attendance.py` -> active attendance/reporting router
-- `report.py` -> compatibility-only router during the layered migration
-
-Router package:
-- `__init__.py` -> exports active routers, including attendance-owned planned absence exposure
-
-Note:
-- `new changeges SBT01.txt` exists in this folder but is not part of the active application runtime
-
-
-`backend/utils/`
-- Business logic and shared helpers
-
-Key utility files:
-- `attendance_generator.py` -> core attendance business-logic file
-- `report_generator.py` -> compatibility bridge during the layered rename
-- `route_driver_assignment.py` -> route-driver resolution helpers
-- `student_bus_absence.py` -> planned absence logic
-- `db_errors.py` -> DB integrity/conflict helpers
-- `gps_tools.py` -> run GPS/progress helpers
-- `auth.py` -> login/session helpers
-
-
-`backend/templates/`
-- Jinja template layer for server-rendered views
-
-Current templates include:
-- `dashboard.html`
-- `driver_run.html`
-- `route_report.html`
-- `school_attendance_routes.html`
-- `school_attendance_runs.html`
-- `school_mobile_report.html`
-- `summary_report.html`
-
-Role of templates:
-- driver workspace
-- route summary display
-- school attendance route/run navigation
-- school mobile attendance review
-- summary reporting views
-
-
-`backend/deps/`
-- Shared dependency helpers
-
+Layer note:
+- frontend/ is not the primary live UI layer today
+- current live UI is mainly template-based through backend/templates/
 
 frontend/
----------
-Secondary frontend workspace present in the repo.
+|-- public/                        Vite public assets
+|-- src/                           React source files
+|   |-- assets/                    Frontend static assets
+|   |-- api.js                     Small fetch helper for backend calls
+|   |-- App.css                    Example app styling
+|   |-- App.jsx                    Simple example frontend view
+|   |-- index.css                  Global frontend styles
+|   |-- main.jsx                   React entry point
+|-- .env                           Frontend environment values
+|-- .gitignore                     Frontend git ignore file
+|-- eslint.config.js               ESLint config
+|-- index.html                     Vite HTML entry
+|-- package.json                   Frontend package manifest
+|-- package-lock.json              Frontend lock file
+|-- README.md                      Vite scaffold documentation
+|-- vite.config.js                 Vite configuration
 
-Includes:
-- Vite config
-- React entry files
-- frontend `README.md`
+frontend/ explanation:
+- React/Vite scaffold exists
+- useful for future frontend work
+- not the main operator interface right now
 
-The FastAPI + Jinja backend remains the active integrated runtime documented here.
+===============================================================================
+tests/
+===============================================================================
 
+Layer note:
+- tests protect configuration, dispatch, and attendance behavior during workflow changes
 
 tests/
-------
-pytest suite covering the working backend behavior.
+|-- conftest.py                    Shared pytest fixtures and client setup
+|-- test_all.py                    Broad end-to-end API and behavior coverage
+|-- test_api_surface.py            API surface and payload-shape protection
+|-- test_running_board.py          Running board coverage
+|-- test_run_absence_integration.py
+|                                  Run and planned-absence integration coverage
+|-- test_run_next_stop.py          Next-stop behavior coverage
+|-- test_run_progress.py           Run progress and state coverage
+|-- test_stops_edge_cases.py       Stop edge-case coverage
+|-- test_stops_sequence.py         Stop sequence/order coverage
+|-- test_student_bus_absence.py    Planned no-ride coverage
+|-- test_student_run_assignment.py Explicit assignment coverage
 
-Main test files:
-- `test_all.py`
-- `test_api_surface.py`
-- `test_run_progress.py`
-- `test_run_next_stop.py`
-- `test_run_absence_integration.py`
-- `test_running_board.py`
-- `test_stops_edge_cases.py`
-- `test_stops_sequence.py`
-- `test_student_run_assignment.py`
-- `test_student_bus_absence.py`
-- `conftest.py`
+tests/ explanation:
+- workflow changes must not break stable dispatch logic
+- workflow changes must not break attendance/report behavior
+- backward compatibility is protected here
 
+===============================================================================
+alembic/
+===============================================================================
 
-System Truths
--------------
-1. Runs are the core operational unit.
-2. `StudentRunAssignment` is the runtime source of truth.
-3. Driver ownership is handled by `RouteDriverAssignment`, not by assigning a driver directly on `Route`.
-4. Attendance is computed from runtime assignments, events, and planned absences.
-5. School confirmation is stored per school and per run.
-6. Multiple schools may be tied to the same route or run context.
-7. `attendance.py` is the active attendance/reporting router.
-8. `report.py` and `report_generator.py` remain intentional compatibility bridges during the layered migration.
+Layer note:
+- schema migration support for the persistent data model
 
+alembic/
+|-- versions/                      Migration revision files
+|-- env.py                         Alembic environment setup
+|-- script.py.mako                 Migration template
 
-Working System Flow
--------------------
-1. Setup drivers, schools, students, routes, and ownership records
-2. Build route/run context
-3. Operate runs and stops
-4. Record runtime events and runtime student assignments
-5. Compute attendance from runtime truth
-6. Support school review and confirmation
-7. Preserve `/reports/...` compatibility while attendance naming becomes the primary layer
+===============================================================================
+ARCHITECTURE NOTES
+===============================================================================
+
+SBT04 is not a rewrite.
+
+Protected layers:
+- dispatch layer is stable and protected
+- attendance layer is stable and protected
+
+Active layer:
+- configuration/workflow layer is the current focus
+
+Current operator direction:
+- create route
+- assign schools to route
+- assign driver to route
+- create runs inside route
+- create stops inside run
+- add students from stop context
+
+Key reality from the current repo:
+- templates remain the main UI
+- React frontend exists as a secondary scaffold
+- StudentRunAssignment remains required internally
+- workflow improvements should be additive and backward compatible

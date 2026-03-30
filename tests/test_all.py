@@ -181,7 +181,7 @@ def test_driver_run_workspace_shows_route_run_stop_student_hierarchy(client):
     assert "Delete" not in body
     assert "Start Run" in body
     assert "End Active Run" not in body
-    assert "Morning" in body
+    assert "MORNING" in body
     assert "Workspace Stop" in body
     assert "Workspace Student" in body
 
@@ -432,7 +432,7 @@ def test_create_run_accepts_custom_run_type_string(client):
 
     run = client.post("/runs/", json={"route_id": route_id, "run_type": "School A First Trip"})
     assert run.status_code in (200, 201)
-    assert run.json()["run_type"] == "School A First Trip"
+    assert run.json()["run_type"] == "SCHOOL A FIRST TRIP"
 
 
 def test_start_run_starts_existing_planned_run_by_id(client):
@@ -462,7 +462,7 @@ def test_start_run_starts_existing_planned_run_by_id(client):
 
     assert started_run.status_code in (200, 201)
     assert started_run.json()["id"] == planned_run_id
-    assert started_run.json()["run_type"] == "Morning"
+    assert started_run.json()["run_type"] == "MORNING"
     assert started_run.json()["driver_id"] == driver.json()["id"]
     assert started_run.json()["start_time"] is not None
 
@@ -497,7 +497,7 @@ def test_update_planned_run_succeeds(client):
 
     assert update.status_code == 200
     assert update.json()["id"] == run_id
-    assert update.json()["run_type"] == "Corrected Label"
+    assert update.json()["run_type"] == "CORRECTED LABEL"
     assert update.json()["start_time"] is None
 
 
@@ -3038,7 +3038,7 @@ def _build_school_attendance_fixture(client):
         json={
             "driver_id": driver_id,                                      # Use second driver to avoid active-run conflict
             "route_id": route_id,
-            "run_type": "AM",
+            "run_type": "PM",
         },
     )
     assert run_2.status_code in (200, 201)
