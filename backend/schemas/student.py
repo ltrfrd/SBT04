@@ -28,17 +28,25 @@ class StudentCreate(StudentBase):
 
     pass
 
-
 # -----------------------------------------------------------
 # - Student update schemas
-# - Keep generic and stop-context update payloads explicit
+# - Keep generic updates limited to profile fields only
 # -----------------------------------------------------------
 class StudentUpdate(BaseModel):
     name: Optional[str] = None
     grade: Optional[str] = None
     school_id: Optional[int] = None
-    route_id: Optional[int] = None
-    stop_id: Optional[int] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+# -----------------------------------------------------------
+# - Student assignment update schema
+# - Keep route/stop movement separate from generic profile edits
+# -----------------------------------------------------------
+class StudentAssignmentUpdate(BaseModel):
+    route_id: int
+    stop_id: int
 
     model_config = ConfigDict(extra="forbid")
 

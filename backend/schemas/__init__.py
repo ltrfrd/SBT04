@@ -49,6 +49,7 @@ from .stop import RunStopCreate, RunStopUpdate, StopCreate, StopOut  # Stop crea
 # Student schemas
 # -------------------------------------------------------------------------
 from .student import (
+    StudentAssignmentUpdate,
     StudentCreate,
     StudentOut,
     StudentUpdate,
@@ -112,6 +113,7 @@ __all__ = [
     "SchoolOut",
 
     "StudentCreate",
+    "StudentAssignmentUpdate",
     "StudentOut",
     "StudentUpdate",
     "StopStudentCreate",

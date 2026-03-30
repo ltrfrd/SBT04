@@ -16,6 +16,7 @@ import pytest                                                      # Pytest fram
 from datetime import datetime, timezone                            # Time utilities
 from sqlalchemy.orm import Session, sessionmaker                   # DB session tools
 from backend.models.associations import StudentRunAssignment       # Runtime assignment model
+from backend.models import run as run_model                        # Direct run verification model
 from backend.models.student import Student                         # Direct student verification model
 from database import engine                                        # DB engine
 import uuid
@@ -3263,82 +3264,6 @@ def test_generic_stop_update_endpoint_remains_compatible(client):
 
 
 # -----------------------------------------------------------
-# - Generic student update compatibility
-# - Preserve legacy /students/{student_id} updates alongside context-first flow
-# -----------------------------------------------------------
-def test_generic_student_update_endpoint_remains_compatible(client):
-    school = client.post(
-        "/schools/",
-        json={
-            "name": "Compatibility Student School",
-            "address": "102 Compatibility Way",
-        },
-    )
-    assert school.status_code in (200, 201)
-
-    driver = client.post(
-        "/drivers/",
-        json={
-            "name": "Compatibility Student Driver",
-            "email": "compat.student.driver@test.com",
-            "phone": "10102",
-        },
-    )
-    assert driver.status_code in (200, 201)
-
-    route = _create_route_with_assignment_flow(
-        client,
-        "COMPAT-STUDENT-ROUTE",
-        "BUS-COMPAT-STUDENT",
-        driver_id=driver.json()["id"],
-        school_ids=[school.json()["id"]],
-    )
-
-    run = client.post("/runs/", json={"route_id": route["id"], "run_type": "AM"})
-    assert run.status_code in (200, 201)
-    run_id = run.json()["id"]
-
-    stop = client.post(
-        "/stops/",
-        json={
-            "run_id": run_id,
-            "sequence": 1,
-            "type": "pickup",
-            "name": "Compatibility Student Stop",
-        },
-    )
-    assert stop.status_code in (200, 201)
-
-    student = client.post(
-        "/students/",
-        json={
-            "name": "Compatibility Student",
-            "grade": "4",
-            "school_id": school.json()["id"],
-            "route_id": route["id"],
-            "stop_id": stop.json()["id"],
-        },
-    )
-    assert student.status_code in (200, 201)
-
-    updated = client.put(
-        f"/students/{student.json()['id']}",
-        json={
-            "name": "Compatibility Student Updated",
-            "grade": "5",
-            "school_id": school.json()["id"],
-            "route_id": route["id"],
-            "stop_id": stop.json()["id"],
-        },
-    )
-    assert updated.status_code == 200
-    assert updated.json()["name"] == "Compatibility Student Updated"
-    assert updated.json()["grade"] == "5"
-    assert updated.json()["route_id"] == route["id"]
-    assert updated.json()["stop_id"] == stop.json()["id"]
-
-
-# -----------------------------------------------------------
 # - Context student drift repair
 # - Repair same-run stop drift while preserving invalid-context guards
 # -----------------------------------------------------------
@@ -3442,4 +3367,123 @@ def test_context_student_update_repairs_same_run_assignment_drift(client, db_eng
         assert stored_student.stop_id == stop_a.json()["id"]
         assert stored_student.route_id == route["id"]
         assert stored_assignment.stop_id == stop_a.json()["id"]
+
+
+# -----------------------------------------------------------
+# - Dedicated student assignment movement
+# - Keep broader route/stop reassignment separate from in-run context repair
+# -----------------------------------------------------------
+def test_student_assignment_update_endpoint_moves_planning_state_safely(client, db_engine):
+    school = client.post(
+        "/schools/",
+        json={
+            "name": "Dedicated Assignment School",
+            "address": "104 Dedicated Way",
+        },
+    )
+    assert school.status_code in (200, 201)
+
+    driver = client.post(
+        "/drivers/",
+        json={
+            "name": "Dedicated Assignment Driver",
+            "email": "dedicated.assignment.driver@test.com",
+            "phone": "10104",
+        },
+    )
+    assert driver.status_code in (200, 201)
+
+    source_route = _create_route_with_assignment_flow(
+        client,
+        "DEDICATED-SRC",
+        "BUS-DEDICATED-SRC",
+        driver_id=driver.json()["id"],
+        school_ids=[school.json()["id"]],
+    )
+    target_route = _create_route_with_assignment_flow(
+        client,
+        "DEDICATED-TGT",
+        "BUS-DEDICATED-TGT",
+        driver_id=driver.json()["id"],
+        school_ids=[school.json()["id"]],
+    )
+
+    source_run = client.post("/runs/", json={"route_id": source_route["id"], "run_type": "AM"})
+    target_run = client.post("/runs/", json={"route_id": target_route["id"], "run_type": "AM"})
+    completed_run = client.post("/runs/", json={"route_id": source_route["id"], "run_type": "PM"})
+    assert source_run.status_code in (200, 201)
+    assert target_run.status_code in (200, 201)
+    assert completed_run.status_code in (200, 201)
+
+    source_stop = client.post(
+        "/stops/",
+        json={"run_id": source_run.json()["id"], "sequence": 1, "type": "pickup", "name": "Dedicated Source Stop"},
+    )
+    target_stop = client.post(
+        "/stops/",
+        json={"run_id": target_run.json()["id"], "sequence": 1, "type": "pickup", "name": "Dedicated Target Stop"},
+    )
+    completed_stop = client.post(
+        "/stops/",
+        json={"run_id": completed_run.json()["id"], "sequence": 1, "type": "pickup", "name": "Completed Source Stop"},
+    )
+    assert source_stop.status_code in (200, 201)
+    assert target_stop.status_code in (200, 201)
+    assert completed_stop.status_code in (200, 201)
+
+    student = client.post(
+        "/students/",
+        json={
+            "name": "Dedicated Assignment Student",
+            "grade": "4",
+            "school_id": school.json()["id"],
+            "route_id": source_route["id"],
+            "stop_id": source_stop.json()["id"],
+        },
+    )
+    assert student.status_code in (200, 201)
+    student_id = student.json()["id"]
+
+    current_assignment = client.post(
+        "/student-run-assignments/",
+        json={"student_id": student_id, "run_id": source_run.json()["id"], "stop_id": source_stop.json()["id"]},
+    )
+    completed_assignment = client.post(
+        "/student-run-assignments/",
+        json={"student_id": student_id, "run_id": completed_run.json()["id"], "stop_id": completed_stop.json()["id"]},
+    )
+    assert current_assignment.status_code == 201
+    assert completed_assignment.status_code == 201
+
+    with Session(db_engine) as db:
+        completed_run_row = db.get(run_model.Run, completed_run.json()["id"])
+        assert completed_run_row is not None
+        completed_run_row.end_time = datetime.now(timezone.utc)
+        completed_run_row.is_completed = True                    # Preserve completed run history during reassignment
+        db.commit()
+
+    moved = client.put(
+        f"/students/{student_id}/assignment",
+        json={"route_id": target_route["id"], "stop_id": target_stop.json()["id"]},
+    )
+    assert moved.status_code == 200
+    assert moved.json()["route_id"] == target_route["id"]
+    assert moved.json()["stop_id"] == target_stop.json()["id"]
+
+    with Session(db_engine) as db:
+        stored_student = db.get(Student, student_id)
+        assert stored_student is not None
+        assert stored_student.route_id == target_route["id"]
+        assert stored_student.stop_id == target_stop.json()["id"]
+
+        assignments = (
+            db.query(StudentRunAssignment)
+            .filter(StudentRunAssignment.student_id == student_id)
+            .all()
+        )
+        assignments_by_run = {assignment.run_id: assignment for assignment in assignments}
+
+        assert source_run.json()["id"] not in assignments_by_run
+        assert assignments_by_run[target_run.json()["id"]].stop_id == target_stop.json()["id"]
+        assert assignments_by_run[completed_run.json()["id"]].stop_id == completed_stop.json()["id"]
      
