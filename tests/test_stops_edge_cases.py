@@ -136,6 +136,76 @@ def test_stop_update_normalizes_flexible_type_values(client):
     assert updated.json()["type"] == "DROPOFF"
 
 
+def test_run_context_stop_update_works_without_run_id_in_body(client):
+    run_id = _setup_run(client)
+
+    created = client.post(
+        f"/runs/{run_id}/stops",
+        json={
+            "type": "pickup",
+            "name": "Original Context Stop",
+            "address": "100 Old St",
+            "planned_time": "07:10:00",
+            "latitude": 1,
+            "longitude": 1,
+        },
+    )
+    assert created.status_code in (200, 201)
+    stop_id = created.json()["id"]
+
+    updated = client.put(
+        f"/runs/{run_id}/stops/{stop_id}",
+        json={
+            "sequence": 1,
+            "type": "drop-off",
+            "name": "Updated Context Stop",
+            "address": "200 New St",
+            "planned_time": "07:25:00",
+            "latitude": 2,
+            "longitude": 2,
+        },
+    )
+
+    assert updated.status_code == 200
+    body = updated.json()
+    assert body["run_id"] == run_id
+    assert body["type"] == "DROPOFF"
+    assert body["name"] == "Updated Context Stop"
+    assert body["address"] == "200 New St"
+    assert body["planned_time"] == "07:25:00"
+    assert body["latitude"] == 2
+    assert body["longitude"] == 2
+
+
+def test_run_context_stop_update_rejects_wrong_run_stop_pairing(client):
+    run_a_id = _setup_run(client)
+    run_a = client.get(f"/runs/{run_a_id}")
+    assert run_a.status_code == 200
+    route_id = run_a.json()["route"]["route_id"]
+
+    created_run = client.post(
+        "/runs/",
+        json={"route_id": route_id, "run_type": "PM"},
+    )
+    assert created_run.status_code in (200, 201)
+    run_b_id = created_run.json()["id"]
+
+    created = client.post(
+        f"/runs/{run_a_id}/stops",
+        json={"type": "pickup", "name": "Run A Stop"},
+    )
+    assert created.status_code in (200, 201)
+    stop_id = created.json()["id"]
+
+    response = client.put(
+        f"/runs/{run_b_id}/stops/{stop_id}",
+        json={"name": "Wrong Pairing"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Stop does not belong to run"
+
+
 def test_stop_rejects_invalid_type_value(client):
     run_id = _setup_run(client)
 
@@ -163,3 +233,35 @@ def test_school_stop_requires_school_id(client):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "school_id is required for school stops"
+
+
+def test_run_context_school_stop_update_requires_school_id_and_sets_school_name(client):
+    run_id = _setup_run(client)
+
+    first_school = client.post("/schools/", json={"name": "First School", "address": "1 School Way"})
+    second_school = client.post("/schools/", json={"name": "Second School", "address": "2 School Way"})
+    assert first_school.status_code in (200, 201)
+    assert second_school.status_code in (200, 201)
+
+    created = client.post(
+        f"/runs/{run_id}/stops",
+        json={"type": "pickup", "name": "Neighborhood Stop"},
+    )
+    assert created.status_code in (200, 201)
+    stop_id = created.json()["id"]
+
+    missing_school = client.put(
+        f"/runs/{run_id}/stops/{stop_id}",
+        json={"type": "SCHOOL_ARRIVE"},
+    )
+    assert missing_school.status_code == 400
+    assert missing_school.json()["detail"] == "school_id is required for school stops"
+
+    updated = client.put(
+        f"/runs/{run_id}/stops/{stop_id}",
+        json={"type": "school_depart", "school_id": second_school.json()["id"]},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["type"] == "SCHOOL_DEPART"
+    assert updated.json()["school_id"] == second_school.json()["id"]
+    assert updated.json()["name"] == "Second School"

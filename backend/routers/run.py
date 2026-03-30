@@ -27,7 +27,7 @@ from backend.models.run_event import RunEvent                  # Run timeline ev
 from backend.models import student as student_model  # Student model for replay names
 from backend.schemas.run import RunReplayOut, RunReplayEventOut, RunReplaySummaryOut
 from backend.schemas.run import RunTimelineOut                 # Timeline response schema
-from backend.schemas.stop import RunStopCreate, StopOut
+from backend.schemas.stop import RunStopCreate, RunStopUpdate, StopOut
 from backend.schemas.run import (  # Running board response schemas
     RunningBoardResponse,
     RunningBoardStop,
@@ -118,6 +118,36 @@ def _get_run_stop_or_404(run_id: int, stop_id: int, db: Session) -> tuple[run_mo
     return run, stop
 
 
+def _get_run_stop_student_context_or_404(
+    run_id: int,
+    stop_id: int,
+    student_id: int,
+    db: Session,
+) -> tuple[run_model.Run, stop_model.Stop, student_model.Student, StudentRunAssignment]:
+    run, stop = _get_run_stop_or_404(run_id, stop_id, db)        # Reuse existing run-stop validation
+
+    student = db.get(student_model.Student, student_id)          # Validate student exists
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    if student.route_id != run.route_id:
+        raise HTTPException(status_code=400, detail="Student does not belong to run route")
+
+    assignment = (
+        db.query(StudentRunAssignment)
+        .filter(StudentRunAssignment.run_id == run_id)
+        .filter(StudentRunAssignment.student_id == student_id)
+        .first()
+    )                                                            # Validate the internal runtime assignment exists
+    if not assignment:
+        raise HTTPException(status_code=400, detail="Student is not assigned to run")
+
+    if assignment.stop_id != stop_id:
+        raise HTTPException(status_code=400, detail="Student is not assigned to stop")
+
+    return run, stop, student, assignment
+
+
 def _create_stop_context_student(
     *,
     run: run_model.Run,
@@ -163,6 +193,71 @@ def _create_stop_context_student(
 
     db.refresh(student)
     return student
+
+
+# -----------------------------------------------------------
+# - Running board helpers
+# - Keep running board assembly stable and source-of-truth aligned
+# -----------------------------------------------------------
+def _group_running_board_students(
+    assignments: list[StudentRunAssignment],
+) -> dict[int, list[RunningBoardStudent]]:
+    assignments_by_stop: dict[int, list[RunningBoardStudent]] = {}  # stop_id -> ordered student rows
+
+    for assignment in assignments:
+        if assignment.stop_id is None or not assignment.student:
+            continue
+
+        assignments_by_stop.setdefault(
+            assignment.stop_id,
+            [],
+        ).append(
+            RunningBoardStudent(
+                student_id=assignment.student.id,              # Stable student identifier
+                student_name=assignment.student.name,          # Driver-facing student display
+            )
+        )
+
+    return assignments_by_stop
+
+
+def _build_running_board_stops(
+    stops: list[stop_model.Stop],
+    assignments_by_stop: dict[int, list[RunningBoardStudent]],
+) -> list[RunningBoardStop]:
+    running_stops: list[RunningBoardStop] = []                 # Final ordered stop rows
+    cumulative_load = 0                                        # Running onboard total
+
+    for stop in stops:
+        stop_students = assignments_by_stop.get(stop.id, [])   # Students assigned to this stop
+        student_count = len(stop_students)                     # Boardings sourced from runtime assignments
+        load_change = student_count                            # Existing running board uses boarding count per stop
+        cumulative_load += load_change                         # Preserve current cumulative behavior
+
+        is_school_stop = stop.type in {"SCHOOL_ARRIVE", "SCHOOL_DEPART"}
+        if is_school_stop and stop.school:
+            display_name = stop.school.name                    # School stop rows display school name when linked
+        else:
+            display_name = stop.name or f"STOP {stop.sequence}"  # Fallback remains operator-friendly
+
+        running_stops.append(
+            RunningBoardStop(
+                stop_id=stop.id,
+                sequence=stop.sequence,
+                stop_type=stop.type,
+                is_school_stop=is_school_stop,
+                display_name=display_name,
+                planned_time=str(stop.planned_time) if stop.planned_time else None,
+                lat=stop.latitude,
+                lng=stop.longitude,
+                student_count_at_stop=student_count,
+                load_change=load_change,
+                cumulative_load=cumulative_load,
+                students=stop_students,
+            )
+        )
+
+    return running_stops
 
 
 # -----------------------------------------------------------
@@ -544,6 +639,7 @@ def start_run(
                         sequence=stop.sequence,  # Keep stop order
                         type=stop.type,  # Keep stop type
                         run_id=target_run.id,  # Attach copied stop to the started run
+                        school_id=stop.school_id,  # Preserve school-linked stop context
                         name=stop.name,  # Keep stop name
                         address=stop.address,  # Keep stop address
                         planned_time=stop.planned_time,  # Keep planned time
@@ -848,6 +944,33 @@ def create_stop_inside_run(
 
 
 # -----------------------------------------------------------
+# Run-context stop update
+# Update a stop inside the selected run context
+# -----------------------------------------------------------
+@router.put(
+    "/{run_id}/stops/{stop_id}",
+    response_model=StopOut,
+    summary="Update stop inside run",
+    description="Update a stop inside the selected run context without sending run_id again. The path run_id is authoritative and cross-run movement is not allowed.",
+    response_description="Updated stop",
+)
+def update_stop_inside_run(
+    run_id: int,
+    stop_id: int,
+    payload: RunStopUpdate,
+    db: Session = Depends(get_db),
+):
+    from backend.routers import stop as stop_router  # Local import avoids circular import at module load time
+
+    return stop_router.update_run_stop(
+        run_id=run_id,                                          # Parent run context from path
+        stop_id=stop_id,                                        # Stop selected within that run
+        payload=payload,                                        # Context payload without run_id
+        db=db,                                                  # Shared DB session
+    )
+
+
+# -----------------------------------------------------------
 # - Add one student from stop context
 # - Create the student and internal runtime assignment together
 # -----------------------------------------------------------
@@ -882,6 +1005,46 @@ def create_run_stop_student(
             detail="Student is already assigned for this run",
         )
         raise HTTPException(status_code=400, detail="Integrity error")
+
+
+# -----------------------------------------------------------
+# - Update one student from stop context
+# - Keep student and assignment stop linkage aligned
+# -----------------------------------------------------------
+@router.put(
+    "/{run_id}/stops/{stop_id}/students/{student_id}",
+    response_model=schemas.StudentOut,
+    summary="Update student inside run stop",
+    description="Update a student from run-stop context without repeating run_id, stop_id, or student_id in the body. The path context is authoritative.",
+    response_description="Updated student",
+)
+def update_run_stop_student(
+    run_id: int,
+    stop_id: int,
+    student_id: int,
+    payload: schemas.StopStudentUpdate,
+    db: Session = Depends(get_db),
+):
+    from backend.routers import student as student_router  # Local import avoids circular import at module load time
+
+    run, stop, student, assignment = _get_run_stop_student_context_or_404(
+        run_id=run_id,
+        stop_id=stop_id,
+        student_id=student_id,
+        db=db,
+    )
+
+    student = student_router._update_student_record(
+        student=student,                                         # Existing routed student
+        payload=payload,                                         # Context-safe update payload
+        db=db,                                                   # Shared DB session
+        authoritative_route_id=run.route_id,                     # Keep student on the run route
+        authoritative_stop=stop,                                 # Keep planning stop aligned with path context
+        assignment=assignment,                                   # Keep internal runtime assignment aligned too
+    )
+    db.commit()
+    db.refresh(student)
+    return student
 
 
 # -----------------------------------------------------------
@@ -2027,6 +2190,7 @@ def get_running_board(run_id: int, db: Session = Depends(get_db)):
     # -------------------------------------------------------------------------
     stops = (
         db.query(stop_model.Stop)  # Query Stop table
+        .options(joinedload(stop_model.Stop.school))  # Load school names for school-stop display rows
         .filter(stop_model.Stop.run_id == run_id)  # Only stops belonging to this run
         .order_by(stop_model.Stop.sequence.asc())  # Ensure correct stop order
         .all()
@@ -2044,97 +2208,8 @@ def get_running_board(run_id: int, db: Session = Depends(get_db)):
     # -------------------------------------------------------------------------
     # Group assignments by stop
     # -------------------------------------------------------------------------
-    assignments_by_stop = {}  # Dictionary {stop_id: [students]}
-
-    for assignment in assignments:  # Loop through assignments
-
-        stop_id = assignment.stop_id  # Stop where student boards
-
-        if stop_id is None:  # Skip invalid assignments
-            continue
-
-        if stop_id not in assignments_by_stop:  # Create list for stop
-            assignments_by_stop[stop_id] = []
-
-        student = assignment.student  # Get student object
-
-        if student:  # If student exists
-            assignments_by_stop[stop_id].append(
-                RunningBoardStudent(
-                    student_id=student.id,  # Student ID
-                    student_name=student.name,  # Student display name
-                )
-            )
-
-    # -------------------------------------------------------------------------
-    # Build running board rows
-    # - Add display info and stop type awareness
-    # -----------------------------------------------------------
-    running_stops = []                                             # Final stop list
-    cumulative_load = 0                                            # Running onboard count
-
-    for stop in stops:                                             # Iterate through ordered stops
-
-        stop_students = assignments_by_stop.get(stop.id, [])       # Students for stop
-        student_count = len(stop_students)                         # Riders boarding here
-
-        load_change = student_count                                # Boardings at this stop
-        cumulative_load += load_change                             # Update onboard count
-
-        # -------------------------------------------------------
-        # Determine display name (NEW)
-        # -------------------------------------------------------
-        if stop.type in ["SCHOOL_ARRIVE", "SCHOOL_DEPART"] and stop.school:
-            display_name = stop.school.name                        # School name
-            is_school_stop = True                                  # Flag
-        else:
-            display_name = stop.name or f"STOP {stop.sequence}"    # Default STOP N
-            is_school_stop = False                                 # Flag
-
-        # -----------------------------------------------------------
-    # - Build running board rows
-    # - Add display info for each stop
-    # -----------------------------------------------------------
-    running_stops = []                                             # Final stop list
-    cumulative_load = 0                                            # Running onboard count
-
-    for stop in stops:                                             # Iterate through ordered stops
-
-        stop_students = assignments_by_stop.get(stop.id, [])       # Students for stop
-        student_count = len(stop_students)                         # Riders boarding here
-
-        load_change = student_count                                # Boardings at this stop
-        cumulative_load += load_change                             # Update onboard count
-
-        # -------------------------------------------------------
-        # Resolve display info
-        # -------------------------------------------------------
-        if stop.type in ["SCHOOL_ARRIVE", "SCHOOL_DEPART"] and stop.school:
-            display_name = stop.school.name                        # School stop display
-            is_school_stop = True                                  # School-stop flag
-        else:
-            display_name = stop.name or f"STOP {stop.sequence}"    # Default stop name
-            is_school_stop = False                                 # Regular stop flag
-
-        # -------------------------------------------------------
-        # Append running board row
-        # -------------------------------------------------------
-        running_stops.append(
-            RunningBoardStop(
-                stop_id=stop.id,                                   # Stop ID
-                sequence=stop.sequence,                            # Stop order
-                stop_type=stop.type,                               # Stop type
-                is_school_stop=is_school_stop,                     # School-stop marker
-                display_name=display_name,                         # UI display name
-                planned_time=str(stop.planned_time) if stop.planned_time else None,  # Time
-                lat=stop.latitude,                                 # Latitude
-                lng=stop.longitude,                                # Longitude
-                student_count_at_stop=student_count,               # Riders here
-                load_change=load_change,                           # Boardings
-                cumulative_load=cumulative_load,                   # Load after stop
-                students=stop_students,                            # Student list
-            )
-        )
+    assignments_by_stop = _group_running_board_students(assignments)  # Keep runtime assignments authoritative
+    running_stops = _build_running_board_stops(stops, assignments_by_stop)  # Preserve existing board contract
 
     # -------------------------------------------------------------------------
     # Return full running board

@@ -79,6 +79,22 @@ def test_running_board_basic(client):  # Test the running board endpoint
         "longitude": -113.2
     }).json()
 
+    stop3 = client.post("/stops/", json={  # School stop
+        "run_id": run["id"],
+        "type": "school_arrive",
+        "sequence": 3,
+        "school_id": school["id"],
+        "planned_time": "07:35:00",
+    }).json()
+
+    stop4 = client.post("/stops/", json={  # Unnamed regular stop for fallback display
+        "run_id": run["id"],
+        "type": "pickup",
+        "sequence": 4,
+        "latitude": 53.4,
+        "longitude": -113.4,
+    }).json()
+
     # -------------------------------------------------------------------------
     # Create students
     # -------------------------------------------------------------------------
@@ -125,7 +141,7 @@ def test_running_board_basic(client):  # Test the running board endpoint
     # -------------------------------------------------------------------------
     # Verify overall structure
     # -------------------------------------------------------------------------
-    assert data["total_stops"] == 2  # Should have two stops
+    assert data["total_stops"] == 4  # Should have four stops
     assert data["total_assigned_students"] == 2  # Two students assigned
 
     # -------------------------------------------------------------------------
@@ -133,3 +149,17 @@ def test_running_board_basic(client):  # Test the running board endpoint
     # -------------------------------------------------------------------------
     assert data["stops"][0]["cumulative_load"] == 1  # First stop boards 1 student
     assert data["stops"][1]["cumulative_load"] == 2  # Second stop increases load
+    assert data["stops"][2]["cumulative_load"] == 2  # School stop with no riders preserves load
+    assert data["stops"][3]["cumulative_load"] == 2  # Empty regular stop preserves load
+
+    # -------------------------------------------------------------------------
+    # Verify display naming rules
+    # -------------------------------------------------------------------------
+    assert data["stops"][0]["display_name"] == "Stop 1"
+    assert data["stops"][0]["is_school_stop"] is False
+    assert data["stops"][2]["stop_id"] == stop3["id"]
+    assert data["stops"][2]["display_name"] == "Test School"
+    assert data["stops"][2]["is_school_stop"] is True
+    assert data["stops"][3]["stop_id"] == stop4["id"]
+    assert data["stops"][3]["display_name"] == "STOP 4"
+    assert data["stops"][3]["is_school_stop"] is False

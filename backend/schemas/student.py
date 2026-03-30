@@ -30,6 +30,20 @@ class StudentCreate(StudentBase):
 
 
 # -----------------------------------------------------------
+# - Student update schemas
+# - Keep generic and stop-context update payloads explicit
+# -----------------------------------------------------------
+class StudentUpdate(BaseModel):
+    name: Optional[str] = None
+    grade: Optional[str] = None
+    school_id: Optional[int] = None
+    route_id: Optional[int] = None
+    stop_id: Optional[int] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+# -----------------------------------------------------------
 # Schema for returning student data (GET response)
 # -----------------------------------------------------------
 class StudentOut(StudentBase):
@@ -49,6 +63,14 @@ class StopStudentCreate(BaseModel):
     name: str
     grade: Optional[str] = None
     school_id: int
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class StopStudentUpdate(BaseModel):
+    name: Optional[str] = None
+    grade: Optional[str] = None
+    school_id: Optional[int] = None
 
     model_config = ConfigDict(extra="forbid")
 

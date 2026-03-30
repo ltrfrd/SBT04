@@ -32,6 +32,16 @@ def test_start_run_copies_stops_from_latest_route_run(client):
     assert driver_response.status_code in (200, 201)
     driver_id = driver_response.json()["id"]  # Created driver ID
 
+    school_response = client.post(
+        "/schools/",
+        json={
+            "name": "Copy School",
+            "address": "10 Copy Way",
+        },
+    )
+    assert school_response.status_code in (200, 201)
+    school_id = school_response.json()["id"]  # Created school ID
+
     # -------------------------------------------------------------------------
     # Create route
     # -------------------------------------------------------------------------
@@ -40,6 +50,7 @@ def test_start_run_copies_stops_from_latest_route_run(client):
         json={
             "route_number": "12",
             "unit_number": "BUS-12",
+            "school_ids": [school_id],
         },
     )
     assert route_response.status_code in (200, 201)
@@ -85,8 +96,8 @@ def test_start_run_copies_stops_from_latest_route_run(client):
         json={
             "run_id": source_run_id,
             "sequence": 2,
-            "type": "pickup",
-            "name": "Stop 2",
+            "type": "school_arrive",
+            "school_id": school_id,
             "address": "456 Second Avenue",
             "planned_time": "07:20:00",
             "latitude": 53.5561,
@@ -136,7 +147,8 @@ def test_start_run_copies_stops_from_latest_route_run(client):
     # -------------------------------------------------------------------------
     assert new_stops[1]["run_id"] == new_run_id
     assert new_stops[1]["sequence"] == 2
-    assert new_stops[1]["name"] == "Stop 2"
+    assert new_stops[1]["name"] == "Copy School"
+    assert new_stops[1]["school_id"] == school_id
     assert new_stops[1]["address"] == "456 Second Avenue"
     assert new_stops[1]["planned_time"] == "07:20:00"
     assert new_stops[1]["latitude"] == 53.5561

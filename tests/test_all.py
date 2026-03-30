@@ -3213,4 +3213,126 @@ def test_school_confirmation_persists_into_school_report(client):
     assert run_1["confirmation"]["is_confirmed"] is True           # Report shows confirmed state
     assert run_1["confirmation"]["confirmed_by"] == "frd"         # Report shows confirmer
     assert run_1["confirmation"]["confirmed_at"] is not None      # Report shows timestamp   
+
+
+# -----------------------------------------------------------
+# - Generic stop update compatibility
+# - Preserve legacy /stops/{stop_id} updates while the run-context flow is preferred
+# -----------------------------------------------------------
+def test_generic_stop_update_endpoint_remains_compatible(client):
+    driver = client.post(
+        "/drivers/",
+        json={
+            "name": "Compatibility Driver",
+            "email": "compatibility.driver@test.com",
+            "phone": "10101",
+        },
+    )
+    assert driver.status_code in (200, 201)
+
+    route = _create_route_with_assignment_flow(
+        client,
+        "COMPAT-ROUTE",
+        "BUS-COMPAT",
+        driver_id=driver.json()["id"],
+    )
+    run = client.post("/runs/", json={"route_id": route["id"], "run_type": "AM"})
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    first_stop = client.post("/stops/", json={"run_id": run_id, "sequence": 1, "type": "pickup", "name": "First"})
+    second_stop = client.post("/stops/", json={"run_id": run_id, "sequence": 2, "type": "pickup", "name": "Second"})
+    assert first_stop.status_code in (200, 201)
+    assert second_stop.status_code in (200, 201)
+
+    update = client.put(
+        f"/stops/{second_stop.json()['id']}",
+        json={"sequence": 1, "name": "Second Updated"},
+    )
+    assert update.status_code == 200
+    assert update.json()["sequence"] == 1
+    assert update.json()["name"] == "Second Updated"
+
+    stops = client.get(f"/runs/{run_id}/stops")
+    assert stops.status_code == 200
+    assert [(stop["name"], stop["sequence"]) for stop in stops.json()] == [
+        ("Second Updated", 1),
+        ("First", 2),
+    ]
+
+
+# -----------------------------------------------------------
+# - Generic student update compatibility
+# - Preserve legacy /students/{student_id} updates alongside context-first flow
+# -----------------------------------------------------------
+def test_generic_student_update_endpoint_remains_compatible(client):
+    school = client.post(
+        "/schools/",
+        json={
+            "name": "Compatibility Student School",
+            "address": "102 Compatibility Way",
+        },
+    )
+    assert school.status_code in (200, 201)
+
+    driver = client.post(
+        "/drivers/",
+        json={
+            "name": "Compatibility Student Driver",
+            "email": "compat.student.driver@test.com",
+            "phone": "10102",
+        },
+    )
+    assert driver.status_code in (200, 201)
+
+    route = _create_route_with_assignment_flow(
+        client,
+        "COMPAT-STUDENT-ROUTE",
+        "BUS-COMPAT-STUDENT",
+        driver_id=driver.json()["id"],
+        school_ids=[school.json()["id"]],
+    )
+
+    run = client.post("/runs/", json={"route_id": route["id"], "run_type": "AM"})
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    stop = client.post(
+        "/stops/",
+        json={
+            "run_id": run_id,
+            "sequence": 1,
+            "type": "pickup",
+            "name": "Compatibility Student Stop",
+        },
+    )
+    assert stop.status_code in (200, 201)
+
+    student = client.post(
+        "/students/",
+        json={
+            "name": "Compatibility Student",
+            "grade": "4",
+            "school_id": school.json()["id"],
+            "route_id": route["id"],
+            "stop_id": stop.json()["id"],
+        },
+    )
+    assert student.status_code in (200, 201)
+
+    updated = client.put(
+        f"/students/{student.json()['id']}",
+        json={
+            "name": "Compatibility Student Updated",
+            "grade": "5",
+            "school_id": school.json()["id"],
+            "route_id": route["id"],
+            "stop_id": stop.json()["id"],
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "Compatibility Student Updated"
+    assert updated.json()["grade"] == "5"
+    assert updated.json()["route_id"] == route["id"]
+    assert updated.json()["stop_id"] == stop.json()["id"]
      

@@ -361,6 +361,87 @@ def test_create_student_inside_run_stop_context_creates_assignment(client):
 
 
 # -----------------------------------------------------------
+# - Stop-context student update
+# - Update student fields while keeping planning stop alignment
+# -----------------------------------------------------------
+def test_update_student_inside_run_stop_context_updates_fields_and_resyncs_stop(client):
+    primary_school = client.post("/schools/", json={"name": "Primary Context School", "address": "72 Context Way"})
+    secondary_school = client.post("/schools/", json={"name": "Secondary Context School", "address": "73 Context Way"})
+    assert primary_school.status_code in (200, 201)
+    assert secondary_school.status_code in (200, 201)
+
+    driver = client.post("/drivers/", json={"name": "Context Update Driver", "email": "context.update@x.com", "phone": "5a"})
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]
+
+    route_id = _create_route_with_assignment(client, "CTX-UP-1", "BUS-CTX-UP-1", driver_id)
+    route_update = client.put(
+        f"/routes/{route_id}",
+        json={
+            "route_number": "CTX-UP-1",
+            "unit_number": "BUS-CTX-UP-1",
+            "school_ids": [primary_school.json()["id"], secondary_school.json()["id"]],
+        },
+    )
+    assert route_update.status_code == 200
+
+    run = client.post("/runs/", json={"route_id": route_id, "run_type": "Morning"})
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    stop_one = client.post(
+        "/stops/",
+        json={"run_id": run_id, "sequence": 1, "type": "pickup", "name": "Context Update Stop"},
+    )
+    stop_two = client.post(
+        "/stops/",
+        json={"run_id": run_id, "sequence": 2, "type": "pickup", "name": "Drift Stop"},
+    )
+    assert stop_one.status_code in (200, 201)
+    assert stop_two.status_code in (200, 201)
+
+    student = client.post(
+        f"/runs/{run_id}/stops/{stop_one.json()['id']}/students",
+        json={"name": "Context Update Student", "grade": "4", "school_id": primary_school.json()["id"]},
+    )
+    assert student.status_code == 201
+    student_id = student.json()["id"]
+
+    generic_drift = client.put(
+        f"/students/{student_id}",
+        json={"stop_id": stop_two.json()["id"]},
+    )
+    assert generic_drift.status_code == 200
+    assert generic_drift.json()["stop_id"] == stop_two.json()["id"]
+
+    updated = client.put(
+        f"/runs/{run_id}/stops/{stop_one.json()['id']}/students/{student_id}",
+        json={"name": "Context Updated Student", "grade": "5", "school_id": secondary_school.json()["id"]},
+    )
+    assert updated.status_code == 200
+
+    body = updated.json()
+    assert body["name"] == "Context Updated Student"
+    assert body["grade"] == "5"
+    assert body["school_id"] == secondary_school.json()["id"]
+    assert body["route_id"] == route_id
+    assert body["stop_id"] == stop_one.json()["id"]
+
+    assignments = client.get(f"/student-run-assignments/{run_id}")
+    assert assignments.status_code == 200
+    assert assignments.json() == [
+        {
+            "id": assignments.json()[0]["id"],
+            "student_id": student_id,
+            "run_id": run_id,
+            "stop_id": stop_one.json()["id"],
+            "actual_pickup_stop_id": None,
+            "actual_dropoff_stop_id": None,
+        }
+    ]
+
+
+# -----------------------------------------------------------
 # - Stop-context bulk student create
 # - Create many students and return per-row summary details
 # -----------------------------------------------------------
@@ -459,6 +540,103 @@ def test_create_student_inside_run_stop_context_rejects_stop_mismatch(client):
     )
     assert response.status_code == 400
     assert response.json()["detail"] == "Stop does not belong to run"
+
+
+def test_update_student_inside_run_stop_context_rejects_wrong_run_or_stop_pairing(client):
+    school = client.post("/schools/", json={"name": "Mismatch Update School", "address": "91 Mismatch Way"})
+    assert school.status_code in (200, 201)
+
+    driver = client.post("/drivers/", json={"name": "Mismatch Update Driver", "email": "mismatch.update@x.com", "phone": "7a"})
+    assert driver.status_code in (200, 201)
+
+    route_id = _create_route_with_assignment(client, "MM-UP-1", "BUS-MM-UP-1", driver.json()["id"])
+    route_update = client.put(
+        f"/routes/{route_id}",
+        json={"route_number": "MM-UP-1", "unit_number": "BUS-MM-UP-1", "school_ids": [school.json()["id"]]},
+    )
+    assert route_update.status_code == 200
+
+    run_one = client.post("/runs/", json={"route_id": route_id, "run_type": "Morning"})
+    run_two = client.post("/runs/", json={"route_id": route_id, "run_type": "Afternoon"})
+    assert run_one.status_code in (200, 201)
+    assert run_two.status_code in (200, 201)
+
+    stop_one = client.post("/stops/", json={"run_id": run_one.json()["id"], "sequence": 1, "type": "pickup", "name": "Stop One"})
+    stop_one_other = client.post("/stops/", json={"run_id": run_one.json()["id"], "sequence": 2, "type": "pickup", "name": "Stop One Other"})
+    stop_two = client.post("/stops/", json={"run_id": run_two.json()["id"], "sequence": 1, "type": "pickup", "name": "Stop Two"})
+    assert stop_one.status_code in (200, 201)
+    assert stop_one_other.status_code in (200, 201)
+    assert stop_two.status_code in (200, 201)
+
+    student = client.post(
+        f"/runs/{run_one.json()['id']}/stops/{stop_one.json()['id']}/students",
+        json={"name": "Mismatch Update Student", "grade": "6", "school_id": school.json()["id"]},
+    )
+    assert student.status_code == 201
+
+    wrong_run = client.put(
+        f"/runs/{run_two.json()['id']}/stops/{stop_one.json()['id']}/students/{student.json()['id']}",
+        json={"name": "Wrong Run"},
+    )
+    assert wrong_run.status_code == 400
+    assert wrong_run.json()["detail"] == "Stop does not belong to run"
+
+    wrong_stop = client.put(
+        f"/runs/{run_one.json()['id']}/stops/{stop_one_other.json()['id']}/students/{student.json()['id']}",
+        json={"name": "Wrong Stop"},
+    )
+    assert wrong_stop.status_code == 400
+    assert wrong_stop.json()["detail"] == "Student is not assigned to stop"
+
+
+def test_update_student_inside_run_stop_context_validates_route_school_membership(client):
+    assigned_school = client.post("/schools/", json={"name": "Assigned Update School", "address": "92 Assigned Way"})
+    also_assigned_school = client.post("/schools/", json={"name": "Also Assigned Update School", "address": "93 Assigned Way"})
+    unassigned_school = client.post("/schools/", json={"name": "Unassigned Update School", "address": "94 Other Way"})
+    assert assigned_school.status_code in (200, 201)
+    assert also_assigned_school.status_code in (200, 201)
+    assert unassigned_school.status_code in (200, 201)
+
+    driver = client.post("/drivers/", json={"name": "School Update Driver", "email": "school.update@x.com", "phone": "8"})
+    assert driver.status_code in (200, 201)
+
+    route_id = _create_route_with_assignment(client, "SCH-UP-1", "BUS-SCH-UP-1", driver.json()["id"])
+    route_update = client.put(
+        f"/routes/{route_id}",
+        json={
+            "route_number": "SCH-UP-1",
+            "unit_number": "BUS-SCH-UP-1",
+            "school_ids": [assigned_school.json()["id"], also_assigned_school.json()["id"]],
+        },
+    )
+    assert route_update.status_code == 200
+
+    run = client.post("/runs/", json={"route_id": route_id, "run_type": "AM"})
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    stop = client.post("/stops/", json={"run_id": run_id, "sequence": 1, "type": "pickup", "name": "School Update Stop"})
+    assert stop.status_code in (200, 201)
+
+    student = client.post(
+        f"/runs/{run_id}/stops/{stop.json()['id']}/students",
+        json={"name": "School Update Student", "school_id": assigned_school.json()["id"]},
+    )
+    assert student.status_code == 201
+
+    invalid_update = client.put(
+        f"/runs/{run_id}/stops/{stop.json()['id']}/students/{student.json()['id']}",
+        json={"school_id": unassigned_school.json()["id"]},
+    )
+    assert invalid_update.status_code == 400
+    assert invalid_update.json()["detail"] == "School is not assigned to the run route"
+
+    valid_update = client.put(
+        f"/runs/{run_id}/stops/{stop.json()['id']}/students/{student.json()['id']}",
+        json={"school_id": also_assigned_school.json()["id"]},
+    )
+    assert valid_update.status_code == 200
+    assert valid_update.json()["school_id"] == also_assigned_school.json()["id"]
 
 # -----------------------------------------------------------
 # - Reject duplicate route_number during route update
@@ -683,3 +861,21 @@ def test_stop_context_student_create_rejects_school_not_on_route(client):
     )
     assert response.status_code == 400
     assert response.json()["detail"] == "School is not assigned to the run route"
+
+
+def test_run_context_stop_update_endpoint_appears_in_openapi(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    path_item = response.json()["paths"]["/runs/{run_id}/stops/{stop_id}"]["put"]
+    assert path_item["summary"] == "Update stop inside run"
+    assert "without sending run_id again" in path_item["description"]
+
+
+def test_run_context_student_update_endpoint_appears_in_openapi(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    path_item = response.json()["paths"]["/runs/{run_id}/stops/{stop_id}/students/{student_id}"]["put"]
+    assert path_item["summary"] == "Update student inside run stop"
+    assert "without repeating run_id, stop_id, or student_id in the body" in path_item["description"]

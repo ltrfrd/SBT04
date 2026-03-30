@@ -77,6 +77,24 @@ class StopUpdate(BaseModel):
         return _normalize_stop_type(value)
 
 
+class RunStopUpdate(BaseModel):
+    sequence: int | None = None
+    type: StopType | None = None
+    name: str | None = None
+    school_id: int | None = None
+    address: str | None = None
+    planned_time: time | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def normalize_type(cls, value):
+        return _normalize_stop_type(value)
+
+
 class StopOut(BaseModel):
     id: int
     sequence: int

@@ -15,7 +15,7 @@ from backend.models import school as school_model
 from backend.models import stop as stop_model
 from backend.models import run as run_model
 from backend.models.stop import Stop, StopType
-from backend.schemas.stop import RunStopCreate, StopCreate, StopOut, StopUpdate, StopReorder
+from backend.schemas.stop import RunStopCreate, RunStopUpdate, StopCreate, StopOut, StopUpdate, StopReorder
 from backend.utils.db_errors import raise_conflict_if_unique
 
 # -----------------------------------------------------------
@@ -185,6 +185,106 @@ def _build_stop_payload(
         "latitude": payload.latitude if payload.latitude is not None else existing_stop.latitude if existing_stop else None,
         "longitude": payload.longitude if payload.longitude is not None else existing_stop.longitude if existing_stop else None,
     }
+
+
+# -----------------------------------------------------------
+# - Stop update helpers
+# - Preserve run sequence integrity across update flows
+# -----------------------------------------------------------
+def _move_stop_within_run(db: Session, stop: stop_model.Stop, requested_sequence: int) -> stop_model.Stop:
+    run_id = stop.run_id                                         # Preserve current run ownership
+    old_sequence = stop.sequence                                 # Preserve current position for block shifting
+
+    max_sequence = (
+        db.query(func.max(stop_model.Stop.sequence))
+        .filter(stop_model.Stop.run_id == run_id)
+        .scalar()
+    ) or 0
+
+    new_sequence = max(1, min(requested_sequence, max_sequence)) # Clamp within existing run bounds
+    if new_sequence == old_sequence:
+        return stop
+
+    stop.sequence = stop.sequence + SHIFT_OFFSET                 # Move row into safe range before shifting neighbors
+    db.flush()
+
+    if new_sequence < old_sequence:
+        shift_block_up(db, run_id, new_sequence, old_sequence - 1)
+    else:
+        shift_block_down(db, run_id, old_sequence + 1, new_sequence)
+
+    db.expire_all()
+    stop = db.get(stop_model.Stop, stop.id)
+    stop.sequence = new_sequence
+    db.flush()
+    return stop
+
+
+def _update_stop_record(
+    *,
+    stop: stop_model.Stop,
+    payload: StopUpdate | RunStopUpdate,
+    db: Session,
+    authoritative_run_id: int | None = None,
+) -> stop_model.Stop:
+    updates = payload.model_dump(exclude_none=True)              # Preserve existing null-ignore compatibility
+    current_run_id = stop.run_id                                 # Save current run for gap normalization if moved
+
+    if authoritative_run_id is not None and stop.run_id != authoritative_run_id:
+        raise HTTPException(status_code=400, detail="Stop does not belong to run")
+
+    target_run_id = authoritative_run_id
+    if target_run_id is None:
+        target_run_id = updates.get("run_id", stop.run_id)       # Generic compatibility path may still carry run_id
+
+    target_run = db.get(run_model.Run, target_run_id)
+    if not target_run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    requested_sequence = updates.get("sequence")
+    school_sensitive_update = any(
+        key in updates for key in {"type", "school_id", "name"}
+    )                                                            # Only rerun school-stop workflow when relevant
+
+    if school_sensitive_update or target_run_id != current_run_id:
+        rebuilt = _build_stop_payload(
+            run_id=target_run_id,                                # Path or compatibility authority
+            payload=payload,                                     # Partial update payload
+            db=db,                                               # Shared DB session
+            existing_stop=stop,                                  # Preserve current stop values as defaults
+        )
+        update_values = {
+            "run_id": rebuilt["run_id"],
+            "type": rebuilt["type"],
+            "name": rebuilt["name"],
+            "school_id": rebuilt["school_id"],
+            "address": rebuilt["address"],
+            "planned_time": rebuilt["planned_time"],
+            "latitude": rebuilt["latitude"],
+            "longitude": rebuilt["longitude"],
+        }
+    else:
+        update_values = {
+            key: updates[key]
+            for key in ("address", "planned_time", "latitude", "longitude")
+            if key in updates
+        }
+
+    if target_run_id != current_run_id:
+        new_sequence = _get_next_stop_sequence(db, target_run_id, requested_sequence)
+        stop.run_id = target_run_id                              # Move to target run only after reserving target slot
+        stop.sequence = new_sequence
+    elif requested_sequence is not None:
+        stop = _move_stop_within_run(db, stop, requested_sequence)
+
+    for key, value in update_values.items():
+        setattr(stop, key, value)
+
+    if target_run_id != current_run_id:
+        db.flush()
+        normalize_run_sequences(db, current_run_id)              # Close the old run gap after cross-run compatibility move
+
+    return stop
 
 # -----------------------------------------------------------
 # - Validate run sequences
@@ -387,24 +487,71 @@ def get_stops(run_id: int | None = None, db: Session = Depends(get_db)):
 def update_stop(
     stop_id: int, stop_in: StopUpdate, db: Session = Depends(get_db)
 ):
-    stop = db.get(stop_model.Stop, stop_id)
-    if not stop:
-        raise HTTPException(status_code=404, detail="Stop not found")
+    try:
+        stop = db.get(stop_model.Stop, stop_id)
+        if not stop:
+            raise HTTPException(status_code=404, detail="Stop not found")
 
-    updates = stop_in.model_dump(exclude_none=True)
-    if "type" in updates or "school_id" in updates or "name" in updates:
-        updates = _build_stop_payload(                          # Reapply school-stop naming rules on update
-            run_id=stop.run_id,                                # Existing run context
-            payload=stop_in,                                   # Partial update payload
+        stop = _update_stop_record(
+            stop=stop,                                         # Existing stop from generic path
+            payload=stop_in,                                   # Compatibility update payload
             db=db,                                             # Shared DB session
-            existing_stop=stop,                                # Update current stop in place
         )
-    for key, value in updates.items():
-        setattr(stop, key, value)
+        db.commit()
+        db.refresh(stop)
+        return stop
 
-    db.commit()
-    db.refresh(stop)
-    return stop
+    except IntegrityError as e:
+        db.rollback()
+        raise_conflict_if_unique(
+            db,
+            e,
+            constraint_name="uq_stops_run_sequence",
+            sqlite_columns=("run_id", "sequence"),
+            detail="Stop sequence conflict for this run",
+        )
+        raise HTTPException(status_code=400, detail="Integrity error")
+
+
+# -----------------------------------------------------------
+# Run-context stop update helper
+# Update a stop inside the selected run context
+# -----------------------------------------------------------
+def update_run_stop(
+    run_id: int,
+    stop_id: int,
+    payload: RunStopUpdate,
+    db: Session,
+):
+    try:
+        run = db.get(run_model.Run, run_id)                     # Path run is the authority in context mode
+        if not run:
+            raise HTTPException(status_code=404, detail="Run not found")
+
+        stop = db.get(stop_model.Stop, stop_id)
+        if not stop:
+            raise HTTPException(status_code=404, detail="Stop not found")
+
+        stop = _update_stop_record(
+            stop=stop,                                         # Existing stop within run context
+            payload=payload,                                   # Context payload without run_id
+            db=db,                                             # Shared DB session
+            authoritative_run_id=run_id,                       # Prevent cross-run movement in preferred flow
+        )
+        db.commit()
+        db.refresh(stop)
+        return stop
+
+    except IntegrityError as e:
+        db.rollback()
+        raise_conflict_if_unique(
+            db,
+            e,
+            constraint_name="uq_stops_run_sequence",
+            sqlite_columns=("run_id", "sequence"),
+            detail="Stop sequence conflict for this run",
+        )
+        raise HTTPException(status_code=400, detail="Integrity error")
 
 # -----------------------------------------------------------
 # - Delete stop

@@ -51,10 +51,12 @@ from .stop import RunStopCreate, StopCreate, StopOut  # Stop creation and respon
 from .student import (
     StudentCreate,
     StudentOut,
+    StudentUpdate,
     StopStudentBulkCreate,
     StopStudentBulkError,
     StopStudentBulkResult,
     StopStudentCreate,
+    StopStudentUpdate,
 )  # Student creation and stop-context workflow schemas
 
 
@@ -111,7 +113,9 @@ __all__ = [
 
     "StudentCreate",
     "StudentOut",
+    "StudentUpdate",
     "StopStudentCreate",
+    "StopStudentUpdate",
     "StopStudentBulkCreate",
     "StopStudentBulkError",
     "StopStudentBulkResult",

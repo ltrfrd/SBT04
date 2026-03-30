@@ -5,6 +5,7 @@
 # ===========================================================
 from fastapi import APIRouter, Depends, HTTPException, status  # FastAPI core imports
 from sqlalchemy.orm import Session  # For DB access
+from sqlalchemy.orm import selectinload  # Eager-load route schools for validation
 from typing import List  # For list responses
 
 from database import get_db  # DB dependency
@@ -24,6 +25,89 @@ router = APIRouter(
     prefix="/students",                                          # Base path
     tags=["Students"],                                           # Swagger section
 )
+
+
+# -----------------------------------------------------------
+# - Student workflow helpers
+# - Reuse validation and synchronization across update paths
+# -----------------------------------------------------------
+def _get_route_with_schools(route_id: int, db: Session) -> route_model.Route:
+    route = (
+        db.query(route_model.Route)
+        .options(selectinload(route_model.Route.schools))
+        .filter(route_model.Route.id == route_id)
+        .first()
+    )                                                           # Load route and assigned schools once
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
+    return route
+
+
+def _validate_route_school_membership(route: route_model.Route, school_id: int) -> None:
+    route_school_ids = {school.id for school in route.schools}   # Keep school validation aligned with stop-context create flow
+    if school_id not in route_school_ids:
+        raise HTTPException(status_code=400, detail="School is not assigned to the run route")
+
+
+def _update_student_record(
+    *,
+    student: student_model.Student,
+    payload: schemas.StudentUpdate | schemas.StopStudentUpdate,
+    db: Session,
+    authoritative_route_id: int | None = None,
+    authoritative_stop: stop_model.Stop | None = None,
+    assignment: assoc_model.StudentRunAssignment | None = None,
+):
+    updates = payload.model_dump(exclude_unset=True)             # Preserve partial-update compatibility
+
+    target_route_id = authoritative_route_id if authoritative_route_id is not None else updates.get("route_id", student.route_id)
+    target_stop_id = authoritative_stop.id if authoritative_stop is not None else updates.get("stop_id", student.stop_id)
+    target_school_id = updates.get("school_id", student.school_id)
+
+    route = None
+    if target_route_id is not None:
+        route = _get_route_with_schools(target_route_id, db)     # Needed for route-aware school validation
+
+    school = db.get(school_model.School, target_school_id)
+    if not school:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    if route is not None:
+        _validate_route_school_membership(route, target_school_id)
+
+    stop = None
+    if target_stop_id is not None:
+        stop = db.get(stop_model.Stop, target_stop_id)
+        if not stop:
+            raise HTTPException(status_code=404, detail="Stop not found")
+
+    if route is not None and stop is not None and stop.run and stop.run.route_id != route.id:
+        raise HTTPException(status_code=400, detail="Stop does not belong to route")
+
+    # -----------------------------------------------------------
+    # - Apply editable student fields
+    # - Keep context authority separate from generic compatibility
+    # -----------------------------------------------------------
+    for field_name in ("name", "grade", "school_id"):
+        if field_name in updates:
+            setattr(student, field_name, updates[field_name])
+
+    if authoritative_route_id is not None:
+        student.route_id = authoritative_route_id                # Context route is authoritative
+    elif "route_id" in updates:
+        student.route_id = updates["route_id"]
+
+    if authoritative_stop is not None:
+        student.stop_id = authoritative_stop.id                  # Context stop is authoritative
+    elif "stop_id" in updates:
+        student.stop_id = updates["stop_id"]
+
+    if assignment is not None and authoritative_stop is not None:
+        assignment.stop_id = authoritative_stop.id               # Keep StudentRunAssignment aligned with stop context
+
+    db.flush()
+    db.refresh(student)
+    return student
 
 
 # -----------------------------------------------------------
@@ -109,7 +193,7 @@ def get_student(student_id: int, db: Session = Depends(get_db)):
 )
 def update_student(
     student_id: int,                                             # Student identifier
-    student_in: schemas.StudentCreate,                           # Incoming update payload
+    student_in: schemas.StudentUpdate,                           # Incoming compatibility update payload
     db: Session = Depends(get_db),                               # DB session dependency
 ):
     """Update student profile fields. Runtime run assignment is managed elsewhere."""  # Internal docstring
@@ -117,9 +201,11 @@ def update_student(
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")  # Return 404 when missing
 
-    for key, value in student_in.model_dump().items():           # Apply updates field-by-field
-        setattr(student, key, value)                             # Set each updated attribute
-
+    student = _update_student_record(
+        student=student,                                         # Existing student from compatibility path
+        payload=student_in,                                      # Partial update payload
+        db=db,                                                   # Shared DB session
+    )
     db.commit()                                                  # Persist changes
     db.refresh(student)                                          # Reload updated record
     return student                                               # Return updated student
