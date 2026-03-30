@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import joinedload, selectinload  # Used for eager loading relationships
 from database import get_db
@@ -14,6 +15,7 @@ from backend import schemas
 from backend.models import run as run_model
 from backend.models import driver as driver_model
 from backend.models import route as route_model
+from backend.models import school as school_model
 from backend.models import stop as stop_model
 from backend.models.run import Run                            # Run model
 from backend.models.student import Student                      # Student model
@@ -33,6 +35,7 @@ from backend.schemas.run import (  # Running board response schemas
 )
 from backend.utils.student_bus_absence import apply_run_absence_filter
 from backend.utils.route_driver_assignment import resolve_route_driver_assignment
+from backend.utils.db_errors import raise_conflict_if_unique
 from backend.schemas.run import (
     PickupStudentRequest,
     PickupStudentResponse,
@@ -94,6 +97,59 @@ def _build_run_occupancy_counts(assignments: list[StudentRunAssignment]) -> dict
 
 def _is_run_active(run: Run) -> bool:
     return run.start_time is not None and run.end_time is None  # Planned runs are not active until they start
+
+
+# -----------------------------------------------------------
+# - Stop-context student workflow helpers
+# - Keep student-run-assignment internal to route/run/stop UX
+# -----------------------------------------------------------
+def _get_run_stop_or_404(run_id: int, stop_id: int, db: Session) -> tuple[run_model.Run, stop_model.Stop]:
+    run = db.get(run_model.Run, run_id)  # Validate run exists once for stop-context workflows
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    stop = db.get(stop_model.Stop, stop_id)  # Validate stop exists once for stop-context workflows
+    if not stop:
+        raise HTTPException(status_code=404, detail="Stop not found")
+
+    if stop.run_id != run_id:
+        raise HTTPException(status_code=400, detail="Stop does not belong to run")
+
+    return run, stop
+
+
+def _create_stop_context_student(
+    *,
+    run: run_model.Run,
+    stop: stop_model.Stop,
+    payload: schemas.StopStudentCreate,
+    db: Session,
+) -> Student:
+    school = db.get(school_model.School, payload.school_id)  # Validate school exists
+    if not school:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    student = Student(
+        name=payload.name,
+        grade=payload.grade,
+        school_id=payload.school_id,
+        route_id=run.route_id,
+        stop_id=stop.id,
+    )  # Keep route and default stop pointers aligned with the selected workflow context
+    db.add(student)
+    db.flush()  # Allocate student id before creating the internal runtime assignment
+
+    db.add(
+        StudentRunAssignment(
+            student_id=student.id,
+            run_id=run.id,
+            stop_id=stop.id,
+        )
+    )  # Preserve existing runtime execution source-of-truth
+    db.flush()  # Surface any assignment conflicts before the outer commit
+
+    db.refresh(student)
+    return student
 
 
 # -----------------------------------------------------------
@@ -702,6 +758,106 @@ def get_run_stops(run_id: int, db: Session = Depends(get_db)):
     )
 
     return stops  # Return ordered stop list
+
+
+# -----------------------------------------------------------
+# - Add one student from stop context
+# - Create the student and internal runtime assignment together
+# -----------------------------------------------------------
+@router.post(
+    "/{run_id}/stops/{stop_id}/students",
+    response_model=schemas.StudentOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add student to run stop",
+    description="Create one student from a run-stop context and create the internal student run assignment automatically.",
+    response_description="Created student",
+)
+def create_run_stop_student(
+    run_id: int,
+    stop_id: int,
+    payload: schemas.StopStudentCreate,
+    db: Session = Depends(get_db),
+):
+    run, stop = _get_run_stop_or_404(run_id, stop_id, db)  # Validate stop context once
+
+    try:
+        student = _create_stop_context_student(run=run, stop=stop, payload=payload, db=db)
+        db.commit()
+        db.refresh(student)
+        return student
+    except IntegrityError as exc:
+        db.rollback()
+        raise_conflict_if_unique(
+            db,
+            exc,
+            constraint_name="uq_student_run_assignment",
+            sqlite_columns=("student_id", "run_id"),
+            detail="Student is already assigned for this run",
+        )
+        raise HTTPException(status_code=400, detail="Integrity error")
+
+
+# -----------------------------------------------------------
+# - Bulk add students from stop context
+# - Create students and internal runtime assignments together
+# -----------------------------------------------------------
+@router.post(
+    "/{run_id}/stops/{stop_id}/students/bulk",
+    response_model=schemas.StopStudentBulkResult,
+    status_code=status.HTTP_201_CREATED,
+    summary="Bulk add students to run stop",
+    description="Create multiple students from a run-stop context and create internal student run assignments automatically.",
+    response_description="Bulk student creation summary",
+)
+def bulk_create_run_stop_students(
+    run_id: int,
+    stop_id: int,
+    payload: schemas.StopStudentBulkCreate,
+    db: Session = Depends(get_db),
+):
+    run, stop = _get_run_stop_or_404(run_id, stop_id, db)  # Validate stop context once
+
+    created_students: list[Student] = []
+    errors: list[schemas.StopStudentBulkError] = []
+
+    for index, student_payload in enumerate(payload.students):
+        try:
+            with db.begin_nested():  # Keep one bad row from aborting the full batch
+                student = _create_stop_context_student(
+                    run=run,
+                    stop=stop,
+                    payload=student_payload,
+                    db=db,
+                )
+                created_students.append(student)
+        except IntegrityError as exc:
+            errors.append(
+                schemas.StopStudentBulkError(
+                    index=index,
+                    name=student_payload.name,
+                    detail="Student is already assigned for this run",
+                )
+            )
+        except HTTPException as exc:
+            errors.append(
+                schemas.StopStudentBulkError(
+                    index=index,
+                    name=student_payload.name,
+                    detail=exc.detail if isinstance(exc.detail, str) else "Unable to create student",
+                )
+            )
+
+    db.commit()
+
+    for student in created_students:
+        db.refresh(student)
+
+    return schemas.StopStudentBulkResult(
+        created_count=len(created_students),
+        skipped_count=len(errors),
+        created_students=created_students,
+        errors=errors,
+    )
 
 
 # -----------------------------------------------------------

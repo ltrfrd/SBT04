@@ -42,6 +42,8 @@ class RouteDriverAssignmentOut(RouteDriverAssignmentBase):
 class RouteCreate(BaseModel):
     route_number: str
     unit_number: str
+    operator: Optional[str] = None
+    capacity: Optional[int] = None
     school_ids: Optional[List[int]] = []
 
     model_config = ConfigDict(extra="forbid")
@@ -55,6 +57,8 @@ class RouteOut(BaseModel):
     id: int
     route_number: str
     unit_number: Optional[str] = None
+    operator: Optional[str] = None
+    capacity: Optional[int] = None
     school_ids: Optional[List[int]] = None
     school_names: List[str] = []
     schools_count: int = 0
@@ -133,6 +137,8 @@ class RouteDetailOut(BaseModel):
     id: int
     route_number: str
     unit_number: str | None = None
+    operator: Optional[str] = None
+    capacity: Optional[int] = None
     schools: List[RouteSchoolOut] = []
     active_driver_id: int | None = None
     active_driver_name: str | None = None

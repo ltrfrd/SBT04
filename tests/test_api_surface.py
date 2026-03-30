@@ -303,6 +303,153 @@ def test_students_crud(client):
     r = client.get(f"/students/{student_id}")
     assert r.status_code == 404
 
+
+# -----------------------------------------------------------
+# - Stop-context student create
+# - Create student and internal runtime assignment in one call
+# -----------------------------------------------------------
+def test_create_student_inside_run_stop_context_creates_assignment(client):
+    school = client.post("/schools/", json={"name": "Context School", "address": "70 Context Way"})
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]
+
+    driver = client.post("/drivers/", json={"name": "Context Driver", "email": "context@x.com", "phone": "5"})
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]
+
+    route_id = _create_route_with_assignment(client, "CTX-1", "BUS-CTX-1", driver_id)
+
+    run = client.post("/runs/", json={"route_id": route_id, "run_type": "Morning"})
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    stop = client.post(
+        "/stops/",
+        json={"run_id": run_id, "sequence": 1, "type": "pickup", "name": "Context Stop", "address": "71 Context Way"},
+    )
+    assert stop.status_code in (200, 201)
+    stop_id = stop.json()["id"]
+
+    response = client.post(
+        f"/runs/{run_id}/stops/{stop_id}/students",
+        json={"name": "Context Student", "grade": "4", "school_id": school_id},
+    )
+    assert response.status_code == 201
+
+    student = response.json()
+    assert student["name"] == "Context Student"
+    assert student["school_id"] == school_id
+    assert student["route_id"] == route_id
+    assert student["stop_id"] == stop_id
+
+    assignments = client.get(f"/student-run-assignments/{run_id}")
+    assert assignments.status_code == 200
+    assert assignments.json() == [
+        {
+            "id": assignments.json()[0]["id"],
+            "student_id": student["id"],
+            "run_id": run_id,
+            "stop_id": stop_id,
+            "actual_pickup_stop_id": None,
+            "actual_dropoff_stop_id": None,
+        }
+    ]
+
+
+# -----------------------------------------------------------
+# - Stop-context bulk student create
+# - Create many students and return per-row summary details
+# -----------------------------------------------------------
+def test_bulk_create_students_inside_run_stop_context_creates_assignments(client):
+    school = client.post("/schools/", json={"name": "Bulk School", "address": "80 Bulk Way"})
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]
+
+    driver = client.post("/drivers/", json={"name": "Bulk Driver", "email": "bulk@x.com", "phone": "6"})
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]
+
+    route_id = _create_route_with_assignment(client, "BULK-1", "BUS-BULK-1", driver_id)
+
+    run = client.post("/runs/", json={"route_id": route_id, "run_type": "Afternoon"})
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    stop = client.post(
+        "/stops/",
+        json={"run_id": run_id, "sequence": 1, "type": "pickup", "name": "Bulk Stop", "address": "81 Bulk Way"},
+    )
+    assert stop.status_code in (200, 201)
+    stop_id = stop.json()["id"]
+
+    response = client.post(
+        f"/runs/{run_id}/stops/{stop_id}/students/bulk",
+        json={
+            "students": [
+                {"name": "Bulk Student One", "grade": "3", "school_id": school_id},
+                {"name": "Missing School Student", "grade": "2", "school_id": school_id + 999},
+                {"name": "Bulk Student Two", "grade": "5", "school_id": school_id},
+            ]
+        },
+    )
+    assert response.status_code == 201
+
+    body = response.json()
+    assert body["created_count"] == 2
+    assert body["skipped_count"] == 1
+    assert [student["name"] for student in body["created_students"]] == [
+        "Bulk Student One",
+        "Bulk Student Two",
+    ]
+    assert all(student["route_id"] == route_id for student in body["created_students"])
+    assert all(student["stop_id"] == stop_id for student in body["created_students"])
+    assert body["errors"] == [
+        {
+            "index": 1,
+            "name": "Missing School Student",
+            "detail": "School not found",
+        }
+    ]
+
+    assignments = client.get(f"/student-run-assignments/{run_id}")
+    assert assignments.status_code == 200
+    assert len(assignments.json()) == 2
+    assert {assignment["stop_id"] for assignment in assignments.json()} == {stop_id}
+
+
+# -----------------------------------------------------------
+# - Stop/run mismatch protection
+# - Reject stop-context student create when stop belongs to another run
+# -----------------------------------------------------------
+def test_create_student_inside_run_stop_context_rejects_stop_mismatch(client):
+    school = client.post("/schools/", json={"name": "Mismatch School", "address": "90 Mismatch Way"})
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]
+
+    driver = client.post("/drivers/", json={"name": "Mismatch Driver", "email": "mismatch@x.com", "phone": "7"})
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]
+
+    route_id = _create_route_with_assignment(client, "MM-1", "BUS-MM-1", driver_id)
+
+    run_one = client.post("/runs/", json={"route_id": route_id, "run_type": "Morning"})
+    run_two = client.post("/runs/", json={"route_id": route_id, "run_type": "Afternoon"})
+    assert run_one.status_code in (200, 201)
+    assert run_two.status_code in (200, 201)
+
+    stop = client.post(
+        "/stops/",
+        json={"run_id": run_two.json()["id"], "sequence": 1, "type": "pickup", "name": "Other Run Stop"},
+    )
+    assert stop.status_code in (200, 201)
+
+    response = client.post(
+        f"/runs/{run_one.json()['id']}/stops/{stop.json()['id']}/students",
+        json={"name": "Mismatch Student", "grade": "6", "school_id": school_id},
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Stop does not belong to run"
+
 # -----------------------------------------------------------
 # - Reject duplicate route_number during route update
 # - Keep current route excluded from duplicate detection

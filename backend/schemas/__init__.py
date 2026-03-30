@@ -48,7 +48,14 @@ from .stop import StopCreate, StopOut  # Stop creation and response schemas
 # -------------------------------------------------------------------------
 # Student schemas
 # -------------------------------------------------------------------------
-from .student import StudentCreate, StudentOut  # Student creation and response schemas
+from .student import (
+    StudentCreate,
+    StudentOut,
+    StopStudentBulkCreate,
+    StopStudentBulkError,
+    StopStudentBulkResult,
+    StopStudentCreate,
+)  # Student creation and stop-context workflow schemas
 
 
 # -------------------------------------------------------------------------
@@ -103,6 +110,10 @@ __all__ = [
 
     "StudentCreate",
     "StudentOut",
+    "StopStudentCreate",
+    "StopStudentBulkCreate",
+    "StopStudentBulkError",
+    "StopStudentBulkResult",
 
     "RouteCreate",
     "RouteOut",

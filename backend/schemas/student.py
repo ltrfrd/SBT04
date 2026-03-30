@@ -40,3 +40,34 @@ class StudentOut(StudentBase):
     school_code: Optional[str] = Field(default=None, validation_alias=AliasPath("school", "school_code"))
 
     model_config = ConfigDict(from_attributes=True)  # ORM to schema conversion
+
+
+# -----------------------------------------------------------
+# Stop-context student create schemas
+# - Keep route/run assignment details internal to workflow helpers
+# -----------------------------------------------------------
+class StopStudentCreate(BaseModel):
+    name: str
+    grade: Optional[str] = None
+    school_id: int
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class StopStudentBulkCreate(BaseModel):
+    students: list[StopStudentCreate]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class StopStudentBulkError(BaseModel):
+    index: int
+    name: Optional[str] = None
+    detail: str
+
+
+class StopStudentBulkResult(BaseModel):
+    created_count: int
+    skipped_count: int
+    created_students: list[StudentOut] = []
+    errors: list[StopStudentBulkError] = []

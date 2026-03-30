@@ -61,6 +61,8 @@ def _serialize_route(route: Route) -> RouteOut:
         id=route.id,
         route_number=route.route_number,
         unit_number=route.unit_number,
+        operator=route.operator,
+        capacity=route.capacity,
         school_ids=[school.id for school in sorted(route.schools, key=lambda school: (school.name, school.id))],
         school_names=[school.name for school in sorted(route.schools, key=lambda school: (school.name, school.id))],
         schools_count=len(route.schools),
@@ -171,6 +173,8 @@ def _serialize_route_detail(route: Route) -> RouteDetailOut:
         id=route.id,
         route_number=route.route_number,
         unit_number=route.unit_number,
+        operator=route.operator,
+        capacity=route.capacity,
         schools=[
             RouteSchoolOut(
                 school_id=school.id,
