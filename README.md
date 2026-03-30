@@ -11,8 +11,8 @@ This repo should be understood as one connected system with three cooperating co
 - dispatch and run execution
 - attendance and reporting
 
-## 2. What Changed In SBT04
-The current SBT04 framing is workflow-focused, not engine-focused.
+## 2. Workflow Direction
+The current SBT04 implementation is workflow-focused, not engine-focused.
 
 SBT04 shifts the visible operator experience toward:
 
