@@ -976,7 +976,7 @@ def update_stop_inside_run(
     response_model=schemas.StudentOut,
     status_code=status.HTTP_201_CREATED,
     summary="Add student to run stop",
-    description="Create one student from a run-stop context and create the internal student run assignment automatically.",
+    description="Create one student from run-stop context without repeating route_id, run_id, or stop_id in the body. Stop, run, and route context are inherited automatically and the internal student run assignment is created automatically.",
     response_description="Created student",
 )
 def create_run_stop_student(
@@ -1053,7 +1053,7 @@ def update_run_stop_student(
     response_model=schemas.StopStudentBulkResult,
     status_code=status.HTTP_201_CREATED,
     summary="Bulk add students to run stop",
-    description="Create multiple students from a run-stop context and create internal student run assignments automatically.",
+    description="Create multiple students from run-stop context without repeating route_id, run_id, or stop_id in the body. Stop, run, and route context are inherited automatically.",
     response_description="Bulk student creation summary",
 )
 def bulk_create_run_stop_students(

@@ -3299,18 +3299,16 @@ def test_context_student_update_repairs_same_run_assignment_drift(client, db_eng
     run_id = run.json()["id"]
 
     stop_a = client.post(
-        "/stops/",
+        f"/runs/{run_id}/stops",
         json={
-            "run_id": run_id,
             "sequence": 1,
             "type": "pickup",
             "name": "Authoritative Stop",
         },
     )
     stop_b = client.post(
-        "/stops/",
+        f"/runs/{run_id}/stops",
         json={
-            "run_id": run_id,
             "sequence": 2,
             "type": "pickup",
             "name": "Drifted Stop",

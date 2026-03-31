@@ -192,8 +192,8 @@ def _update_student_record(
     "/",                                                         # Endpoint path
     response_model=schemas.StudentOut,                           # Response schema
     status_code=status.HTTP_201_CREATED,                         # HTTP 201 on success
-    summary="Create student",                                    # Swagger title
-    description="Create a new student record. School is required; route and stop are optional.",  # Swagger description
+    summary="Create student (secondary compatibility)",          # Swagger title
+    description="Secondary compatibility endpoint for creating a student record directly. Preferred layered workflow is POST /runs/{run_id}/stops/{stop_id}/students so route and stop context are inherited automatically.",  # Swagger description
     response_description="Created student",                      # Swagger response text
 )
 def create_student(student: schemas.StudentCreate, db: Session = Depends(get_db)):
@@ -262,7 +262,7 @@ def get_student(student_id: int, db: Session = Depends(get_db)):
     "/{student_id}/assignment",
     response_model=schemas.StudentOut,
     summary="Update student assignment",
-    description="Move a student to a different route and stop while keeping runtime assignment rows synchronized safely.",
+    description="Secondary maintenance endpoint for moving a student to a different route, run, and stop while keeping runtime assignment rows synchronized safely.",
     response_description="Updated student assignment",
 )
 def update_student_assignment(
