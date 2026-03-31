@@ -145,27 +145,14 @@ def test_driver_run_workspace_shows_route_run_stop_student_hierarchy(client):
     stop_id = stop.json()["id"]
 
     student = client.post(
-        "/students/",
+        f"/runs/{run_id}/stops/{stop_id}/students",
         json={
             "name": "Workspace Student",
             "grade": "5",
             "school_id": school_id,
-            "route_id": route_id,
-            "stop_id": stop_id,
         },
     )
     assert student.status_code in (200, 201)
-    student_id = student.json()["id"]
-
-    assignment = client.post(
-        "/student-run-assignments/",
-        json={
-            "student_id": student_id,
-            "run_id": run_id,
-            "stop_id": stop_id,
-        },
-    )
-    assert assignment.status_code == 201
 
     login = client.post("/login", json={"driver_id": driver_id})
     assert login.status_code == 200

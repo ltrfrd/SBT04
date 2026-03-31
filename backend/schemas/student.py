@@ -1,31 +1,38 @@
 # ===========================================================
 # backend/schemas/student.py — SBT Student Schemas
 # -----------------------------------------------------------
-# Pydantic models for Student creation and output responses.
+# Pydantic models for student compatibility and workflow APIs.
 # ===========================================================
 from pydantic import BaseModel, ConfigDict
 from typing import Optional
 
 
 # -----------------------------------------------------------
-# Base schema (shared by create and response models)
+# - Shared student identity fields
+# - Keep student-specific fields reusable across API layers
 # -----------------------------------------------------------
-class StudentBase(BaseModel):
-    """Common fields shared by StudentCreate and StudentOut."""
-
+class StudentIdentityFields(BaseModel):
     name: str  # Student full name
     grade: Optional[str] = None  # Optional grade (e.g., "5th")
     school_id: int  # FK: school ID this student belongs to
-    route_id: Optional[int] = None  # Optional assigned route
-    stop_id: Optional[int] = None  # Optional assigned stop
+
+    model_config = ConfigDict(extra="forbid")
 
 
 # -----------------------------------------------------------
-# Schema for creating a student (POST request)
+# - Generic student create compatibility schema
+# - Preserve legacy route/stop linkage fields only for /students/
 # -----------------------------------------------------------
-class StudentCreate(StudentBase):
-    """Used when adding a new student."""
+class StudentCompatibilityCreate(StudentIdentityFields):
+    route_id: Optional[int] = None  # Optional legacy planning route pointer
+    stop_id: Optional[int] = None  # Optional legacy planning stop pointer
 
+
+# -----------------------------------------------------------
+# - Backward-compatible student create alias
+# - Keep existing imports stable while Swagger uses the clearer name
+# -----------------------------------------------------------
+class StudentCreate(StudentCompatibilityCreate):
     pass
 
 # -----------------------------------------------------------
@@ -40,27 +47,24 @@ class StudentAssignmentUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 # -----------------------------------------------------------
-# Schema for returning student data (GET response)
+# - Student response schema
+# - Return the stored student with optional legacy planning pointers
 # -----------------------------------------------------------
-class StudentOut(StudentBase):
-    """Returned in API responses."""
-
+class StudentOut(StudentIdentityFields):
     id: int  # Auto-generated unique ID
     school_name: Optional[str] = None
+    route_id: Optional[int] = None  # Optional legacy planning route pointer
+    stop_id: Optional[int] = None  # Optional legacy planning stop pointer
 
     model_config = ConfigDict(from_attributes=True)  # ORM to schema conversion
 
 
 # -----------------------------------------------------------
-# Stop-context student create schemas
+# - Stop-context student create schemas
 # - Keep route/run assignment details internal to workflow helpers
 # -----------------------------------------------------------
-class StopStudentCreate(BaseModel):
-    name: str
-    grade: Optional[str] = None
-    school_id: int
-
-    model_config = ConfigDict(extra="forbid")
+class StopStudentCreate(StudentIdentityFields):
+    pass
 
 
 class StopStudentUpdate(BaseModel):

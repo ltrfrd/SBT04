@@ -50,6 +50,7 @@ from .stop import RunStopCreate, RunStopUpdate, StopCreate, StopOut  # Stop crea
 # -------------------------------------------------------------------------
 from .student import (
     StudentAssignmentUpdate,
+    StudentCompatibilityCreate,
     StudentCreate,
     StudentOut,
     StopStudentBulkCreate,
@@ -112,6 +113,7 @@ __all__ = [
     "SchoolOut",
 
     "StudentCreate",
+    "StudentCompatibilityCreate",
     "StudentAssignmentUpdate",
     "StudentOut",
     "StopStudentCreate",

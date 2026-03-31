@@ -109,17 +109,10 @@ def test_routes_list_returns_summary_fields(client):
     stop_id = stop.json()["id"]
 
     student = client.post(
-        "/students/",
-        json={"name": "Summary Student", "school_id": school_id, "route_id": route_id, "stop_id": stop_id},
+        f"/runs/{run_id}/stops/{stop_id}/students",
+        json={"name": "Summary Student", "school_id": school_id},
     )
     assert student.status_code in (200, 201)
-    student_id = student.json()["id"]
-
-    assignment = client.post(
-        "/student-run-assignments/",
-        json={"student_id": student_id, "run_id": run_id, "stop_id": stop_id},
-    )
-    assert assignment.status_code == 201
 
     response = client.get("/routes/")
     assert response.status_code == 200
@@ -185,17 +178,11 @@ def test_route_detail_returns_nested_route_data(client):
     stop_id = stop.json()["id"]
 
     student = client.post(
-        "/students/",
-        json={"name": "Detail Student", "school_id": school_id, "route_id": route_id, "stop_id": stop_id},
+        f"/runs/{run_id}/stops/{stop_id}/students",
+        json={"name": "Detail Student", "school_id": school_id},
     )
     assert student.status_code in (200, 201)
     student_id = student.json()["id"]
-
-    assignment = client.post(
-        "/student-run-assignments/",
-        json={"student_id": student_id, "run_id": run_id, "stop_id": stop_id},
-    )
-    assert assignment.status_code == 201
 
     response = client.get(f"/routes/{route_id}")
     assert response.status_code == 200
@@ -986,31 +973,33 @@ def test_run_detail_returns_nested_run_data(client):
     assert driver.status_code in (200, 201)
     driver_id = driver.json()["id"]
 
-    route_id = _create_route_with_assignment(client, "RUN-DETAIL-1", "BUS-RUN-DETAIL-1", driver_id)
+    route = client.post(
+        "/routes/",
+        json={"route_number": "RUN-DETAIL-1", "unit_number": "BUS-RUN-DETAIL-1", "school_ids": [school_id]},
+    )
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    assign = client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
+    assert assign.status_code in (200, 201)
 
     run = client.post("/runs/start", json={"route_id": route_id, "run_type": "Morning"})
     assert run.status_code in (200, 201)
     run_id = run.json()["id"]
 
     stop = client.post(
-        "/stops/",
-        json={"run_id": run_id, "sequence": 1, "type": "pickup", "name": "Run Detail Stop", "address": "51 Run Detail Rd", "planned_time": "07:05:00", "latitude": 1, "longitude": 1},
+        f"/runs/{run_id}/stops",
+        json={"sequence": 1, "type": "pickup", "name": "Run Detail Stop", "address": "51 Run Detail Rd", "planned_time": "07:05:00", "latitude": 1, "longitude": 1},
     )
     assert stop.status_code in (200, 201)
     stop_id = stop.json()["id"]
 
     student = client.post(
-        "/students/",
-        json={"name": "Run Detail Student", "school_id": school_id, "route_id": route_id, "stop_id": stop_id},
+        f"/runs/{run_id}/stops/{stop_id}/students",
+        json={"name": "Run Detail Student", "school_id": school_id},
     )
     assert student.status_code in (200, 201)
     student_id = student.json()["id"]
-
-    assignment = client.post(
-        "/student-run-assignments/",
-        json={"student_id": student_id, "run_id": run_id, "stop_id": stop_id},
-    )
-    assert assignment.status_code == 201
 
     response = client.get(f"/runs/{run_id}")
     assert response.status_code == 200
@@ -1263,6 +1252,14 @@ def test_generic_student_create_endpoint_is_secondary_in_openapi(client):
     path_item = response.json()["paths"]["/students/"]["post"]
     assert path_item["summary"] == "Create student (secondary compatibility)"
     assert "Preferred layered workflow is POST /runs/{run_id}/stops/{stop_id}/students" in path_item["description"]
+    assert "Optional route_id and stop_id fields are legacy planning pointers" in path_item["description"]
+
+    schema_ref = path_item["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+    assert schema_ref.endswith("/StudentCompatibilityCreate")
+
+    properties = response.json()["components"]["schemas"]["StudentCompatibilityCreate"]["properties"]
+    assert "route_id" in properties
+    assert "stop_id" in properties
 
 
 def test_run_context_student_update_endpoint_appears_in_openapi(client):

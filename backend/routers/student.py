@@ -186,17 +186,22 @@ def _update_student_record(
 
 # -----------------------------------------------------------
 # - Create student
-# - Register a new student in the system
+# - Register a student through the compatibility path
+# - Preserve direct-create support while stop-context is preferred
 # -----------------------------------------------------------
 @router.post(
     "/",                                                         # Endpoint path
     response_model=schemas.StudentOut,                           # Response schema
     status_code=status.HTTP_201_CREATED,                         # HTTP 201 on success
     summary="Create student (secondary compatibility)",          # Swagger title
-    description="Secondary compatibility endpoint for creating a student record directly. Preferred layered workflow is POST /runs/{run_id}/stops/{stop_id}/students so route and stop context are inherited automatically.",  # Swagger description
+    description=(
+        "Secondary compatibility endpoint for creating a student record directly. "
+        "Preferred layered workflow is POST /runs/{run_id}/stops/{stop_id}/students so route and stop context are inherited automatically. "
+        "Optional route_id and stop_id fields are legacy planning pointers for compatibility only."
+    ),                                                           # Swagger description
     response_description="Created student",                      # Swagger response text
 )
-def create_student(student: schemas.StudentCreate, db: Session = Depends(get_db)):
+def create_student(student: schemas.StudentCompatibilityCreate, db: Session = Depends(get_db)):
     """Add a new student. Runtime run/stop mapping is managed in StudentRunAssignment."""  # Internal docstring
     school = db.get(school_model.School, student.school_id)      # Validate school exists
     if not school:
