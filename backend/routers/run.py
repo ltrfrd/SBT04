@@ -923,7 +923,7 @@ def get_run_stops(run_id: int, db: Session = Depends(get_db)):
     response_model=StopOut,
     status_code=status.HTTP_201_CREATED,
     summary="Create stop inside run",
-    description="Create a stop inside the selected run context without sending run_id in the body.",
+    description="Create a stop inside the selected run context without sending run_id in the body. This is the preferred workflow-first stop creation path.",
     response_description="Created stop",
 )
 def create_stop_inside_run(

@@ -102,8 +102,8 @@ def test_routes_list_returns_summary_fields(client):
     run_id = run.json()["id"]
 
     stop = client.post(
-        "/stops/",
-        json={"run_id": run_id, "name": "Summary Stop", "latitude": 1, "longitude": 1, "type": "pickup", "sequence": 1},
+        f"/runs/{run_id}/stops",
+        json={"name": "Summary Stop", "latitude": 1, "longitude": 1, "type": "pickup", "sequence": 1},
     )
     assert stop.status_code in (200, 201)
     stop_id = stop.json()["id"]
@@ -170,9 +170,8 @@ def test_route_detail_returns_nested_route_data(client):
     run_id = run.json()["id"]
 
     stop = client.post(
-        "/stops/",
+        f"/runs/{run_id}/stops",
         json={
-            "run_id": run_id,
             "name": "Detail Stop",
             "address": "30 Detail St",
             "planned_time": "14:10:00",
@@ -277,7 +276,7 @@ def test_students_crud(client):
     assert r.status_code in (200, 201)
     run_id = r.json()["id"]
 
-    r = client.post("/stops/", json={"run_id": run_id, "name": "Stop1", "latitude": 1, "longitude": 1, "type": "pickup"})
+    r = client.post(f"/runs/{run_id}/stops", json={"name": "Stop1", "latitude": 1, "longitude": 1, "type": "pickup"})
     assert r.status_code in (200, 201)
     stop_id = r.json()["id"]
 
@@ -324,8 +323,8 @@ def test_create_student_inside_run_stop_context_creates_assignment(client):
     run_id = run.json()["id"]
 
     stop = client.post(
-        "/stops/",
-        json={"run_id": run_id, "sequence": 1, "type": "pickup", "name": "Context Stop", "address": "71 Context Way"},
+        f"/runs/{run_id}/stops",
+        json={"sequence": 1, "type": "pickup", "name": "Context Stop", "address": "71 Context Way"},
     )
     assert stop.status_code in (200, 201)
     stop_id = stop.json()["id"]
@@ -387,12 +386,12 @@ def test_update_student_inside_run_stop_context_updates_fields_and_repairs_same_
     run_id = run.json()["id"]
 
     stop_one = client.post(
-        "/stops/",
-        json={"run_id": run_id, "sequence": 1, "type": "pickup", "name": "Context Update Stop"},
+        f"/runs/{run_id}/stops",
+        json={"sequence": 1, "type": "pickup", "name": "Context Update Stop"},
     )
     stop_two = client.post(
-        "/stops/",
-        json={"run_id": run_id, "sequence": 2, "type": "pickup", "name": "Drift Stop"},
+        f"/runs/{run_id}/stops",
+        json={"sequence": 2, "type": "pickup", "name": "Drift Stop"},
     )
     assert stop_one.status_code in (200, 201)
     assert stop_two.status_code in (200, 201)
@@ -471,8 +470,8 @@ def test_bulk_create_students_inside_run_stop_context_creates_assignments(client
     run_id = run.json()["id"]
 
     stop = client.post(
-        "/stops/",
-        json={"run_id": run_id, "sequence": 1, "type": "pickup", "name": "Bulk Stop", "address": "81 Bulk Way"},
+        f"/runs/{run_id}/stops",
+        json={"sequence": 1, "type": "pickup", "name": "Bulk Stop", "address": "81 Bulk Way"},
     )
     assert stop.status_code in (200, 201)
     stop_id = stop.json()["id"]
@@ -805,7 +804,11 @@ def test_update_student_assignment_moves_student_and_synchronizes_runtime_rows(c
 
     moved = client.put(
         f"/students/{student_id}/assignment",
-        json={"route_id": target_route_id, "stop_id": target_stop.json()["id"]},
+        json={
+            "route_id": target_route_id,
+            "run_id": target_run.json()["id"],
+            "stop_id": target_stop.json()["id"],
+        },
     )
     assert moved.status_code == 200
     assert moved.json()["route_id"] == target_route_id
@@ -859,24 +862,29 @@ def test_update_student_assignment_rejects_invalid_route_stop_combination(client
     other_stop = client.post("/stops/", json={"run_id": other_run.json()["id"], "sequence": 1, "type": "pickup", "name": "Other Stop"})
     assert source_stop.status_code in (200, 201)
     assert other_stop.status_code in (200, 201)
-
     student = client.post(
         "/students/",
         json={
             "name": "Invalid Combo Student",
+            "grade": "4",
             "school_id": school.json()["id"],
             "route_id": route_one_id,
             "stop_id": source_stop.json()["id"],
         },
     )
     assert student.status_code in (200, 201)
+    student_id = student.json()["id"]
 
     moved = client.put(
-        f"/students/{student.json()['id']}/assignment",
-        json={"route_id": route_one_id, "stop_id": other_stop.json()["id"]},
+        f"/students/{student_id}/assignment",
+        json={
+            "route_id": route_one_id,
+            "run_id": source_run.json()["id"],   # correct run
+            "stop_id": other_stop.json()["id"],  # ❗ wrong stop (from other route)
+        },
     )
     assert moved.status_code == 400
-    assert moved.json()["detail"] == "Stop does not belong to route"
+    assert moved.json()["detail"] == "Stop does not belong to run"
 
 
 def test_update_student_assignment_validates_target_route_school_membership(client):
@@ -911,22 +919,26 @@ def test_update_student_assignment_validates_target_route_school_membership(clie
     target_stop = client.post("/stops/", json={"run_id": target_run.json()["id"], "sequence": 1, "type": "pickup", "name": "Target Stop"})
     assert source_stop.status_code in (200, 201)
     assert target_stop.status_code in (200, 201)
-
     student = client.post(
         "/students/",
         json={
             "name": "Assignment School Student",
-            "school_id": school.json()["id"],
+            "grade": "5",
+            "school_id": school.json()["id"],      # belongs to source route
             "route_id": source_route_id,
             "stop_id": source_stop.json()["id"],
         },
     )
     assert student.status_code in (200, 201)
-
+    student_id = student.json()["id"]
     moved = client.put(
-        f"/students/{student.json()['id']}/assignment",
-        json={"route_id": target_route_id, "stop_id": target_stop.json()["id"]},
-    )
+    f"/students/{student_id}/assignment",
+    json={
+        "route_id": target_route_id,                 # target route
+        "run_id": target_run.json()["id"],           # target run
+        "stop_id": target_stop.json()["id"],         # valid stop
+    },
+)
     assert moved.status_code == 400
     assert moved.json()["detail"] == "School is not assigned to the run route"
 
@@ -1164,6 +1176,37 @@ def test_run_context_stop_update_endpoint_appears_in_openapi(client):
     assert "without sending run_id again" in path_item["description"]
 
 
+def test_run_context_stop_create_endpoint_appears_in_openapi(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    path_item = response.json()["paths"]["/runs/{run_id}/stops"]["post"]
+    assert path_item["summary"] == "Create stop inside run"
+    assert "without sending run_id in the body" in path_item["description"]
+    assert "preferred workflow-first stop creation path" in path_item["description"]
+
+    schema_ref = path_item["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+    assert schema_ref.endswith("/RunStopCreate")
+
+    properties = response.json()["components"]["schemas"]["RunStopCreate"]["properties"]
+    assert "run_id" not in properties
+
+
+def test_generic_stop_create_endpoint_is_legacy_in_openapi(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    path_item = response.json()["paths"]["/stops/"]["post"]
+    assert path_item["summary"] == "Create stop (legacy compatibility)"
+    assert "Preferred workflow-first creation is POST /runs/{run_id}/stops." in path_item["description"]
+
+    schema_ref = path_item["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+    assert schema_ref.endswith("/StopCreate")
+
+    properties = response.json()["components"]["schemas"]["StopCreate"]["properties"]
+    assert "run_id" in properties
+
+
 def test_run_context_student_update_endpoint_appears_in_openapi(client):
     response = client.get("/openapi.json")
     assert response.status_code == 200
@@ -1180,3 +1223,11 @@ def test_student_assignment_update_endpoint_appears_in_openapi(client):
     path_item = response.json()["paths"]["/students/{student_id}/assignment"]["put"]
     assert path_item["summary"] == "Update student assignment"
     assert "Move a student to a different route and stop while keeping runtime assignment rows synchronized safely." in path_item["description"]
+
+
+def test_generic_student_update_endpoint_is_not_in_openapi(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    student_path = response.json()["paths"]["/students/{student_id}"]
+    assert "put" not in student_path

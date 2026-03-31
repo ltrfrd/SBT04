@@ -60,26 +60,36 @@ def _validate_student_assignment_target(
     *,
     student: student_model.Student,
     route_id: int,
+    run_id: int,
     stop_id: int,
     db: Session,
-) -> tuple[route_model.Route, stop_model.Stop]:
-    route = _get_route_with_schools(route_id, db)                # Validate route and load school membership
-    stop = _get_stop_or_404(stop_id, db)                         # Validate stop exists
+) -> tuple[route_model.Route, run_model.Run, stop_model.Stop]:
+    route = _get_route_with_schools(route_id, db)                # Validate target route first
+    run = db.get(run_model.Run, run_id)                          # Validate target run exists
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
 
-    if not stop.run or stop.run.route_id != route.id:
-        raise HTTPException(status_code=400, detail="Stop does not belong to route")
+    stop = _get_stop_or_404(stop_id, db)                         # Validate target stop exists
 
-    if stop.run.end_time is not None or stop.run.is_completed:
-        raise HTTPException(status_code=400, detail="Stop belongs to a completed run")
+    if run.route_id != route.id:
+        raise HTTPException(status_code=400, detail="Run does not belong to route")
 
-    _validate_route_school_membership(route, student.school_id)  # Keep route-school safety aligned with stop-context flow
-    return route, stop
+    if stop.run_id != run.id:
+        raise HTTPException(status_code=400, detail="Stop does not belong to run")
+
+    if run.end_time is not None or run.is_completed:
+        raise HTTPException(status_code=400, detail="Run is completed")
+
+    _validate_route_school_membership(route, student.school_id)  # Keep school-route safety
+
+    return route, run, stop
 
 
 def _sync_student_assignment_rows_for_assignment_move(
     *,
     student: student_model.Student,
     target_route: route_model.Route,
+    target_run: run_model.Run,
     target_stop: stop_model.Stop,
     db: Session,
 ) -> None:
@@ -96,7 +106,7 @@ def _sync_student_assignment_rows_for_assignment_move(
         run = assignment.run
         is_historical = run.end_time is not None or run.is_completed
 
-        if assignment.run_id == target_stop.run_id:
+        if assignment.run_id == target_run.id:
             target_assignment = assignment                       # Reuse existing target-run row when it exists
 
         if is_historical:
@@ -108,7 +118,7 @@ def _sync_student_assignment_rows_for_assignment_move(
     if target_assignment is None:
         target_assignment = assoc_model.StudentRunAssignment(
             student_id=student.id,
-            run_id=target_stop.run_id,
+            run_id=target_run.id,
             stop_id=target_stop.id,
         )                                                       # Create planning/runtime row for the newly selected stop context
         db.add(target_assignment)
@@ -121,7 +131,7 @@ def _sync_student_assignment_rows_for_assignment_move(
 def _update_student_record(
     *,
     student: student_model.Student,
-    payload: schemas.StudentUpdate | schemas.StopStudentUpdate,
+    payload: schemas.StopStudentUpdate,
     db: Session,
     authoritative_route_id: int | None = None,
     authoritative_stop: stop_model.Stop | None = None,
@@ -155,7 +165,7 @@ def _update_student_record(
 
     # -----------------------------------------------------------
     # - Apply editable student fields
-    # - Keep context authority separate from generic compatibility
+    # - Keep run-stop context authoritative for student field edits
     # -----------------------------------------------------------
     for field_name in ("name", "grade", "school_id"):
         if field_name in updates:
@@ -163,13 +173,9 @@ def _update_student_record(
 
     if authoritative_route_id is not None:
         student.route_id = authoritative_route_id                # Context route is authoritative
-    elif "route_id" in updates:
-        student.route_id = updates["route_id"]
 
     if authoritative_stop is not None:
         student.stop_id = authoritative_stop.id                  # Context stop is authoritative
-    elif "stop_id" in updates:
-        student.stop_id = updates["stop_id"]
 
     if assignment is not None and authoritative_stop is not None:
         assignment.stop_id = authoritative_stop.id               # Keep StudentRunAssignment aligned with stop context
@@ -177,7 +183,6 @@ def _update_student_record(
     db.flush()
     db.refresh(student)
     return student
-
 
 # -----------------------------------------------------------
 # - Create student
@@ -250,37 +255,6 @@ def get_student(student_id: int, db: Session = Depends(get_db)):
 
 
 # -----------------------------------------------------------
-# - Update student
-# - Modify an existing student record
-# -----------------------------------------------------------
-@router.put(
-    "/{student_id}",                                             # Endpoint path with student id
-    response_model=schemas.StudentOut,                           # Response schema
-    summary="Update student",                                    # Swagger title
-    description="Update generic student profile fields by id. For route/stop reassignment, use PUT /students/{student_id}/assignment.",  # Swagger description
-    response_description="Updated student",                      # Swagger response text
-)
-def update_student(
-    student_id: int,                                             # Student identifier
-    student_in: schemas.StudentUpdate,                           # Incoming compatibility update payload
-    db: Session = Depends(get_db),                               # DB session dependency
-):
-    """Update student profile fields. Runtime run assignment is managed elsewhere."""  # Internal docstring
-    student = db.get(student_model.Student, student_id)          # Load existing student
-    if not student:
-        raise HTTPException(status_code=404, detail="Student not found")  # Return 404 when missing
-
-    student = _update_student_record(
-        student=student,                                         # Existing student from compatibility path
-        payload=student_in,                                      # Partial update payload
-        db=db,                                                   # Shared DB session
-    )
-    db.commit()                                                  # Persist changes
-    db.refresh(student)                                          # Reload updated record
-    return student                                               # Return updated student
-
-
-# -----------------------------------------------------------
 # - Update student assignment
 # - Move a student to a different route and stop safely
 # -----------------------------------------------------------
@@ -300,9 +274,10 @@ def update_student_assignment(
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    target_route, target_stop = _validate_student_assignment_target(
+    target_route, target_run, target_stop = _validate_student_assignment_target(
         student=student,
         route_id=assignment_in.route_id,
+        run_id=assignment_in.run_id,
         stop_id=assignment_in.stop_id,
         db=db,
     )
@@ -313,6 +288,7 @@ def update_student_assignment(
     _sync_student_assignment_rows_for_assignment_move(
         student=student,
         target_route=target_route,
+        target_run=target_run,
         target_stop=target_stop,
         db=db,
     )

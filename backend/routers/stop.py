@@ -382,8 +382,8 @@ def force_normalize_run(
     "/",
     response_model=StopOut,
     status_code=201,
-    summary="Create stop",
-    description="Create a stop for a run and place it in the requested sequence position.",
+    summary="Create stop (legacy compatibility)",
+    description="Legacy compatibility endpoint for creating a stop by sending run_id in the body. Preferred workflow-first creation is POST /runs/{run_id}/stops.",
     response_description="Created stop",
 )
 def create_stop(payload: StopCreate, db: Session = Depends(get_db)):

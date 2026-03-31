@@ -131,14 +131,13 @@ def test_driver_run_workspace_shows_route_run_stop_student_hierarchy(client):
     run_id = run.json()["id"]
 
     stop = client.post(
-        "/stops/",
+        f"/runs/{run_id}/stops",
         json={
             "name": "Workspace Stop",
             "address": "456 Stop St",
             "latitude": 40.0,
             "longitude": -105.0,
             "type": "pickup",
-            "run_id": run_id,
             "sequence": 1,
         },
     )
@@ -3433,7 +3432,7 @@ def test_student_assignment_update_endpoint_moves_planning_state_safely(client, 
 
     student = client.post(
         "/students/",
-        json={
+         json={
             "name": "Dedicated Assignment Student",
             "grade": "4",
             "school_id": school.json()["id"],
@@ -3464,7 +3463,11 @@ def test_student_assignment_update_endpoint_moves_planning_state_safely(client, 
 
     moved = client.put(
         f"/students/{student_id}/assignment",
-        json={"route_id": target_route["id"], "stop_id": target_stop.json()["id"]},
+        json={
+            "route_id": target_route["id"],
+            "run_id": target_run.json()["id"],
+            "stop_id": target_stop.json()["id"],
+        },
     )
     assert moved.status_code == 200
     assert moved.json()["route_id"] == target_route["id"]
