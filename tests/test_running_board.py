@@ -49,16 +49,14 @@ def test_running_board_basic(client):  # Test the running board endpoint
     # -------------------------------------------------------------------------
     # Create run
     # -------------------------------------------------------------------------
-    run = client.post("/runs/", json={  # Create run
-        "route_id": route["id"],
+    run = client.post(f"/routes/{route['id']}/runs", json={  # Create run inside route context
         "run_type": "AM"
     }).json()
 
     # -------------------------------------------------------------------------
     # Create stops
     # -------------------------------------------------------------------------
-    stop1 = client.post("/stops/", json={  # First stop
-        "run_id": run["id"],
+    stop1 = client.post(f"/runs/{run['id']}/stops", json={  # First stop inside run context
         "type": "pickup",
         "sequence": 1,
         "name": "Stop 1",
@@ -68,8 +66,7 @@ def test_running_board_basic(client):  # Test the running board endpoint
         "longitude": -113.1
     }).json()
 
-    stop2 = client.post("/stops/", json={  # Second stop
-        "run_id": run["id"],
+    stop2 = client.post(f"/runs/{run['id']}/stops", json={  # Second stop inside run context
         "type": "pickup",
         "sequence": 2,
         "name": "Stop 2",
@@ -79,16 +76,14 @@ def test_running_board_basic(client):  # Test the running board endpoint
         "longitude": -113.2
     }).json()
 
-    stop3 = client.post("/stops/", json={  # School stop
-        "run_id": run["id"],
+    stop3 = client.post(f"/runs/{run['id']}/stops", json={  # School stop inside run context
         "type": "school_arrive",
         "sequence": 3,
         "school_id": school["id"],
         "planned_time": "07:35:00",
     }).json()
 
-    stop4 = client.post("/stops/", json={  # Unnamed regular stop for fallback display
-        "run_id": run["id"],
+    stop4 = client.post(f"/runs/{run['id']}/stops", json={  # Unnamed regular stop for fallback display
         "type": "pickup",
         "sequence": 4,
         "latitude": 53.4,
@@ -98,36 +93,17 @@ def test_running_board_basic(client):  # Test the running board endpoint
     # -------------------------------------------------------------------------
     # Create students
     # -------------------------------------------------------------------------
-    student1 = client.post("/students/", json={  # Student at stop 1
+    student1 = client.post(f"/runs/{run['id']}/stops/{stop1['id']}/students", json={  # Student at stop 1
         "name": "Student One",
         "grade": "5",
-        "school_id": school["id"],
-        "route_id": route["id"],
-        "stop_id": stop1["id"]
+        "school_id": school["id"]
     }).json()
 
-    student2 = client.post("/students/", json={  # Student at stop 2
+    student2 = client.post(f"/runs/{run['id']}/stops/{stop2['id']}/students", json={  # Student at stop 2
         "name": "Student Two",
         "grade": "5",
-        "school_id": school["id"],
-        "route_id": route["id"],
-        "stop_id": stop2["id"]
+        "school_id": school["id"]
     }).json()
-
-    # -------------------------------------------------------------------------
-    # Create runtime assignments
-    # -------------------------------------------------------------------------
-    client.post("/student-run-assignments/", json={  # Assignment for student 1
-        "student_id": student1["id"],
-        "run_id": run["id"],
-        "stop_id": stop1["id"]
-    })
-
-    client.post("/student-run-assignments/", json={  # Assignment for student 2
-        "student_id": student2["id"],
-        "run_id": run["id"],
-        "stop_id": stop2["id"]
-    })
 
     # -------------------------------------------------------------------------
     # Call running board endpoint

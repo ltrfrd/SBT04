@@ -266,8 +266,12 @@ def get_student(student_id: int, db: Session = Depends(get_db)):
 @router.put(
     "/{student_id}/assignment",
     response_model=schemas.StudentOut,
-    summary="Update student assignment",
-    description="Secondary maintenance endpoint for moving a student to a different route, run, and stop while keeping runtime assignment rows synchronized safely.",
+    summary="Update student assignment (maintenance)",
+    description=(
+        "Maintenance endpoint for correcting or moving a student to a different route, run, and stop after initial setup. "
+        "This is not the normal creation workflow; preferred initial setup is POST /runs/{run_id}/stops/{stop_id}/students. "
+        "Runtime assignment rows are synchronized safely when the move is valid."
+    ),
     response_description="Updated student assignment",
 )
 def update_student_assignment(

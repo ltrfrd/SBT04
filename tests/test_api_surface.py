@@ -1278,9 +1278,20 @@ def test_student_assignment_update_endpoint_appears_in_openapi(client):
     paths = response.json()["paths"]
     operation = paths["/students/{student_id}/assignment"]["put"]
 
-    assert "summary" in operation
-    assert "student" in operation["summary"].lower()
-    assert "assignment" in operation["summary"].lower()
+    assert operation["summary"] == "Update student assignment (maintenance)"
+    assert "Maintenance endpoint" in operation["description"]
+    assert "not the normal creation workflow" in operation["description"]
+    assert "POST /runs/{run_id}/stops/{stop_id}/students" in operation["description"]
+
+
+def test_driver_routes_endpoint_appears_in_openapi(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    operation = response.json()["paths"]["/drivers/{driver_id}/routes"]["get"]
+    assert operation["summary"] == "List driver routes"
+    assert "entry point for the real operator workflow" in operation["description"]
+    assert "selects an assigned route" in operation["description"]
     
 def test_generic_student_update_endpoint_is_not_in_openapi(client):
     response = client.get("/openapi.json")

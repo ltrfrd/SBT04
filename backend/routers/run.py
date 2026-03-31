@@ -503,7 +503,10 @@ def create_run(run: RunStart, db: Session = Depends(get_db)):
     "/start",
     response_model=RunOut,
     summary="Start run",
-    description="Start an existing planned run or create and start a new run for the route, then create runtime student assignments.",
+    description=(
+        "Operational runtime endpoint. Start an existing planned run prepared through the Route -> Run -> Stop -> Student workflow, "
+        "or create and start a run for the selected route when needed. Runtime student assignments are generated automatically."
+    ),
     response_description="Started run",
 )
 def start_run(
@@ -714,7 +717,7 @@ def start_run(
     "/end",
     response_model=schemas.RunOut,
     summary="End run",
-    description="End an active run by run id.",
+    description="Operational runtime endpoint for ending one active run by run id.",
     response_description="Ended run",
 )
 def end_run(run_id: int, db: Session = Depends(get_db)):
@@ -739,7 +742,7 @@ def end_run(run_id: int, db: Session = Depends(get_db)):
     "/end_by_driver",
     response_model=schemas.RunOut,
     summary="End run by driver",
-    description="End the newest active run for a specific driver.",
+    description="Operational runtime endpoint for ending the newest active run for a specific driver.",
     response_description="Ended run",
 )
 def end_run_by_driver(
@@ -791,7 +794,7 @@ def end_run_by_driver(
     "/",
     response_model=List[RunListOut],
     summary="List runs",
-    description="Return summary-level run data for one route only. route_id is required.",
+    description="Return summary-level run data for one route only. route_id is required so operators stay inside a selected route context.",
     response_description="Run summary list",
 )
 def get_all_runs(
@@ -843,7 +846,7 @@ def get_all_runs(
     "/active",
     response_model=schemas.RunOut,
     summary="Get active run",
-    description="Return the newest active run for the requested driver.",
+    description="Operational runtime endpoint that returns the newest active run for the requested driver.",
     response_description="Active run",
 )
 def get_active_run(
@@ -891,7 +894,7 @@ def get_active_run(
     "/{run_id}/stops",
     response_model=List[StopOut],
     summary="Get run stops",
-    description="Return the stops for a run ordered by sequence and id.",
+    description="Return the prepared stop structure for a run ordered by sequence and id so drivers and operators can work inside the selected run context.",
     response_description="Ordered run stops",
 )
 def get_run_stops(run_id: int, db: Session = Depends(get_db)):
@@ -2174,7 +2177,7 @@ def delete_run(run_id: int, db: Session = Depends(get_db)):
     "/{run_id}/running_board",
     response_model=RunningBoardResponse,
     summary="Get running board",
-    description="Return the operational running board for a run using runtime student assignments as the source of truth.",
+    description="Operational runtime endpoint that returns the running board for a prepared run using runtime student assignments as the source of truth.",
     response_description="Running board",
 )
 def get_running_board(run_id: int, db: Session = Depends(get_db)):
@@ -2232,7 +2235,7 @@ def get_running_board(run_id: int, db: Session = Depends(get_db)):
 @router.get(
     "/{run_id}/assignments",
     summary="Get run assignments",
-    description="Return all effective student assignments for a run with student and stop details.",
+    description="Return all effective runtime student assignments for a run with student and stop details. This is a read-only operational view, not the primary setup flow.",
     response_description="Run assignments",
 )
 def get_run_assignments(
@@ -2294,7 +2297,7 @@ def get_run_assignments(
     "/{run_id}/summary",
     response_model=schemas.RunSummaryOut,
     summary="Get run summary",
-    description="Return a compact operational summary for one run with driver, route, and rider totals.",
+    description="Operational runtime endpoint that returns a compact summary for one prepared run with driver, route, and rider totals.",
     response_description="Run summary",
 )
 def get_run_summary(run_id: int, db: Session = Depends(get_db)):

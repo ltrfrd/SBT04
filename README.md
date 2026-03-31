@@ -31,6 +31,21 @@ These endpoints reduce repeated manual IDs in the normal workflow:
 - stop context creates students
 - `StudentRunAssignment` is created internally
 
+## Runtime And Maintenance Flow
+After the setup hierarchy exists, real usage should continue from route and run context:
+
+1. Driver selects an assigned route
+2. Driver reviews the route's prepared runs
+3. Driver starts and operates the selected run
+4. Runtime views read the prepared stop and student structure from that run
+
+Maintenance and compatibility remain separate from the normal setup path:
+
+- `PUT /students/{student_id}/assignment` is a correction / reassignment endpoint
+- `POST /runs/` is legacy compatibility
+- `POST /stops/` is legacy compatibility
+- `POST /students/` is secondary compatibility
+
 ## Current Backend Rules
 The active SBT04 backend surface follows these rules:
 
