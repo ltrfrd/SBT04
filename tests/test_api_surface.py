@@ -318,7 +318,7 @@ def test_create_student_inside_run_stop_context_creates_assignment(client):
     )
     assert route_update.status_code == 200
 
-    run = client.post("/runs/", json={"route_id": route_id, "run_type": "Morning"})
+    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "Morning"})
     assert run.status_code in (200, 201)
     run_id = run.json()["id"]
 
@@ -381,7 +381,7 @@ def test_update_student_inside_run_stop_context_updates_fields_and_repairs_same_
     )
     assert route_update.status_code == 200
 
-    run = client.post("/runs/", json={"route_id": route_id, "run_type": "Morning"})
+    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "Morning"})
     assert run.status_code in (200, 201)
     run_id = run.json()["id"]
 
@@ -465,7 +465,7 @@ def test_bulk_create_students_inside_run_stop_context_creates_assignments(client
     )
     assert route_update.status_code == 200
 
-    run = client.post("/runs/", json={"route_id": route_id, "run_type": "Afternoon"})
+    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "Afternoon"})
     assert run.status_code in (200, 201)
     run_id = run.json()["id"]
 
@@ -527,8 +527,8 @@ def test_create_student_inside_run_stop_context_rejects_stop_mismatch(client):
 
     route_id = _create_route_with_assignment(client, "MM-1", "BUS-MM-1", driver_id)
 
-    run_one = client.post("/runs/", json={"route_id": route_id, "run_type": "Morning"})
-    run_two = client.post("/runs/", json={"route_id": route_id, "run_type": "Afternoon"})
+    run_one = client.post(f"/routes/{route_id}/runs", json={"run_type": "Morning"})
+    run_two = client.post(f"/routes/{route_id}/runs", json={"run_type": "Afternoon"})
     assert run_one.status_code in (200, 201)
     assert run_two.status_code in (200, 201)
 
@@ -560,8 +560,8 @@ def test_update_student_inside_run_stop_context_rejects_wrong_run_or_stop_pairin
     )
     assert route_update.status_code == 200
 
-    run_one = client.post("/runs/", json={"route_id": route_id, "run_type": "Morning"})
-    run_two = client.post("/runs/", json={"route_id": route_id, "run_type": "Afternoon"})
+    run_one = client.post(f"/routes/{route_id}/runs", json={"run_type": "Morning"})
+    run_two = client.post(f"/routes/{route_id}/runs", json={"run_type": "Afternoon"})
     assert run_one.status_code in (200, 201)
     assert run_two.status_code in (200, 201)
 
@@ -605,7 +605,7 @@ def test_update_student_inside_run_stop_context_rejects_missing_assignment_for_r
     )
     assert route_update.status_code == 200
 
-    run = client.post("/runs/", json={"route_id": route_id, "run_type": "AM"})
+    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
     assert run.status_code in (200, 201)
     run_id = run.json()["id"]
 
@@ -653,7 +653,7 @@ def test_update_student_inside_run_stop_context_rejects_student_from_different_r
     assert route_one_update.status_code == 200
     assert route_two_update.status_code == 200
 
-    run = client.post("/runs/", json={"route_id": route_one_id, "run_type": "AM"})
+    run = client.post(f"/routes/{route_one_id}/runs", json={"run_type": "AM"})
     assert run.status_code in (200, 201)
     run_id = run.json()["id"]
 
@@ -702,7 +702,7 @@ def test_update_student_inside_run_stop_context_validates_route_school_membershi
     )
     assert route_update.status_code == 200
 
-    run = client.post("/runs/", json={"route_id": route_id, "run_type": "AM"})
+    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
     assert run.status_code in (200, 201)
     run_id = run.json()["id"]
 
@@ -757,9 +757,9 @@ def test_update_student_assignment_moves_student_and_synchronizes_runtime_rows(c
     assert source_route_update.status_code == 200
     assert target_route_update.status_code == 200
 
-    source_run = client.post("/runs/", json={"route_id": source_route_id, "run_type": "AM"})
-    target_run = client.post("/runs/", json={"route_id": target_route_id, "run_type": "AM"})
-    historical_run = client.post("/runs/", json={"route_id": source_route_id, "run_type": "PM"})
+    source_run = client.post(f"/routes/{source_route_id}/runs", json={"run_type": "AM"})
+    target_run = client.post(f"/routes/{target_route_id}/runs", json={"run_type": "AM"})
+    historical_run = client.post(f"/routes/{source_route_id}/runs", json={"run_type": "PM"})
     assert source_run.status_code in (200, 201)
     assert target_run.status_code in (200, 201)
     assert historical_run.status_code in (200, 201)
@@ -853,8 +853,8 @@ def test_update_student_assignment_rejects_invalid_route_stop_combination(client
     assert route_one_update.status_code == 200
     assert route_two_update.status_code == 200
 
-    source_run = client.post("/runs/", json={"route_id": route_one_id, "run_type": "AM"})
-    other_run = client.post("/runs/", json={"route_id": route_two_id, "run_type": "AM"})
+    source_run = client.post(f"/routes/{route_one_id}/runs", json={"run_type": "AM"})
+    other_run = client.post(f"/routes/{route_two_id}/runs", json={"run_type": "AM"})
     assert source_run.status_code in (200, 201)
     assert other_run.status_code in (200, 201)
 
@@ -910,8 +910,8 @@ def test_update_student_assignment_validates_target_route_school_membership(clie
     assert source_route_update.status_code == 200
     assert target_route_update.status_code == 200
 
-    source_run = client.post("/runs/", json={"route_id": source_route_id, "run_type": "AM"})
-    target_run = client.post("/runs/", json={"route_id": target_route_id, "run_type": "AM"})
+    source_run = client.post(f"/routes/{source_route_id}/runs", json={"run_type": "AM"})
+    target_run = client.post(f"/routes/{target_route_id}/runs", json={"run_type": "AM"})
     assert source_run.status_code in (200, 201)
     assert target_run.status_code in (200, 201)
 
@@ -1058,8 +1058,8 @@ def test_runs_list_requires_route_id_and_returns_route_runs_only(client):
     route_one_id = _create_route_with_assignment(client, "RUN-LIST-1", "BUS-RUN-LIST-1", driver_id)
     route_two_id = _create_route_with_assignment(client, "RUN-LIST-2", "BUS-RUN-LIST-2", driver_id)
 
-    run_one = client.post("/runs/", json={"route_id": route_one_id, "run_type": "Morning"})
-    run_two = client.post("/runs/", json={"route_id": route_two_id, "run_type": "Afternoon"})
+    run_one = client.post(f"/routes/{route_one_id}/runs", json={"run_type": "Morning"})
+    run_two = client.post(f"/routes/{route_two_id}/runs", json={"run_type": "Afternoon"})
     assert run_one.status_code in (200, 201)
     assert run_two.status_code in (200, 201)
 
@@ -1133,6 +1133,37 @@ def test_route_context_run_creation_normalizes_and_rejects_duplicates(client):
     duplicate = client.post(f"/routes/{route_id}/runs", json={"run_type": "Pm"})
     assert duplicate.status_code == 409
     assert duplicate.json()["detail"] == "Run label already exists for this route"
+
+
+def test_run_context_create_endpoint_appears_in_openapi(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    path_item = response.json()["paths"]["/routes/{route_id}/runs"]["post"]
+    assert path_item["summary"] == "Create run inside route"
+    assert "Primary workflow-first run creation path." in path_item["description"]
+    assert "without sending route_id in the body" in path_item["description"]
+
+    schema_ref = path_item["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+    assert schema_ref.endswith("/RouteRunCreate")
+
+    properties = response.json()["components"]["schemas"]["RouteRunCreate"]["properties"]
+    assert "route_id" not in properties
+
+
+def test_generic_run_create_endpoint_is_legacy_in_openapi(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    path_item = response.json()["paths"]["/runs/"]["post"]
+    assert path_item["summary"] == "Create run (legacy compatibility)"
+    assert "Preferred workflow-first creation is POST /routes/{route_id}/runs" in path_item["description"]
+
+    schema_ref = path_item["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+    assert schema_ref.endswith("/RunStart")
+
+    properties = response.json()["components"]["schemas"]["RunStart"]["properties"]
+    assert "route_id" in properties
 
 
 def test_stop_context_student_create_rejects_school_not_on_route(client):

@@ -361,15 +361,18 @@ def update_route(route_id: int, route_in: RouteCreate, db: Session = Depends(get
 
 
 # -----------------------------------------------------------
-# Route-context run creation
-# Create a run inside the selected route context
+# - Route-context run creation
+# - Create a planned run inside the selected route context
 # -----------------------------------------------------------
 @router.post(
     "/{route_id}/runs",
     response_model=schemas.RunOut,
     status_code=status.HTTP_201_CREATED,
     summary="Create run inside route",
-    description="Create a planned run inside the selected route context without sending route_id again.",
+    description=(
+        "Primary workflow-first run creation path. "
+        "Create a planned run inside the selected route context without sending route_id in the body."
+    ),
     response_description="Created run",
 )
 def create_route_run(
@@ -390,10 +393,10 @@ def create_route_run(
     if not route:
         raise HTTPException(status_code=404, detail="Route not found")
 
-    new_run = run_router._create_planned_run(                  # Reuse shared run creation rules
-        route=route,                                           # Parent route context
-        run_type=payload.run_type,                             # Normalized run label
-        db=db,                                                 # Shared DB session
+    new_run = run_router._create_planned_run(                   # Reuse shared run creation rules
+        route=route,                                            # Parent route context
+        run_type=payload.run_type,                              # Normalized run label
+        db=db,                                                  # Shared DB session
     )
     db.commit()
     db.refresh(new_run)

@@ -453,14 +453,19 @@ def _serialize_run_list_item(run: run_model.Run) -> RunListOut:
 
 # -----------------------------------------------------------
 # - Create run
-# - Create a planned run record for a route
+# - Legacy planned run creation
+# - Preserve compatibility while the route-context flow is primary
 # -----------------------------------------------------------
 @router.post(
     "/",                                                         # Route path
     response_model=schemas.RunOut,                               # Response schema
     status_code=status.HTTP_201_CREATED,                         # HTTP 201 on success
-    summary="Create run",                                        # Swagger summary
-    description="Create a planned run record for a route. A driver assignment is optional until the run is started.",  # Swagger description
+    summary="Create run (legacy compatibility)",                 # Swagger summary
+    description=(
+        "Legacy compatibility endpoint for creating a planned run by sending route_id in the body. "
+        "Preferred workflow-first creation is POST /routes/{route_id}/runs so route context is inherited automatically. "
+        "A driver assignment is optional until the run is started."
+    ),                                                           # Swagger description
     response_description="Created run",                          # Swagger response text
 )
 def create_run(run: RunStart, db: Session = Depends(get_db)):

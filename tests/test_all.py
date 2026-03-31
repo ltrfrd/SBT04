@@ -126,7 +126,7 @@ def test_driver_run_workspace_shows_route_run_stop_student_hierarchy(client):
     )
     route_id = route["id"]
 
-    run = client.post("/runs/", json={"route_id": route_id, "run_type": "Morning"})
+    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "Morning"})
     assert run.status_code in (200, 201)
     run_id = run.json()["id"]
 
@@ -336,7 +336,7 @@ def test_create_run_uses_single_active_route_assignment(client):
     assert len(inactive_assignments) == 1
     assert inactive_assignments[0]["driver_id"] == first_driver.json()["id"]
 
-    run = client.post("/runs/", json={"route_id": route_id, "run_type": "AM"})
+    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
     assert run.status_code in (200, 201)
     assert run.json()["driver_id"] == second_driver.json()["id"]
     assert run.json()["driver_name"] == "Second Route Driver"
@@ -350,7 +350,7 @@ def test_create_run_allows_planned_run_without_active_route_driver_assignment(cl
     )
     assert route.status_code in (200, 201)
 
-    run = client.post("/runs/", json={"route_id": route.json()["id"], "run_type": "AM"})
+    run = client.post(f"/routes/{route.json()['id']}/runs", json={"run_type": "AM"})
     assert run.status_code in (200, 201)
     assert run.json()["route_id"] == route.json()["id"]
     assert run.json()["run_type"] == "AM"
@@ -377,8 +377,8 @@ def test_create_run_allows_multiple_planned_runs_for_same_driver(client):
     assign = client.post(f"/routes/{route_id}/assign_driver/{driver.json()['id']}")
     assert assign.status_code in (200, 201)
 
-    first_run = client.post("/runs/", json={"route_id": route_id, "run_type": "AM"})
-    second_run = client.post("/runs/", json={"route_id": route_id, "run_type": "PM"})
+    first_run = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
+    second_run = client.post(f"/routes/{route_id}/runs", json={"run_type": "PM"})
 
     assert first_run.status_code in (200, 201)
     assert second_run.status_code in (200, 201)
@@ -431,7 +431,7 @@ def test_create_run_accepts_custom_run_type_string(client):
     assign = client.post(f"/routes/{route_id}/assign_driver/{driver.json()['id']}")
     assert assign.status_code in (200, 201)
 
-    run = client.post("/runs/", json={"route_id": route_id, "run_type": "School A First Trip"})
+    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "School A First Trip"})
     assert run.status_code in (200, 201)
     assert run.json()["run_type"] == "SCHOOL A FIRST TRIP"
 
@@ -444,7 +444,7 @@ def test_start_run_starts_existing_planned_run_by_id(client):
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
 
-    planned_run = client.post("/runs/", json={"route_id": route_id, "run_type": "Morning"})
+    planned_run = client.post(f"/routes/{route_id}/runs", json={"run_type": "Morning"})
     assert planned_run.status_code in (200, 201)
     planned_run_id = planned_run.json()["id"]
     assert planned_run.json()["driver_id"] is None
@@ -489,7 +489,7 @@ def test_update_planned_run_succeeds(client):
     assign = client.post(f"/routes/{route_id}/assign_driver/{driver.json()['id']}")
     assert assign.status_code in (200, 201)
 
-    run = client.post("/runs/", json={"route_id": route_id, "run_type": "Wrong Label"})
+    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "Wrong Label"})
     assert run.status_code in (200, 201)
     run_id = run.json()["id"]
     assert run.json()["start_time"] is None
@@ -519,7 +519,7 @@ def test_delete_planned_run_succeeds(client):
     assign = client.post(f"/routes/{route_id}/assign_driver/{driver.json()['id']}")
     assert assign.status_code in (200, 201)
 
-    run = client.post("/runs/", json={"route_id": route_id, "run_type": "Delete Me"})
+    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "Delete Me"})
     assert run.status_code in (200, 201)
     run_id = run.json()["id"]
     assert run.json()["start_time"] is None
@@ -3237,7 +3237,7 @@ def test_generic_stop_update_endpoint_remains_compatible(client):
         "BUS-COMPAT",
         driver_id=driver.json()["id"],
     )
-    run = client.post("/runs/", json={"route_id": route["id"], "run_type": "AM"})
+    run = client.post(f"/routes/{route['id']}/runs", json={"run_type": "AM"})
     assert run.status_code in (200, 201)
     run_id = run.json()["id"]
 
@@ -3294,7 +3294,7 @@ def test_context_student_update_repairs_same_run_assignment_drift(client, db_eng
         school_ids=[school.json()["id"]],
     )
 
-    run = client.post("/runs/", json={"route_id": route["id"], "run_type": "AM"})
+    run = client.post(f"/routes/{route['id']}/runs", json={"run_type": "AM"})
     assert run.status_code in (200, 201)
     run_id = run.json()["id"]
 
@@ -3405,9 +3405,9 @@ def test_student_assignment_update_endpoint_moves_planning_state_safely(client, 
         school_ids=[school.json()["id"]],
     )
 
-    source_run = client.post("/runs/", json={"route_id": source_route["id"], "run_type": "AM"})
-    target_run = client.post("/runs/", json={"route_id": target_route["id"], "run_type": "AM"})
-    completed_run = client.post("/runs/", json={"route_id": source_route["id"], "run_type": "PM"})
+    source_run = client.post(f"/routes/{source_route['id']}/runs", json={"run_type": "AM"})
+    target_run = client.post(f"/routes/{target_route['id']}/runs", json={"run_type": "AM"})
+    completed_run = client.post(f"/routes/{source_route['id']}/runs", json={"run_type": "PM"})
     assert source_run.status_code in (200, 201)
     assert target_run.status_code in (200, 201)
     assert completed_run.status_code in (200, 201)
