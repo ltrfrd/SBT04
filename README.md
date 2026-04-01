@@ -13,9 +13,10 @@ The intended operator path is:
 1. Create a route
 2. Assign schools to the route
 3. Assign a driver to the route
-4. Create runs inside the route
-5. Create stops inside the run
-6. Add students from stop context
+4. Assign a bus to the route
+5. Create runs inside the route
+6. Create stops inside the run
+7. Add students from stop context
 
 Preferred context-first endpoints:
 
@@ -57,6 +58,13 @@ The active SBT backend surface follows these rules:
 - stop types support `PICKUP`, `DROPOFF`, `SCHOOL_ARRIVE`, and `SCHOOL_DEPART`
 - school stops can store `stop.school_id`
 - stop order is controlled by `sequence`
+- Bus is now a standalone entity with its own CRUD and detail surface
+- `Route.bus_id` is an optional current bus assignment
+- legacy route bus-like fields remain in place for compatibility:
+  - `route.unit_number`
+  - `route.capacity`
+  - `route.operator`
+- read surfaces can prefer assigned bus values and fall back to legacy route values when no bus is assigned
 
 ## Protected Engine
 The internal runtime engine remains authoritative:
@@ -79,11 +87,20 @@ Configuration and workflow:
 
 Application bootstrap and extracted UI/session layers:
 
-- `app.py` keeps FastAPI bootstrap, middleware, static mount, router registration, the root endpoint, DB init, and the `get_db` compatibility export used by tests
+- `app.py` keeps FastAPI bootstrap, middleware, static mount, router registration, the root endpoint, startup-based DB init, and the `get_db` compatibility export used by tests
 - `backend/routers/web_pages.py` contains the server-rendered page routes
 - `backend/routers/auth.py` contains the session/auth endpoints
 - `backend/routers/ws.py` contains the GPS WebSocket endpoint
 - `backend/utils/driver_workspace.py` contains the route-first driver workspace helpers
+
+Bus rollout and compatibility layers:
+
+- `backend/models/bus.py`
+- `backend/schemas/bus.py`
+- `backend/routers/bus.py`
+- routes can optionally point to a current bus through `Route.bus_id`
+- route-first read surfaces now expose assigned bus values when present
+- route-first read surfaces still fall back to `route.unit_number`, `route.capacity`, and `route.operator` when no bus is assigned
 
 Protected runtime and reporting:
 

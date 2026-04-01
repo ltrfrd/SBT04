@@ -13,6 +13,7 @@ Route -> Run -> Stop -> Students
 Supporting configuration steps:
 - assign schools to route
 - assign driver to route
+- assign bus to route
 
 Important rule:
 - operators should work in routes, runs, stops, and students
@@ -64,7 +65,7 @@ ROOT LEVEL
 |-- .env                           Local development environment values
 |-- .gitignore                     Git ignore rules
 |-- alembic.ini                    Alembic configuration
-|-- app.py                         Bootstrap-focused FastAPI entry point: app setup, middleware, static mount, router registration, root endpoint, DB init, get_db compatibility export
+|-- app.py                         Bootstrap-focused FastAPI entry point: app setup, middleware, static mount, router registration, root endpoint, startup DB init, get_db compatibility export
 |-- database.py                    SQLAlchemy engine, session, Base, and DB dependency
 |-- README.md                      Main SBT04 project documentation
 |-- requirements.txt               Python dependency list
@@ -96,9 +97,10 @@ backend/
 |-- models/                        SQLAlchemy models
 |   |-- __init__.py                Model export hub
 |   |-- associations.py            Route-school link, route-driver assignment, StudentRunAssignment
+|   |-- bus.py                     Bus model and current vehicle identity fields
 |   |-- dispatch.py                Dispatch/payroll persistence
 |   |-- driver.py                  Driver model
-|   |-- route.py                   Route planning container
+|   |-- route.py                   Route planning container with optional current bus assignment
 |   |-- run.py                     Run model for operational execution
 |   |-- run_event.py               Run event timeline model
 |   |-- school.py                  School model
@@ -112,6 +114,7 @@ backend/
 |   |-- __init__.py                Router export hub
 |   |-- attendance.py              Attendance/report endpoints under /reports
 |   |-- auth.py                    Session login/logout endpoints
+|   |-- bus.py                     Bus CRUD and bus detail endpoints
 |   |-- dispatch.py                Dispatch and payroll endpoints
 |   |-- driver.py                  Driver CRUD and route lookup
 |   |-- report.py                  Compatibility layer re-exporting attendance router
@@ -127,9 +130,10 @@ backend/
 |
 |-- schemas/                       Pydantic request and response contracts
 |   |-- __init__.py                Schema export hub
+|   |-- bus.py                     Bus create/update/output and rich bus detail schemas
 |   |-- dispatch.py                Dispatch and payroll schemas
 |   |-- driver.py                  Driver schemas
-|   |-- route.py                   Route summary/detail and nested route-run-stop-student schemas
+|   |-- route.py                   Route summary/detail, bus assignment fields, and nested route-run-stop-student schemas
 |   |-- run.py                     Run detail, state, replay, running board, pickup/dropoff schemas
 |   |-- school.py                  School schemas
 |   |-- stop.py                    Stop create/update/reorder schemas
@@ -151,10 +155,10 @@ backend/
 |
 |-- utils/                         Shared application helpers
 |   |-- __init__.py                Utils package marker
-|   |-- attendance_generator.py    Attendance and reporting aggregation logic
+|   |-- attendance_generator.py    Attendance/report aggregation logic with assigned-bus read fallback support
 |   |-- auth.py                    Session-based auth helpers
 |   |-- db_errors.py               Database error helpers
-|   |-- driver_workspace.py        Route-first driver workspace serialization helpers
+|   |-- driver_workspace.py        Route-first driver workspace serialization helpers with assigned-bus read fallback
 |   |-- gps_tools.py               GPS, ETA, and progress helpers
 |   |-- report_generator.py        Compatibility re-export of attendance generator logic
 |   |-- route_driver_assignment.py Route-driver resolution helpers
@@ -167,10 +171,15 @@ backend/ architecture note:
 - Students are increasingly managed from stop context.
 - StudentRunAssignment remains the internal runtime engine.
 - app.py is now bootstrap-focused.
+- database tables are initialized on startup, not at import time.
 - server-rendered page routes live in backend/routers/web_pages.py.
 - session/auth endpoints live in backend/routers/auth.py.
 - the GPS websocket endpoint and active connection state live in backend/routers/ws.py.
 - route-first driver workspace helpers live in backend/utils/driver_workspace.py.
+- Bus is now a standalone entity.
+- Route may point to one current bus through route.bus_id.
+- existing route.unit_number, route.capacity, and route.operator remain for compatibility.
+- read surfaces may prefer assigned bus values and fall back to legacy route values.
 
 Real workflow-related endpoint note:
 - run router already contains stop-context student endpoints
@@ -220,6 +229,7 @@ tests/
 |-- conftest.py                    Shared pytest fixtures and client setup
 |-- test_all.py                    Broad end-to-end API and behavior coverage
 |-- test_api_surface.py            API surface and payload-shape protection
+|-- test_bus.py                    Bus CRUD, assignment, detail, and read-surface coverage
 |-- test_running_board.py          Running board coverage
 |-- test_run_absence_integration.py
 |                                  Run and planned-absence integration coverage
@@ -264,6 +274,7 @@ Current operator direction:
 - create route
 - assign schools to route
 - assign driver to route
+- assign bus to route
 - create runs inside route
 - create stops inside run
 - add students from stop context
