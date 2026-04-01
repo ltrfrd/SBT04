@@ -1,4 +1,4 @@
-# SBT - School Bus Transport and Operations System
+# SBT
 
 ## Overview
 SBT is a workflow-first bus operations backend built on FastAPI, SQLAlchemy, Alembic, and Jinja templates. The repository is organized around a simple operator flow:

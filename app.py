@@ -1,5 +1,5 @@
 # ===========================================================
-# app.py — BST FastAPI Application Entry Point
+# app.py — SBT FastAPI Application Entry Point
 # -----------------------------------------------------------
 # Fully documented version: all imports, functions, and logic explained.
 # ===========================================================
@@ -329,6 +329,8 @@ def _build_route_workspace(route: route_model.Route, selected_run_id: int | None
         "id": route.id,
         "route_number": route.route_number,
         "unit_number": route.unit_number,
+        "operator": route.operator,
+        "capacity": route.capacity,
         "schools": [
             {
                 "id": school.id,
