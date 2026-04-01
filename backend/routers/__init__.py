@@ -4,6 +4,8 @@
 # -----------------------------------------------------------
 
 from .driver import router as driver_router                      # Driver management endpoints
+from .auth import router as auth_router                          # Auth/session endpoints
+from .ws import router as ws_router                              # WebSocket endpoints
 from .school import router as school_router                      # School management endpoints
 from .student import router as student_router                    # Student management endpoints
 from .route import router as route_router                        # Route management endpoints
@@ -17,6 +19,8 @@ from .student_run_assignment import router as student_run_assignment_router  # R
 
 __all__ = [
     "driver_router",                     # Export driver router
+    "auth_router",                       # Export auth router
+    "ws_router",                         # Export websocket router
     "school_router",                     # Export school router
     "student_router",                    # Export student router
     "route_router",                      # Export route router
