@@ -1,4 +1,5 @@
 from .driver import Driver
+from .bus import Bus
 from .school import School
 from .student import Student
 from .route import Route
@@ -11,6 +12,7 @@ from .student_bus_absence import StudentBusAbsence, StudentBusAbsenceSource
 from .school_attendance_verification import SchoolAttendanceVerification  # New school confirmation model
 __all__ = [
     "Driver",
+    "Bus",
     "School",
     "Student",
     "Route",

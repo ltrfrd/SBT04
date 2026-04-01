@@ -7,6 +7,7 @@ from database import get_db
 
 from backend import schemas
 from backend.models.associations import RouteDriverAssignment
+from backend.models.bus import Bus
 from backend.models.driver import Driver
 from backend.models.route import Route
 from backend.models.school import School
@@ -65,6 +66,7 @@ def _serialize_route(route: Route) -> RouteOut:
         unit_number=route.unit_number,
         operator=route.operator,
         capacity=route.capacity,
+        bus_id=route.bus_id,
         school_ids=[school.id for school in sorted(route.schools, key=lambda school: (school.name, school.id))],
         school_names=[school.name for school in sorted(route.schools, key=lambda school: (school.name, school.id))],
         schools_count=len(route.schools),
@@ -177,6 +179,7 @@ def _serialize_route_detail(route: Route) -> RouteDetailOut:
         unit_number=route.unit_number,
         operator=route.operator,
         capacity=route.capacity,
+        bus_id=route.bus_id,
         schools=[
             RouteSchoolOut(
                 school_id=school.id,
@@ -428,6 +431,56 @@ def get_route_schools(route_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Route not found")
 
     return [{"id": s.id, "name": s.name, "address": s.address} for s in route.schools]
+
+
+# -----------------------------------------------------------
+# - Assign bus to route
+# - Set the current bus pointer without changing legacy fields
+# -----------------------------------------------------------
+@router.post(
+    "/{route_id}/assign_bus/{bus_id}",
+    response_model=RouteOut,
+    summary="Assign bus to route",
+    description="Assign one current bus to the route without changing legacy route bus-like fields.",
+    response_description="Updated route with assigned bus",
+)
+def assign_bus_to_route(route_id: int, bus_id: int, db: Session = Depends(get_db)):
+    route = db.get(Route, route_id)
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
+
+    bus = db.get(Bus, bus_id)
+    if not bus:
+        raise HTTPException(status_code=404, detail="Bus not found")
+
+    route.bus_id = bus.id
+    db.commit()
+    db.refresh(route)
+    return _serialize_route(route)
+
+
+# -----------------------------------------------------------
+# - Unassign bus from route
+# - Clear the current bus pointer without changing legacy fields
+# -----------------------------------------------------------
+@router.delete(
+    "/{route_id}/unassign_bus",
+    response_model=RouteOut,
+    summary="Unassign bus from route",
+    description="Clear the current bus assignment from the route without changing legacy route bus-like fields.",
+    response_description="Updated route without assigned bus",
+)
+def unassign_bus_from_route(route_id: int, db: Session = Depends(get_db)):
+    route = db.get(Route, route_id)
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
+
+    route.bus_id = None
+    db.commit()
+    db.refresh(route)
+    return _serialize_route(route)
+
+
 # -----------------------------------------------------------
 # - Assign driver to route
 # - Enforce one active driver per route

@@ -94,6 +94,10 @@
       <div><strong>Total Runs:</strong> {{ route_data.total_runs }}</div>
       <div><strong>Schools:</strong> {{ route.schools|length }}</div>
       <div><strong>Students:</strong> {{ route_data.students|length }}</div>
+      <div><strong>Vehicle:</strong> {{ route_data.unit_number or "-" }}</div>
+      <div><strong>Capacity:</strong> {{ route_data.capacity if route_data.capacity is not none else "-" }}</div>
+      <div><strong>Bus Size:</strong> {{ route_data.bus_size or "-" }}</div>
+      <div><strong>Plate:</strong> {{ route_data.bus_license_plate or "-" }}</div>
     </div>
 
     <div class="section">

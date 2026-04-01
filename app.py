@@ -27,7 +27,7 @@ from backend.models import (                # Import model modules for ORM bindi
 # ---------- ROUTERS ----------
 # Import each router module (each exposes a .router object)
 from backend.routers import (
-    auth, driver, school, student, route, stop, run, dispatch, attendance, student_run_assignment, web_pages, ws
+    auth, bus, driver, school, student, route, stop, run, dispatch, attendance, student_run_assignment, web_pages, ws
 )  # Import active routers through attendance ownership
 
 
@@ -60,6 +60,7 @@ app.mount("/static", StaticFiles(directory="backend/templates/static"), name="st
 # -----------------------------------------------------------
 # Each router defines its own endpoints (CRUD APIs)
 app.include_router(driver.router)  # Register driver endpoints
+app.include_router(bus.router)  # Register bus endpoints
 app.include_router(school.router)  # Register school endpoints
 app.include_router(student.router)  # Register student endpoints
 app.include_router(route.router)  # Register route endpoints
@@ -84,9 +85,25 @@ def root():
 
 
 # -----------------------------------------------------------
+# - Startup DB initialization helper
+# - Keep table creation isolated for future startup evolution
+# -----------------------------------------------------------
+def init_database() -> None:
+    Base.metadata.create_all(bind=engine)
+
+
+# -----------------------------------------------------------
+# - Startup event
+# - Initialize database tables on app startup
+# -----------------------------------------------------------
+@app.on_event("startup")
+def startup_event():
+    init_database()
+
+
+# -----------------------------------------------------------
 # DATABASE INITIALIZATION
 # -----------------------------------------------------------
-# Import all models for Base metadata and create tables if not exist
+# Import all models for Base metadata
 from database import Base, engine
 from backend.models import *  # noqa: F403, F401
-Base.metadata.create_all(bind=engine)

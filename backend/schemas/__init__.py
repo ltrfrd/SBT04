@@ -12,6 +12,12 @@
 
 
 # -------------------------------------------------------------------------
+# Bus schemas
+# -------------------------------------------------------------------------
+from .bus import BusCreate, BusDetailOut, BusOut, BusUpdate  # Bus creation and response schemas
+
+
+# -------------------------------------------------------------------------
 # Driver schemas
 # -------------------------------------------------------------------------
 from .driver import DriverCreate, DriverOut  # Driver creation and response schemas
@@ -106,6 +112,11 @@ from .student_bus_absence import (
 # Only schemas listed here are accessible through "backend.schemas"
 # =============================================================================
 __all__ = [
+    "BusCreate",
+    "BusDetailOut",
+    "BusUpdate",
+    "BusOut",
+
     "DriverCreate",
     "DriverOut",
 

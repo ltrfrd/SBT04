@@ -174,6 +174,168 @@ def test_driver_run_workspace_shows_route_run_stop_student_hierarchy(client):
     assert "Workspace Student" in body
 
 
+def test_driver_run_workspace_prefers_assigned_bus_values_with_route_fallback(client):
+    driver = client.post(
+        "/drivers/",
+        json={"name": "Workspace Bus Driver", "email": "workspace.bus.driver@test.com", "phone": "11123"},
+    )
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]
+
+    school = client.post(
+        "/schools/",
+        json={"name": "Workspace Bus School", "address": "124 Workspace Way"},
+    )
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]
+
+    route = _create_route_with_assignment_flow(
+        client,
+        "WORKSPACE-BUS-1",
+        "LEGACY-WORKSPACE-BUS-1",
+        driver_id=driver_id,
+        school_ids=[school_id],
+    )
+    route_id = route["id"]
+
+    updated_route = client.put(
+        f"/routes/{route_id}",
+        json={
+            "route_number": "WORKSPACE-BUS-1",
+            "unit_number": "LEGACY-WORKSPACE-BUS-1",
+            "operator": "Legacy Operator",
+            "capacity": 31,
+            "school_ids": [school_id],
+        },
+    )
+    assert updated_route.status_code == 200
+
+    bus = client.post(
+        "/buses/",
+        json={
+            "unit_number": "BUS-WORKSPACE-REAL",
+            "license_plate": "WS-PLATE-1",
+            "capacity": 53,
+            "size": "full",
+        },
+    )
+    assert bus.status_code in (200, 201)
+
+    assigned = client.post(f"/routes/{route_id}/assign_bus/{bus.json()['id']}")
+    assert assigned.status_code == 200
+
+    login = client.post("/login", json={"driver_id": driver_id})
+    assert login.status_code == 200
+
+    assigned_response = client.get(f"/driver_run/{driver_id}?route_id={route_id}")
+    assert assigned_response.status_code == 200
+    assigned_body = assigned_response.text
+
+    assert "BUS-WORKSPACE-REAL" in assigned_body
+    assert "53" in assigned_body
+    assert "full" in assigned_body
+    assert "WS-PLATE-1" in assigned_body
+    assert "Legacy Operator" in assigned_body
+
+    unassigned = client.delete(f"/routes/{route_id}/unassign_bus")
+    assert unassigned.status_code == 200
+
+    fallback_response = client.get(f"/driver_run/{driver_id}?route_id={route_id}")
+    assert fallback_response.status_code == 200
+    fallback_body = fallback_response.text
+
+    assert "LEGACY-WORKSPACE-BUS-1" in fallback_body
+    assert "31" in fallback_body
+    assert "Legacy Operator" in fallback_body
+
+
+def test_route_report_prefers_assigned_bus_values_with_route_fallback(client):
+    driver = client.post(
+        "/drivers/",
+        json={"name": "Report Bus Driver", "email": "report.bus.driver@test.com", "phone": "11124"},
+    )
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]
+
+    school = client.post(
+        "/schools/",
+        json={"name": "Report Bus School", "address": "125 Report Way"},
+    )
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]
+
+    route = _create_route_with_assignment_flow(
+        client,
+        "REPORT-BUS-1",
+        "LEGACY-REPORT-BUS-1",
+        driver_id=driver_id,
+        school_ids=[school_id],
+    )
+    route_id = route["id"]
+
+    updated_route = client.put(
+        f"/routes/{route_id}",
+        json={
+            "route_number": "REPORT-BUS-1",
+            "unit_number": "LEGACY-REPORT-BUS-1",
+            "operator": "Legacy Report Operator",
+            "capacity": 29,
+            "school_ids": [school_id],
+        },
+    )
+    assert updated_route.status_code == 200
+
+    run = client.post("/runs/start", json={"route_id": route_id, "run_type": "AM"})
+    assert run.status_code in (200, 201)
+
+    stop = client.post(
+        f"/runs/{run.json()['id']}/stops",
+        json={"name": "Report Stop", "latitude": 1, "longitude": 1, "type": "pickup", "sequence": 1},
+    )
+    assert stop.status_code in (200, 201)
+
+    student = client.post(
+        f"/runs/{run.json()['id']}/stops/{stop.json()['id']}/students",
+        json={"name": "Report Student", "school_id": school_id},
+    )
+    assert student.status_code in (200, 201)
+
+    bus = client.post(
+        "/buses/",
+        json={
+            "unit_number": "BUS-REPORT-REAL",
+            "license_plate": "RP-PLATE-1",
+            "capacity": 47,
+            "size": "mid",
+        },
+    )
+    assert bus.status_code in (200, 201)
+
+    assigned = client.post(f"/routes/{route_id}/assign_bus/{bus.json()['id']}")
+    assert assigned.status_code == 200
+
+    assigned_response = client.get(f"/route_report/{route_id}")
+    assert assigned_response.status_code == 200
+    assigned_body = assigned_response.text
+
+    assert "Route Attendance: LEGACY-REPORT-BUS-1" in assigned_body
+    assert "BUS-REPORT-REAL" in assigned_body
+    assert "47" in assigned_body
+    assert "mid" in assigned_body
+    assert "RP-PLATE-1" in assigned_body
+
+    unassigned = client.delete(f"/routes/{route_id}/unassign_bus")
+    assert unassigned.status_code == 200
+
+    fallback_response = client.get(f"/route_report/{route_id}")
+    assert fallback_response.status_code == 200
+    fallback_body = fallback_response.text
+
+    assert "Route Attendance: LEGACY-REPORT-BUS-1" in fallback_body
+    assert "Vehicle:</strong> LEGACY-REPORT-BUS-1" in fallback_body
+    assert "Capacity:</strong> 29" in fallback_body
+
+
 def test_websocket_gps(client):
     client.post("/drivers/", json={"name": "D", "email": "d@d.com", "phone": "000"})
     client.post("/login", json={"driver_id": 1})

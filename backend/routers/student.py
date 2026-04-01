@@ -1,5 +1,5 @@
 # ===========================================================
-# backend/routers/student.py — BST Student Router
+# backend/routers/student.py — SBT Student Router
 # -----------------------------------------------------------
 # Handles CRUD operations for students and route/school lookups.
 # ===========================================================

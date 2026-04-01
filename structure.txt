@@ -64,7 +64,7 @@ ROOT LEVEL
 |-- .env                           Local development environment values
 |-- .gitignore                     Git ignore rules
 |-- alembic.ini                    Alembic configuration
-|-- app.py                         FastAPI entry point, pages, WebSocket, router registration
+|-- app.py                         Bootstrap-focused FastAPI entry point: app setup, middleware, static mount, router registration, root endpoint, DB init, get_db compatibility export
 |-- database.py                    SQLAlchemy engine, session, Base, and DB dependency
 |-- README.md                      Main SBT04 project documentation
 |-- requirements.txt               Python dependency list
@@ -111,6 +111,7 @@ backend/
 |-- routers/                       FastAPI routers
 |   |-- __init__.py                Router export hub
 |   |-- attendance.py              Attendance/report endpoints under /reports
+|   |-- auth.py                    Session login/logout endpoints
 |   |-- dispatch.py                Dispatch and payroll endpoints
 |   |-- driver.py                  Driver CRUD and route lookup
 |   |-- report.py                  Compatibility layer re-exporting attendance router
@@ -121,6 +122,8 @@ backend/
 |   |-- student.py                 Student CRUD and filtered lookup
 |   |-- student_bus_absence.py     Planned no-ride endpoints
 |   |-- student_run_assignment.py  Explicit assignment router kept for compatibility/internal use
+|   |-- web_pages.py               Server-rendered page routes for dashboard, reports, and driver workspace
+|   |-- ws.py                      WebSocket GPS endpoint and connection state
 |
 |-- schemas/                       Pydantic request and response contracts
 |   |-- __init__.py                Schema export hub
@@ -151,6 +154,7 @@ backend/
 |   |-- attendance_generator.py    Attendance and reporting aggregation logic
 |   |-- auth.py                    Session-based auth helpers
 |   |-- db_errors.py               Database error helpers
+|   |-- driver_workspace.py        Route-first driver workspace serialization helpers
 |   |-- gps_tools.py               GPS, ETA, and progress helpers
 |   |-- report_generator.py        Compatibility re-export of attendance generator logic
 |   |-- route_driver_assignment.py Route-driver resolution helpers
@@ -162,6 +166,11 @@ backend/ architecture note:
 - Stop belongs to run.
 - Students are increasingly managed from stop context.
 - StudentRunAssignment remains the internal runtime engine.
+- app.py is now bootstrap-focused.
+- server-rendered page routes live in backend/routers/web_pages.py.
+- session/auth endpoints live in backend/routers/auth.py.
+- the GPS websocket endpoint and active connection state live in backend/routers/ws.py.
+- route-first driver workspace helpers live in backend/utils/driver_workspace.py.
 
 Real workflow-related endpoint note:
 - run router already contains stop-context student endpoints

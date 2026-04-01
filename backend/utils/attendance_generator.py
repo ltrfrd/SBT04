@@ -71,6 +71,7 @@ def route_summary(db: Session, route_id: int) -> dict:
     r = db.get(route_model.Route, route_id)  # Load route
     if not r:
         return {"error": "Route not found"}  # Return stable missing-route payload
+    assigned_bus = r.bus  # Current assigned bus when present
 
     active_driver_id = None  # Default unresolved route driver
     try:
@@ -120,7 +121,14 @@ def route_summary(db: Session, route_id: int) -> dict:
     return {
         "route_id": route_id,
         "route_number": r.route_number,
-        "unit_number": r.unit_number,
+        "unit_number": assigned_bus.unit_number if assigned_bus else r.unit_number,
+        "capacity": assigned_bus.capacity if assigned_bus else r.capacity,
+        "operator": r.operator,
+        "bus_id": assigned_bus.id if assigned_bus else None,
+        "bus_unit_number": assigned_bus.unit_number if assigned_bus else None,
+        "bus_license_plate": assigned_bus.license_plate if assigned_bus else None,
+        "bus_capacity": assigned_bus.capacity if assigned_bus else None,
+        "bus_size": assigned_bus.size if assigned_bus else None,
         "num_runs": r.num_runs,
         "driver_id": active_driver_id,  # Compatibility shim for existing report payloads
         "active_driver_id": active_driver_id,

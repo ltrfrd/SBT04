@@ -1,5 +1,5 @@
 # ===========================================================
-# backend/routers/run.py - BST Run Router
+# backend/routers/run.py - SBT Run Router
 # Manage run lifecycle, live stop progress, and rider actions.
 # ===========================================================
 

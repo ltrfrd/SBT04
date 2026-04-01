@@ -71,6 +71,7 @@ class RouteOut(BaseModel):
     unit_number: Optional[str] = None
     operator: Optional[str] = None
     capacity: Optional[int] = None
+    bus_id: Optional[int] = None
     school_ids: Optional[List[int]] = None
     school_names: List[str] = []
     schools_count: int = 0
@@ -150,6 +151,7 @@ class RouteDetailOut(BaseModel):
     unit_number: str | None = None
     operator: Optional[str] = None
     capacity: Optional[int] = None
+    bus_id: Optional[int] = None
     schools: List[RouteSchoolOut] = []
     active_driver_id: int | None = None
     active_driver_name: str | None = None

@@ -31,6 +31,7 @@ def _build_route_workspace(route: route_model.Route, selected_run_id: int | None
         (assignment for assignment in route.driver_assignments if assignment.active),
         None,
     )
+    assigned_bus = route.bus                                 # Current assigned bus when present
 
     # -----------------------------------------------------------
     # - Order route runs
@@ -140,9 +141,14 @@ def _build_route_workspace(route: route_model.Route, selected_run_id: int | None
     return {
         "id": route.id,
         "route_number": route.route_number,
-        "unit_number": route.unit_number,
+        "unit_number": assigned_bus.unit_number if assigned_bus else route.unit_number,
         "operator": route.operator,
-        "capacity": route.capacity,
+        "capacity": assigned_bus.capacity if assigned_bus else route.capacity,
+        "bus_id": assigned_bus.id if assigned_bus else None,
+        "bus_unit_number": assigned_bus.unit_number if assigned_bus else None,
+        "bus_license_plate": assigned_bus.license_plate if assigned_bus else None,
+        "bus_capacity": assigned_bus.capacity if assigned_bus else None,
+        "bus_size": assigned_bus.size if assigned_bus else None,
         "schools": [
             {
                 "id": school.id,

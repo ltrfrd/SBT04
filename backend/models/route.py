@@ -18,7 +18,7 @@
 #   - Students are assigned to runs dynamically using StudentRunAssignment.
 # =============================================================================
 
-from sqlalchemy import Column, Integer, String             # Table column types
+from sqlalchemy import Column, ForeignKey, Integer, String  # Table column types
 from sqlalchemy.orm import relationship                    # ORM relationship mapping
 
 from database import Base                                  # Declarative base for models
@@ -37,6 +37,7 @@ class Route(Base):
     unit_number = Column(String(50), nullable=True)        # Bus unit number (optional)
     operator = Column(String(100), nullable=True)          # Bus operator/company name
     capacity = Column(Integer, nullable=True)              # Bus capacity (number of seats)
+    bus_id = Column(Integer, ForeignKey("buses.id", ondelete="SET NULL"), nullable=True)  # Current assigned bus
     num_runs = Column(Integer, nullable=True)              # Number of runs assigned to route
 
     driver_assignments = relationship(
@@ -57,6 +58,11 @@ class Route(Base):
         back_populates="route",                            # Linked from Run.route
         cascade="all, delete-orphan",                      # Delete runs if route removed
         passive_deletes=True,                              # Use DB-level ON DELETE
+    )
+
+    bus = relationship(
+        "Bus",
+        back_populates="routes",                           # Linked from Bus.routes
     )
 
     students = relationship(

@@ -1,5 +1,5 @@
 # ===========================================================
-# backend/routers/stop.py - BST Stop Router
+# backend/routers/stop.py - SBT Stop Router
 # Manage run stop validation, normalization, and ordering.
 # ===========================================================
 from typing import List

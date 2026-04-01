@@ -120,6 +120,7 @@ def driver_run_view(
     available_routes = (
         db.query(route_model.Route)
         .options(
+            joinedload(route_model.Route.bus),               # Current assigned bus display data
             joinedload(route_model.Route.schools),           # Route header school list
             joinedload(route_model.Route.driver_assignments).joinedload(RouteDriverAssignment.driver),  # Assigned driver display
             joinedload(route_model.Route.runs).joinedload(run_model.Run.stops),  # Run -> stop hierarchy

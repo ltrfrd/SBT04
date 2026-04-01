@@ -77,6 +77,14 @@ Configuration and workflow:
 - `backend/routers/stop.py`
 - `backend/routers/student.py`
 
+Application bootstrap and extracted UI/session layers:
+
+- `app.py` keeps FastAPI bootstrap, middleware, static mount, router registration, the root endpoint, DB init, and the `get_db` compatibility export used by tests
+- `backend/routers/web_pages.py` contains the server-rendered page routes
+- `backend/routers/auth.py` contains the session/auth endpoints
+- `backend/routers/ws.py` contains the GPS WebSocket endpoint
+- `backend/utils/driver_workspace.py` contains the route-first driver workspace helpers
+
 Protected runtime and reporting:
 
 - `backend/routers/run.py`
