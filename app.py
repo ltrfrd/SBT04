@@ -32,10 +32,32 @@ from backend.routers import (
 
 
 # -----------------------------------------------------------
+# DATABASE INITIALIZATION
+# -----------------------------------------------------------
+# Import all models for Base metadata
+from database import Base, engine
+from backend.models import *  # noqa: F403, F401
+# -----------------------------------------------------------
+# Lifespan - App startup/shutdown handler
+# -----------------------------------------------------------
+from contextlib import asynccontextmanager  # Lifespan context manager
+
+
+# -----------------------------------------------------------
+# Lifespan - App startup/shutdown handler
+# -----------------------------------------------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    yield
+# -----------------------------------------------------------
 # APP SETUP
 # -----------------------------------------------------------
-app = FastAPI(title="SBT — School Bus Tracking System", version="1.0.0")
-
+app = FastAPI(
+    title="SBT — School Bus Tracking System",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 # Session middleware for login sessions, using secret key from .env
 app.add_middleware(
     SessionMiddleware,
@@ -91,19 +113,3 @@ def root():
 def init_database() -> None:
     Base.metadata.create_all(bind=engine)
 
-
-# -----------------------------------------------------------
-# - Startup event
-# - Initialize database tables on app startup
-# -----------------------------------------------------------
-@app.on_event("startup")
-def startup_event():
-    init_database()
-
-
-# -----------------------------------------------------------
-# DATABASE INITIALIZATION
-# -----------------------------------------------------------
-# Import all models for Base metadata
-from database import Base, engine
-from backend.models import *  # noqa: F403, F401

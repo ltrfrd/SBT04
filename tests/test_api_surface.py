@@ -113,7 +113,7 @@ def test_routes_list_returns_summary_fields(client):
         json={"name": "Summary Student", "school_id": school_id},
     )
     assert student.status_code in (200, 201)
-
+    
     response = client.get("/routes/")
     assert response.status_code == 200
 

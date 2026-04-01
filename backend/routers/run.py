@@ -505,7 +505,8 @@ def create_run(run: RunStart, db: Session = Depends(get_db)):
     summary="Start run",
     description=(
         "Operational runtime endpoint. Start an existing planned run prepared through the Route -> Run -> Stop -> Student workflow, "
-        "or create and start a run for the selected route when needed. Runtime student assignments are generated automatically."
+        "or create and start a run for the selected route when needed. "
+        "This endpoint starts the run only and does not create students or runtime assignments."
     ),
     response_description="Started run",
 )
@@ -660,50 +661,7 @@ def start_run(
     # - Ensures every route student is inserted into runtime table
     # - School and report views depend on these rows
     # -------------------------------------------------------------------------
-    route_students = (
-        db.query(student_model.Student)
-        .filter(student_model.Student.route_id == target_run.route_id)
-        .all()
-    )  # Load all students assigned to this route
-
-    run_stops = (
-        db.query(stop_model.Stop)
-        .filter(stop_model.Stop.run_id == target_run.id)
-        .order_by(stop_model.Stop.sequence.asc(), stop_model.Stop.id.asc())
-        .all()
-    )  # Load runtime stops already attached to this run
-
-    run_stop_by_sequence = {
-        stop.sequence: stop
-        for stop in run_stops
-    }  # Map runtime stops by sequence for fallback matching
-
-    for student in route_students:
-        existing_assignment = (
-            db.query(StudentRunAssignment)
-            .filter(
-                StudentRunAssignment.run_id == target_run.id,
-                StudentRunAssignment.student_id == student.id,
-            )
-            .first()
-        )  # Prevent duplicate runtime assignment rows
-
-        if existing_assignment:
-            continue  # Skip student if already assigned to this run
-
-        assigned_run_stop = None  # Default to no mapped runtime stop
-
-        if getattr(student, "stop", None) and getattr(student.stop, "sequence", None) in run_stop_by_sequence:
-            assigned_run_stop = run_stop_by_sequence[student.stop.sequence]  # Match student stop to copied run stop by sequence
-
-        assignment = StudentRunAssignment(
-            student_id=student.id,  # Student assigned to runtime run
-            run_id=target_run.id,  # Current run id
-            stop_id=assigned_run_stop.id if assigned_run_stop else None,  # Existing runtime stop if matched
-        )
-
-        db.add(assignment)  # Stage runtime assignment row
-
+    
     db.flush()  # Validate and insert all assignment rows before final commit
     db.commit()  # Save run and student assignments
     db.refresh(target_run)  # Reload saved run

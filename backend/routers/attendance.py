@@ -530,14 +530,13 @@ def get_school_mobile_attendance(
             detail=report_data["error"],
         )
 
-    return templates.TemplateResponse(                        # Render mobile HTML template
-        "school_attendance_routes.html",                       # Route landing template file
+    return templates.TemplateResponse(
+        request,
+        "school_attendance_routes.html",
         {
-            "request": request,                                # Required by Jinja templates
-            "report": report_data,                             # School attendance data
+            "report": report_data,
         },
-    )                                                          # Return rendered page
-
+    )
 
 # -----------------------------------------------------------
 # - School route attendance run list
@@ -568,13 +567,13 @@ def get_school_mobile_route_runs(
             detail=report_data["error"],
         )
 
-    return templates.TemplateResponse(                        # Render route run list template
-        "school_attendance_runs.html",                        # Route run list template file
+    return templates.TemplateResponse(
+        request,
+        "school_attendance_routes.html",
         {
-            "request": request,                               # Required by Jinja templates
-            "report": report_data,                            # Route runs payload
+            "report": report_data,
         },
-    )                                                         # Return rendered page
+    )                                                   # Return rendered page
 
 
 # -----------------------------------------------------------
@@ -606,13 +605,13 @@ def get_school_mobile_single_run(
             detail=report_data["error"],
         )
 
-    return templates.TemplateResponse(                        # Render single-run template
-        "school_mobile_report.html",                          # Single run report template
+    return templates.TemplateResponse(
+        request,
+        "school_mobile_report.html",
         {
-            "request": request,                               # Required by Jinja templates
-            "report": report_data,                            # Single run payload
+            "report": report_data,
         },
-    )                                                         # Return rendered page
+    )                                             # Return rendered page
 # -------------------------------------------------------------------------
 # Request Schema - School Student Status Update
 # -------------------------------------------------------------------------
