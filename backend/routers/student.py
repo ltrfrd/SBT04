@@ -56,6 +56,30 @@ def _get_stop_or_404(stop_id: int, db: Session) -> stop_model.Stop:
     return stop
 
 
+def _validate_compatibility_student_create_target(
+    *,
+    school_id: int,
+    route_id: int | None,
+    stop_id: int | None,
+    db: Session,
+) -> tuple[route_model.Route | None, stop_model.Stop | None]:
+    route = _get_route_with_schools(route_id, db) if route_id is not None else None
+    stop = _get_stop_or_404(stop_id, db) if stop_id is not None else None
+
+    if stop is not None:
+        run = stop.run                                           # Resolve stop hierarchy only when stop compatibility pointer is present
+        if run is None:
+            raise HTTPException(status_code=400, detail="Stop does not belong to route")
+
+        if route is not None and run.route_id != route.id:
+            raise HTTPException(status_code=400, detail="Stop does not belong to route")
+
+        if route is None:
+            route = _get_route_with_schools(run.route_id, db)    # Infer stop route for validation only
+
+    return route, stop
+
+
 def _validate_student_assignment_target(
     *,
     student: student_model.Student,
@@ -207,15 +231,12 @@ def create_student(student: schemas.StudentCompatibilityCreate, db: Session = De
     if not school:
         raise HTTPException(status_code=404, detail="School not found")  # Return 404 when missing
 
-    if student.route_id:
-        route = db.get(route_model.Route, student.route_id)      # Validate optional route
-        if not route:
-            raise HTTPException(status_code=404, detail="Route not found")  # Return 404 when missing
-
-    if student.stop_id:
-        stop = db.get(stop_model.Stop, student.stop_id)          # Validate optional stop
-        if not stop:
-            raise HTTPException(status_code=404, detail="Stop not found")  # Return 404 when missing
+    _validate_compatibility_student_create_target(
+        school_id=student.school_id,                             # Compatibility create still anchors on a real school
+        route_id=student.route_id,                               # Optional legacy planning route pointer
+        stop_id=student.stop_id,                                 # Optional legacy planning stop pointer
+        db=db,                                                   # Shared DB session
+    )
 
     new_student = student_model.Student(**student.model_dump())  # Convert schema → DB model
     db.add(new_student)                                          # Add to session

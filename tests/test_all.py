@@ -2066,7 +2066,7 @@ def test_flexible_pickup_dropoff_records_actual_stops_and_keeps_occupancy_correc
     driver_id = driver.json()["id"]  # Extract driver ID from API response
     school = client.post("/schools/", json={"name": "Flex School", "address": "456 Flex Ave"})  # Create school
     school_id = school.json()["id"]  # Extract school ID from API response
-    route = client.post("/routes/", json={"route_number": "R4", "unit_number": "Bus-04", "driver_id": driver_id})  # Create route
+    route = client.post("/routes/", json={"route_number": "R4", "unit_number": "Bus-04", "driver_id": driver_id, "school_ids": [school_id]})  # Create route
     route_id = route.json()["id"]  # Extract route ID from API response
     run = client.post("/runs/start", json={"driver_id": driver_id, "route_id": route_id, "run_type": "AM"})  # Create run
     run_id = run.json()["id"]  # Extract run ID from API response
