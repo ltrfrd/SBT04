@@ -1,5 +1,5 @@
 # ===========================================================
-# backend/schemas/stop.py - BST Stop Schemas
+# backend/schemas/stop.py - SBT Stop Schemas
 # -----------------------------------------------------------
 # Pydantic models for stop requests and responses.
 # ===========================================================

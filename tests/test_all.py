@@ -60,7 +60,7 @@ def _create_route_with_assignment_flow(
 def test_root(client):
     r = client.get("/")
     assert r.status_code == 200
-    assert r.json()["status"] == "BST01 backend is running"
+    assert r.json()["status"] == "SBT backend is running"
 
 
 def test_driver_crud(client):

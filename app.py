@@ -59,7 +59,7 @@ active_connections: Dict[int, List[WebSocket]] = {}
 # -----------------------------------------------------------
 # APP SETUP
 # -----------------------------------------------------------
-app = FastAPI(title="BST — School Bus Tracking System", version="1.0.0")
+app = FastAPI(title="SBT — School Bus Tracking System", version="1.0.0")
 
 # Session middleware for login sessions, using secret key from .env
 app.add_middleware(
@@ -496,7 +496,7 @@ def logout(request: Request):
 @app.get("/")
 def root():
     """Basic API health endpoint."""
-    return {"status": "BST01 backend is running"}
+    return {"status": "SBT backend is running"}
 
 
 # -----------------------------------------------------------

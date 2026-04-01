@@ -1,7 +1,7 @@
-# SBT04 - School Bus Transport and Operations System
+# SBT - School Bus Transport and Operations System
 
 ## Overview
-SBT04 is a workflow-first bus operations backend built on FastAPI, SQLAlchemy, Alembic, and Jinja templates. The repository is organized around a simple operator flow:
+SBT is a workflow-first bus operations backend built on FastAPI, SQLAlchemy, Alembic, and Jinja templates. The repository is organized around a simple operator flow:
 
 Route -> Run -> Stop -> Student
 
@@ -47,7 +47,7 @@ Maintenance and compatibility remain separate from the normal setup path:
 - `POST /students/` is secondary compatibility
 
 ## Current Backend Rules
-The active SBT04 backend surface follows these rules:
+The active SBT backend surface follows these rules:
 
 - `school_code` is removed from the working model and API surface
 - `school_id` remains the internal and visible school reference

@@ -1,5 +1,5 @@
 # ============================================================
-# Run request and response schemas for BusTrack
+# Run request and response schemas for SBT
 # ============================================================
 
 # -----------------------------
