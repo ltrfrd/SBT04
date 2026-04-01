@@ -97,6 +97,8 @@ def get_driver_routes(driver_id: int, db: Session = Depends(get_db)):
         db.query(Route)
         .join(RouteDriverAssignment, RouteDriverAssignment.route_id == Route.id)
         .filter(RouteDriverAssignment.driver_id == driver_id)
+        .filter(RouteDriverAssignment.active.is_(True))
+        .order_by(Route.route_number.asc(), Route.id.asc())
         .distinct()
         .all()
     )

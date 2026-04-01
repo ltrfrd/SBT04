@@ -12,7 +12,7 @@ load_dotenv()                            # Initialize environment variables
 # ---------- FASTAPI ----------
 from fastapi import (
     FastAPI, Request, Depends, HTTPException,
-    status, WebSocket, WebSocketDisconnect
+    status, WebSocket, WebSocketDisconnect, Body
 )                                        # Core FastAPI imports
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates  # For rendering HTML templates
@@ -24,7 +24,6 @@ from sqlalchemy.orm import Session, joinedload         # Database session for OR
 from datetime import datetime, date        # For timestamps and date filters
 import json                                # Parse JSON payloads
 from typing import Dict, List              # Type hints for dictionaries/lists
-from fastapi import Body
 # ---------- DB & MODELS ----------
 from database import get_db, engine, Base   # Local database setup (SQLAlchemy)
 from backend import schemas                 # Import Pydantic schemas
@@ -184,23 +183,19 @@ def route_report(route_id: int, request: Request, db: Session = Depends(get_db))
     driver_name = get_route_driver_name(route) if route else None
     return templates.TemplateResponse(
         request,                                              # New Starlette signature: request first
-            "route_report.html",                                  # Template name
-            {
+        "route_report.html",                                  # Template name
+        {
             "request": request,
             "route": route,
             "route_data": route_data,
-            "driver_name": driver_name or "Unassigned"
-            }
-        )
+            "driver_name": driver_name or "Unassigned",
+        },
+    )
 
 
 # -----------------------------------------------------------
 # - Driver workspace helpers
-# - Build route-first driver workspace state
-# -----------------------------------------------------------
-# -----------------------------------------------------------
-# - Resolve run workspace status
-# - Convert raw run timestamps into driver-facing status labels
+# - Build route-first driver template state
 # -----------------------------------------------------------
 def _get_run_workspace_status(run: run_model.Run) -> str:
     if run.start_time is None:
@@ -460,21 +455,16 @@ def summary_report(request: Request, start: date = None, end: date = None, db: S
             "start_date": start,
             "end_date": end,
             "total_drivers": total_drivers,
-        "approved_days": approved_days,
-        "pending_days": pending_days,
-        "total_charter_hours": round(total_charter_hours, 2)
-        }
+            "approved_days": approved_days,
+            "pending_days": pending_days,
+            "total_charter_hours": round(total_charter_hours, 2),
+        },
     )
 
 
 # -----------------------------------------------------------
 # LOGIN / LOGOUT ENDPOINTS
 # -----------------------------------------------------------
-from fastapi import Request, Form, HTTPException, Depends
-from sqlalchemy.orm import Session
-from backend.models import driver as driver_model
-from database import get_db
-
 @app.post("/login")
 def login(payload: dict = Body(...), request: Request = None, db: Session = Depends(get_db)):
     driver_id = int(payload["driver_id"])

@@ -330,6 +330,48 @@ def test_create_run_uses_single_active_route_assignment(client):
     assert run.json()["start_time"] is None
 
 
+def test_driver_routes_lists_only_active_route_assignments(client):
+    first_driver = client.post(
+        "/drivers/",
+        json={"name": "History Driver", "email": "history.driver@test.com", "phone": "10002a"},
+    )
+    second_driver = client.post(
+        "/drivers/",
+        json={"name": "Current Driver", "email": "current.driver@test.com", "phone": "10003a"},
+    )
+    assert first_driver.status_code in (200, 201)
+    assert second_driver.status_code in (200, 201)
+
+    retained_route = client.post(
+        "/routes/",
+        json={"route_number": "ACTIVE-KEEP", "unit_number": "BUS-ACTIVE-KEEP"},
+    )
+    replaced_route = client.post(
+        "/routes/",
+        json={"route_number": "ACTIVE-REPLACE", "unit_number": "BUS-ACTIVE-REPLACE"},
+    )
+    assert retained_route.status_code in (200, 201)
+    assert replaced_route.status_code in (200, 201)
+
+    retained_route_id = retained_route.json()["id"]
+    replaced_route_id = replaced_route.json()["id"]
+
+    keep_assign = client.post(f"/routes/{retained_route_id}/assign_driver/{first_driver.json()['id']}")
+    first_assign = client.post(f"/routes/{replaced_route_id}/assign_driver/{first_driver.json()['id']}")
+    second_assign = client.post(f"/routes/{replaced_route_id}/assign_driver/{second_driver.json()['id']}")
+    assert keep_assign.status_code in (200, 201)
+    assert first_assign.status_code in (200, 201)
+    assert second_assign.status_code in (200, 201)
+
+    first_driver_routes = client.get(f"/drivers/{first_driver.json()['id']}/routes")
+    second_driver_routes = client.get(f"/drivers/{second_driver.json()['id']}/routes")
+    assert first_driver_routes.status_code == 200
+    assert second_driver_routes.status_code == 200
+
+    assert [item["id"] for item in first_driver_routes.json()] == [retained_route_id]
+    assert [item["id"] for item in second_driver_routes.json()] == [replaced_route_id]
+
+
 def test_create_run_allows_planned_run_without_active_route_driver_assignment(client):
     route = client.post(
         "/routes/",

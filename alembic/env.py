@@ -45,8 +45,9 @@ if REPO_ROOT not in sys.path:                             # Avoid duplicate path
 
 # -----------------------------------------------------------
 # Target metadata
-# - Used by `alembic revision --autogenerate`
+# - Import models before Base.metadata so autogenerate sees tables
 # -----------------------------------------------------------
+import backend.models  # noqa: F401                        # Register ORM tables on Base metadata
 from database import Base                                  # Declarative base (root database.py)
 
 target_metadata = Base.metadata                            # Model metadata for autogenerate
