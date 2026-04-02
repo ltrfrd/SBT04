@@ -504,8 +504,8 @@ def create_run(run: RunStart, db: Session = Depends(get_db)):
     response_model=RunOut,
     summary="Start run",
     description=(
-        "Operational runtime endpoint. Start an existing planned run prepared through the Route -> Run -> Stop -> Student workflow, "
-        "or create and start a run for the selected route when needed. "
+        "Operational runtime endpoint. Start an existing prepared run through the Route -> Run -> Stop -> Student workflow. "
+        "A prepared run must already have stops and at least one runtime student assignment before start succeeds. "
         "This endpoint starts the run only and does not create students, stops, or runtime assignments."
     ),
     response_description="Started run",
@@ -616,6 +616,22 @@ def start_run(
             status_code=400,
             detail="Run has no stops. Prepare stops before starting the run."
         )
+
+    # -------------------------------------------------------------------------
+    # Require prepared runtime student assignments before runtime start
+    # -------------------------------------------------------------------------
+    existing_student_count = (
+        db.query(StudentRunAssignment)
+        .filter(StudentRunAssignment.run_id == target_run.id)
+        .count()
+    )  # Determine whether this run already has runtime student assignments
+
+    if existing_student_count == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Run has no students. Assign students before starting the run."
+        )
+
 
     # -------------------------------------------------------------------------
     # Mark the selected run as started

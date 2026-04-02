@@ -33,6 +33,67 @@ from database import Base  # SQLAlchemy Base (root database.py)
 from app import app, get_db  # FastAPI app + DB dependency
 from backend.models import driver, school, student, route, run, dispatch          # Core models used by app
 from backend.models import associations                                            # Ensure StudentRunAssignment is registered
+
+
+# =============================================================================
+# Test preparation helper
+# =============================================================================
+
+def ensure_prepared_run_student(client, run_id: int):
+    """Create the minimum canonical student fixture required for /runs/start."""
+
+    run_response = client.get(f"/runs/{run_id}")
+    assert run_response.status_code == 200
+    run_data = run_response.json()
+
+    if run_data["students"]:
+        return run_data["students"][0]
+
+    assert run_data["stops"], "Run must have stops before preparing a runtime student"
+
+    route_id = run_data["route"]["route_id"]
+    route_response = client.get(f"/routes/{route_id}")
+    assert route_response.status_code == 200
+    route_data = route_response.json()
+
+    schools = route_data.get("schools", [])
+    if schools:
+        school_id = schools[0]["school_id"]
+    else:
+        school_response = client.post(
+            "/schools/",
+            json={
+                "name": f"Prepared School {run_id}",
+                "address": f"{run_id} Prepared Way",
+            },
+        )
+        assert school_response.status_code in (200, 201)
+        school_id = school_response.json()["id"]
+
+        update_payload = {
+            "route_number": route_data["route_number"],
+            "unit_number": route_data["unit_number"],
+            "school_ids": [school_id],
+        }
+        if route_data.get("operator") is not None:
+            update_payload["operator"] = route_data["operator"]
+        if route_data.get("capacity") is not None:
+            update_payload["capacity"] = route_data["capacity"]
+
+        route_update = client.put(f"/routes/{route_id}", json=update_payload)
+        assert route_update.status_code == 200
+
+    first_stop_id = run_data["stops"][0]["stop_id"]
+    student_response = client.post(
+        f"/runs/{run_id}/stops/{first_stop_id}/students",
+        json={
+            "name": f"Prepared Student {run_id}",
+            "grade": "1",
+            "school_id": school_id,
+        },
+    )
+    assert student_response.status_code in (200, 201)
+    return student_response.json()
 # =============================================================================
 # Collection guard
 # =============================================================================

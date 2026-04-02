@@ -21,7 +21,7 @@ from backend.models.student import Student                         # Direct stud
 from database import engine                                        # DB engine
 import uuid
 
-from tests.conftest import client
+from tests.conftest import client, ensure_prepared_run_student
 # =============================================================================
 # Project Models (used directly in tests)
 # =============================================================================
@@ -65,6 +65,7 @@ def _create_planned_run(client, route_id: int, run_type: str):
 
 
 def _start_run_by_id(client, run_id: int):
+    ensure_prepared_run_student(client, run_id)
     start_response = client.post(f"/runs/start?run_id={run_id}")
     assert start_response.status_code in (200, 201)
     return start_response
@@ -630,6 +631,7 @@ def test_start_run_blocks_second_active_run_for_same_driver(client):
         json={"name": "Second Active Stop", "type": "pickup", "sequence": 1},
     )
     assert second_stop.status_code in (200, 201)
+    ensure_prepared_run_student(client, second_run.json()["id"])
     second_start = client.post(f"/runs/start?run_id={second_run.json()['id']}")
 
     assert first_start.status_code in (200, 201)
@@ -688,6 +690,7 @@ def test_start_run_starts_existing_planned_run_by_id(client):
         json={"name": "Start Existing Stop", "type": "pickup", "sequence": 1},
     )
     assert stop.status_code in (200, 201)
+    ensure_prepared_run_student(client, planned_run_id)
 
     started_run = client.post(f"/runs/start?run_id={planned_run_id}")
 
@@ -3148,15 +3151,6 @@ def _build_school_attendance_fixture(client):
     assert stop_2.status_code in (200, 201)
     stop_2_id = stop_2.json()["id"]                                # Save stop 2 ID
 
-    started_run_1 = _start_run_by_id(client, run_1_id)
-    run_1_id = started_run_1.json()["id"]                          # Start prepared run 1 only after stops exist
-
-    # -------------------------------------------------------------------------
-    # Complete run 1 so the same route driver can create run 2
-    # -------------------------------------------------------------------------
-    complete_run_1 = client.post(f"/runs/{run_1_id}/complete")
-    assert complete_run_1.status_code == 200
-
     # -------------------------------------------------------------------------
     # Create student in run 1 stop context before start
     # -------------------------------------------------------------------------
@@ -3170,6 +3164,15 @@ def _build_school_attendance_fixture(client):
     )
     assert student.status_code == 201
     student_id = student.json()["id"]                              # Save student ID
+
+    started_run_1 = _start_run_by_id(client, run_1_id)
+    run_1_id = started_run_1.json()["id"]                          # Start prepared run 1 only after stops and student exist
+
+    # -------------------------------------------------------------------------
+    # Complete run 1 so the same route driver can create run 2
+    # -------------------------------------------------------------------------
+    complete_run_1 = client.post(f"/runs/{run_1_id}/complete")
+    assert complete_run_1.status_code == 200
 
     return {
         "school_id": school_id,                                    # Test school

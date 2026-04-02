@@ -103,22 +103,22 @@ def list_assignments(
     )                                                            # Load student assignments
 
     return assignments                                           # Return assignment list
-
 # -----------------------------------------------------------
-# - Delete student run assignment
-# - Remove one assignment by id
+# - Delete assignment (blocked)
+# - Prevent direct deletion to preserve stop-context integrity
 # -----------------------------------------------------------
 @router.delete(
     "/{assignment_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete student run assignment",
-    description="Delete a student run assignment by id.",
-    response_description="Student run assignment deleted",
+    status_code=405,
+    summary="Delete student run assignment (disabled)",
+    description=(
+        "Direct assignment deletion is not allowed. "
+        "Use the stop-context student workflow instead so runtime and planning state stay synchronized."
+    ),
+    response_description="Direct delete blocked",
 )
 def delete_assignment(assignment_id: int, db: Session = Depends(get_db)):
-    assignment = db.get(StudentRunAssignment, assignment_id)
-    if not assignment:
-        raise HTTPException(status_code=404, detail="Assignment not found")
-    db.delete(assignment)
-    db.commit()
-    return None
+    raise HTTPException(
+        status_code=405,
+        detail="Direct assignment deletion is not allowed. Remove student via stop-context endpoint.",
+    )

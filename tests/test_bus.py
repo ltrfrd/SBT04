@@ -1,4 +1,4 @@
-from tests.conftest import client
+from tests.conftest import client, ensure_prepared_run_student
 
 
 def test_create_bus(client):
@@ -377,14 +377,9 @@ def test_bus_detail_returns_assigned_route_with_nested_context(client):
     )
     assert stop.status_code in (200, 201)
 
+    student = ensure_prepared_run_student(client, run.json()["id"])
     start = client.post(f"/runs/start?run_id={run.json()['id']}")
     assert start.status_code in (200, 201)
-
-    student = client.post(
-        f"/runs/{run.json()['id']}/stops/{stop.json()['id']}/students",
-        json={"name": "Bus Detail Student", "school_id": school.json()["id"]},
-    )
-    assert student.status_code in (200, 201)
 
     response = client.get(f"/buses/{bus.json()['id']}")
     assert response.status_code == 200
@@ -426,8 +421,8 @@ def test_bus_detail_returns_assigned_route_with_nested_context(client):
     ]
     assert run_detail["students"] == [
         {
-            "student_id": student.json()["id"],
-            "student_name": "Bus Detail Student",
+            "student_id": student["id"],
+            "student_name": student["name"],
             "school_id": school.json()["id"],
             "school_name": "Bus Detail School",
             "stop_id": stop.json()["id"],

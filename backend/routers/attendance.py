@@ -569,7 +569,7 @@ def get_school_mobile_route_runs(
 
     return templates.TemplateResponse(
         request,
-        "school_attendance_routes.html",
+        "school_attendance_runs.html",
         {
             "report": report_data,
         },

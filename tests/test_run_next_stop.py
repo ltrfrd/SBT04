@@ -9,6 +9,7 @@
 #   - Calling next_stop again increments to the next sequence
 #   - Stop must exist in the run
 # =============================================================================
+from tests.conftest import ensure_prepared_run_student
 
 
 def test_next_stop_advances_progress(client):
@@ -80,6 +81,7 @@ def test_next_stop_advances_progress(client):
     # -------------------------------------------------------------------------
     # Start prepared run
     # -------------------------------------------------------------------------
+    ensure_prepared_run_student(client, run_id)
     start_res = client.post(f"/runs/start?run_id={run_id}")
     assert start_res.status_code in (200, 201)
 

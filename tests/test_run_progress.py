@@ -2,13 +2,16 @@
 # tests/test_run_progress.py
 # -----------------------------------------------------------------------------
 # Purpose:
-#   Verify that start only works for prepared runs that already have stops.
+#   Verify that start only works for prepared runs that already have stops
+#   and at least one runtime student assignment.
 #
 # Endpoint flow tested:
 #   - POST /routes/{route_id}/runs
 #   - POST /stops/
+#   - POST /runs/{run_id}/stops/{stop_id}/students
 #   - POST /runs/start
 # =============================================================================
+from tests.conftest import ensure_prepared_run_student
 
 
 # =============================================================================
@@ -70,6 +73,78 @@ def test_start_run_requires_prepared_stops(client):
     start_response = client.post(f"/runs/start?run_id={source_run_id}")
     assert start_response.status_code == 400
     assert start_response.json()["detail"] == "Run has no stops. Prepare stops before starting the run."
+
+
+# =============================================================================
+# Test: starting a run with stops but no students fails
+# =============================================================================
+def test_start_run_requires_prepared_students(client):
+
+    # -------------------------------------------------------------------------
+    # Create driver
+    # -------------------------------------------------------------------------
+    driver_response = client.post(
+        "/drivers/",
+        json={
+            "name": "Student Guard Driver",
+            "email": "student.guard@example.com",
+            "phone": "111-222-4444",
+        },
+    )
+    assert driver_response.status_code in (200, 201)
+    driver_id = driver_response.json()["id"]
+
+    school_response = client.post(
+        "/schools/",
+        json={
+            "name": "Student Guard School",
+            "address": "11 Guard Way",
+        },
+    )
+    assert school_response.status_code in (200, 201)
+    school_id = school_response.json()["id"]
+
+    # -------------------------------------------------------------------------
+    # Create route
+    # -------------------------------------------------------------------------
+    route_response = client.post(
+        "/routes/",
+        json={
+            "route_number": "13",
+            "unit_number": "BUS-13",
+            "school_ids": [school_id],
+        },
+    )
+    assert route_response.status_code in (200, 201)
+    route_id = route_response.json()["id"]
+
+    assign_response = client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
+    assert assign_response.status_code in (200, 201)
+
+    # -------------------------------------------------------------------------
+    # Create planned run with stops only
+    # -------------------------------------------------------------------------
+    source_run_response = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
+    assert source_run_response.status_code in (200, 201)
+    source_run_id = source_run_response.json()["id"]
+
+    stop_response = client.post(
+        f"/runs/{source_run_id}/stops",
+        json={
+            "sequence": 1,
+            "type": "pickup",
+            "name": "Prepared Stop Without Student",
+            "address": "100 Guard Stop",
+        },
+    )
+    assert stop_response.status_code in (200, 201)
+
+    # -------------------------------------------------------------------------
+    # Starting without runtime students should now fail
+    # -------------------------------------------------------------------------
+    start_response = client.post(f"/runs/start?run_id={source_run_id}")
+    assert start_response.status_code == 400
+    assert start_response.json()["detail"] == "Run has no students. Assign students before starting the run."
 
 
 # =============================================================================
@@ -162,6 +237,7 @@ def test_run_state_uses_stored_current_stop_sequence(client):
     # -------------------------------------------------------------------------
     # Start the prepared run
     # -------------------------------------------------------------------------
+    ensure_prepared_run_student(client, seed_run_id)
     active_run_res = client.post(f"/runs/start?run_id={seed_run_id}")
     assert active_run_res.status_code in (200, 201)
     active_run_id = active_run_res.json()["id"]  # Started run ID

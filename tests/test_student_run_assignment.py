@@ -238,3 +238,43 @@ def test_list_student_run_assignments_requires_student_id(client):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "student_id is required"
+
+
+# -----------------------------------------------------------
+# - Delete assignment is blocked
+# - Reject direct runtime assignment deletion
+# -----------------------------------------------------------
+def test_delete_student_run_assignment_is_blocked(client):
+
+    # -------------------------------------------------------------------------
+    # Build assignment through canonical stop-context workflow
+    # -------------------------------------------------------------------------
+    context = _build_assignment_context(client, "SRA-DELETE", ["AM"])
+    run = context["runs"][0]
+    stop = context["stops"][0]
+    school = context["school"]
+
+    student = client.post(
+        f"/runs/{run['id']}/stops/{stop['id']}/students",
+        json={
+            "name": "Delete Blocked Student",
+            "grade": "5",
+            "school_id": school["id"],
+        },
+    ).json()
+
+    assignments = client.get(f"/student-run-assignments/{run['id']}")
+    assert assignments.status_code == 200
+    assignment_id = assignments.json()[0]["id"]
+    assert assignments.json()[0]["student_id"] == student["id"]
+
+    # -------------------------------------------------------------------------
+    # Direct delete should remain blocked
+    # -------------------------------------------------------------------------
+    response = client.delete(f"/student-run-assignments/{assignment_id}")
+
+    assert response.status_code == 405
+    assert response.json()["detail"] == (
+        "Direct assignment deletion is not allowed. "
+        "Remove student via stop-context endpoint."
+    )

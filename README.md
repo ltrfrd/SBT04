@@ -36,7 +36,9 @@ Core workflow rule:
 
 - runtime assignment truth is explicit and stop-based
 - no runtime assignment exists without stop context
+- assignment creation is stop-context only through `POST /runs/{run_id}/stops/{stop_id}/students`
 - `/runs/start` does not create students
+- `/runs/start` does not create stops
 - `/runs/start` does not auto-create `StudentRunAssignment` rows
 
 ## Runtime And Maintenance Flow
@@ -50,15 +52,21 @@ After the setup hierarchy exists, real usage should continue from route and run 
 Current `/runs/start` meaning:
 
 - operational runtime endpoint only
-- starts an existing prepared run by `run_id`, or creates-and-starts a run for the selected route when needed
-- requires the run to already have stops before start succeeds
+- starts an existing prepared run by `run_id`
+- prepared run required before start succeeds
+- prepared run means stops already exist on the run
+- prepared run means at least one runtime student assignment already exists on the run
 - does not create students
+- does not create stops
 - does not create `StudentRunAssignment` rows
 
 Maintenance and compatibility remain separate from the normal setup path:
 
-- `PUT /students/{student_id}/assignment` is a correction / reassignment endpoint
+- assignment creation is stop-context only through `POST /runs/{run_id}/stops/{stop_id}/students`
+- `PUT /students/{student_id}/assignment` is an intentional maintenance endpoint for corrections and controlled moves
+- `StudentRunAssignment` acts as the runtime + planning bridge between the student record and the selected run/stop context
 - `POST /student-run-assignments/` is blocked and returns guidance to use stop-context student creation
+- `DELETE /student-run-assignments/{id}` is blocked and returns guidance to use stop-context student workflows
 - `GET /student-run-assignments/{run_id}` and `GET /student-run-assignments/?student_id=...` remain compatibility read views
 - `POST /runs/` is legacy compatibility
 - `POST /stops/` is legacy compatibility
@@ -135,13 +143,13 @@ Protected runtime and reporting:
 Explicit runtime mapping and compatibility:
 
 - `backend/models/associations.py` defines `RouteDriverAssignment` and `StudentRunAssignment`
-- `backend/routers/student_run_assignment.py` exposes explicit assignment endpoints for compatibility and advanced/internal use
-- `backend/routers/student.py` keeps the direct student create/update compatibility surface, but the preferred assignment flow is stop-context student creation
+- `backend/routers/student_run_assignment.py` exposes read-only assignment lookup endpoints while direct create/delete mutation paths are blocked
+- `backend/routers/student.py` keeps the direct student create compatibility surface and the intentional maintenance move endpoint, but the preferred assignment flow is stop-context student creation
 
 School mobile attendance flow:
 
 - `/reports/school/{school_id}/mobile` renders `school_attendance_routes.html`
-- `/reports/school/{school_id}/mobile/route/{route_id}` currently also renders `school_attendance_routes.html`
+- `/reports/school/{school_id}/mobile/route/{route_id}` renders `school_attendance_runs.html`
 - `/reports/school/{school_id}/mobile/run/{run_id}` renders `school_mobile_report.html`
 - attendance template rendering uses the current `TemplateResponse(request, template_name, context)` signature
 

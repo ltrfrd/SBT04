@@ -51,8 +51,16 @@ Workflow context endpoints:
 - POST /runs/{run_id}/stops/{stop_id}/students/bulk
 - stop-context student creation creates StudentRunAssignment internally
 - /runs/start is operational runtime only
+- /runs/start starts existing prepared runs only
+- prepared run means stops already exist
+- prepared run means at least one runtime student assignment already exists
 - /runs/start does not create students
+- /runs/start does not create stops
 - /runs/start does not auto-create StudentRunAssignment rows
+- StudentRunAssignment is the runtime + planning bridge for the selected run/stop
+- assignment create is stop-context only: POST /runs/{run_id}/stops/{stop_id}/students
+- assignment update is maintenance only: PUT /students/{student_id}/assignment
+- assignment delete is blocked directly: DELETE /student-run-assignments/{id}
 - NOT FOR OPERATOR WORKFLOW
 - internal runtime engine
 - still exists in the backend
@@ -154,9 +162,9 @@ backend/
 |   |-- driver_run.html            Main driver route/run workspace
 |   |-- route_report.html          Route report page
 |   |-- school_attendance_routes.html
-|   |                              School mobile route selection page (also currently used for route-run selection)
+|   |                              School mobile route selection page
 |   |-- school_attendance_runs.html
-|   |                              School mobile run selection template present in repo
+|   |                              School mobile run selection page
 |   |-- school_mobile_report.html  School mobile attendance page
 |   |-- summary_report.html        Summary/payroll-oriented report page
 |
@@ -188,11 +196,12 @@ backend/ architecture note:
 - existing route.unit_number, route.capacity, and route.operator remain for compatibility.
 - read surfaces may prefer assigned bus values and fall back to legacy route values.
 - active route-driver assignment is the route-level source used for run start.
-- /runs/start starts runs only; it does not create students or runtime assignment rows.
+- /runs/start starts prepared runs only; it does not create students, stops, or runtime assignment rows.
 - stop-context student creation is the preferred path that creates runtime assignment rows.
+- StudentRunAssignment is the internal runtime + planning bridge, not the normal operator planning object.
 - school mobile attendance pages currently map as:
 - /reports/school/{school_id}/mobile -> school_attendance_routes.html
-- /reports/school/{school_id}/mobile/route/{route_id} -> school_attendance_routes.html
+- /reports/school/{school_id}/mobile/route/{route_id} -> school_attendance_runs.html
 - /reports/school/{school_id}/mobile/run/{run_id} -> school_mobile_report.html
 - attendance templates use TemplateResponse(request, template_name, context).
 
@@ -201,7 +210,9 @@ Real workflow-related endpoint note:
 - single add: POST /runs/{run_id}/stops/{stop_id}/students
 - bulk add:   POST /runs/{run_id}/stops/{stop_id}/students/bulk
 - student_run_assignment router still exists for compatibility/internal read visibility
+- direct assignment update intentionally lives in student router maintenance endpoint: PUT /students/{student_id}/assignment
 - direct POST /student-run-assignments/ is blocked and points callers to stop-context student creation
+- direct DELETE /student-run-assignments/{id} is blocked and points callers to stop-context student workflows
 - legacy direct creates still exist:
 - POST /runs/ for planned-run compatibility
 - POST /stops/ for stop compatibility
@@ -298,7 +309,7 @@ Current operator direction:
 - create runs inside route
 - create stops inside run
 - add students from stop context
-- start prepared runs through /runs/start
+- start prepared runs through /runs/start only after stops and student assignments exist
 
 Key reality from the current repo:
 - templates remain the main UI
