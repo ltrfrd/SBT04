@@ -18,10 +18,7 @@ def _create_route(client, driver_id: int):
 
 
 def _create_run(client, driver_id: int, route_id: int):
-    r = client.post(
-        "/runs/start",
-        json={"route_id": route_id, "run_type": "AM"},
-    )
+    r = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
     assert r.status_code in (200, 201)
     return r.json()["id"]
 

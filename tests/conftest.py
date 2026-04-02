@@ -13,6 +13,7 @@
 
 import os  # Path utilities
 import sys  # Python import path control
+import tempfile
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))  # Repo root
 if PROJECT_ROOT not in sys.path:
@@ -33,14 +34,31 @@ from app import app, get_db  # FastAPI app + DB dependency
 from backend.models import driver, school, student, route, run, dispatch          # Core models used by app
 from backend.models import associations                                            # Ensure StudentRunAssignment is registered
 # =============================================================================
+# Collection guard
+# =============================================================================
+
+def pytest_ignore_collect(collection_path, config):
+    """Skip leftover Windows temp directories under tests during collection."""
+
+    name = getattr(collection_path, "name", None) or os.path.basename(str(collection_path))
+
+    if str(collection_path).startswith(os.path.join(PROJECT_ROOT, "tests")):
+        if name.startswith("sbt04-tests-") or name.startswith("pytest_"):
+            return True
+
+    return False
+
+
+# =============================================================================
 # Database engine fixture (isolated per test)
 # =============================================================================
 
 @pytest.fixture()
-def db_engine(tmp_path):
+def db_engine():
     """Create a temporary SQLite engine for this test (isolated from sbt.db)."""
 
-    test_db_path = tmp_path / "test_sbt.db"  # Unique temp DB file per test
+    fd, test_db_path = tempfile.mkstemp(prefix="sbt04-tests-", suffix=".db", dir=PROJECT_ROOT)  # Stable per-test DB file without pytest tmp_path
+    os.close(fd)
 
     engine = create_engine(
         f"sqlite:///{test_db_path}",  # File-based SQLite in temp directory
@@ -58,6 +76,10 @@ def db_engine(tmp_path):
     yield engine  # Provide engine to tests
     Base.metadata.drop_all(bind=engine)  # Drop tables after test
     engine.dispose()  # Release file handles (important on Windows)
+    try:
+        os.remove(test_db_path)  # Best-effort cleanup without pytest tmpdir involvement
+    except FileNotFoundError:
+        pass
 
 
 # =============================================================================

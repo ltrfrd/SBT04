@@ -56,7 +56,8 @@ Workflow context endpoints:
 - NOT FOR OPERATOR WORKFLOW
 - internal runtime engine
 - still exists in the backend
-- still exposed by router for compatibility and advanced/internal use
+- direct POST /student-run-assignments/ is blocked
+- read endpoints remain available for compatibility/debug visibility
 - should not be used as the main UI planning object
 
 ===============================================================================
@@ -130,7 +131,7 @@ backend/
 |   |-- stop.py                    Stop CRUD, reorder, normalize, validate
 |   |-- student.py                 Student CRUD and filtered lookup
 |   |-- student_bus_absence.py     Planned no-ride endpoints
-|   |-- student_run_assignment.py  Explicit assignment router kept for compatibility/internal use
+|   |-- student_run_assignment.py  Read-focused compatibility router; direct create is blocked
 |   |-- web_pages.py               Server-rendered page routes for dashboard, reports, and driver workspace
 |   |-- ws.py                      WebSocket GPS endpoint and connection state
 |
@@ -199,7 +200,8 @@ Real workflow-related endpoint note:
 - run router already contains stop-context student endpoints
 - single add: POST /runs/{run_id}/stops/{stop_id}/students
 - bulk add:   POST /runs/{run_id}/stops/{stop_id}/students/bulk
-- student_run_assignment router still exists for compatibility/internal use
+- student_run_assignment router still exists for compatibility/internal read visibility
+- direct POST /student-run-assignments/ is blocked and points callers to stop-context student creation
 - legacy direct creates still exist:
 - POST /runs/ for planned-run compatibility
 - POST /stops/ for stop compatibility

@@ -57,6 +57,18 @@ def _create_route_with_assignment_flow(
 
     return route
 
+
+def _create_planned_run(client, route_id: int, run_type: str):
+    run_response = client.post(f"/routes/{route_id}/runs", json={"run_type": run_type})
+    assert run_response.status_code in (200, 201)
+    return run_response
+
+
+def _start_run_by_id(client, run_id: int):
+    start_response = client.post(f"/runs/start?run_id={run_id}")
+    assert start_response.status_code in (200, 201)
+    return start_response
+
 def test_root(client):
     r = client.get("/")
     assert r.status_code == 200
@@ -285,8 +297,7 @@ def test_route_report_prefers_assigned_bus_values_with_route_fallback(client):
     )
     assert updated_route.status_code == 200
 
-    run = client.post("/runs/start", json={"route_id": route_id, "run_type": "AM"})
-    assert run.status_code in (200, 201)
+    run = _create_planned_run(client, route_id, "AM")
 
     stop = client.post(
         f"/runs/{run.json()['id']}/stops",
@@ -299,6 +310,8 @@ def test_route_report_prefers_assigned_bus_values_with_route_fallback(client):
         json={"name": "Report Student", "school_id": school_id},
     )
     assert student.status_code in (200, 201)
+
+    run = _start_run_by_id(client, run.json()["id"])
 
     bus = client.post(
         "/buses/",
@@ -343,8 +356,13 @@ def test_websocket_gps(client):
     route = _create_route_with_assignment_flow(client, "R1", "Test", driver_id=1)
     route_id = route["id"]
 
-    r = client.post("/runs/start", json={"route_id": route_id, "run_type": "AM"})
-    assert r.status_code in (200, 201)
+    planned_run = _create_planned_run(client, route_id, "AM")
+    run_stop = client.post(
+        f"/runs/{planned_run.json()['id']}/stops",
+        json={"name": "GPS Stop", "latitude": 40.7128, "longitude": -74.0060, "type": "pickup", "sequence": 1},
+    )
+    assert run_stop.status_code in (200, 201)
+    r = _start_run_by_id(client, planned_run.json()["id"])
     run_id = r.json()["id"]
 
     with client.websocket_connect(f"/ws/gps/{run_id}") as ws:
@@ -364,9 +382,8 @@ def test_alerts(client):
     route = _create_route_with_assignment_flow(client, "R1", "Bus-01", driver_id=driver_id)
     route_id = route["id"]
 
-    r = client.post("/runs/start", json={"route_id": route_id, "run_type": "AM"})
-    assert r.status_code in (200, 201)
-    run_id = r.json()["id"]
+    planned_run = _create_planned_run(client, route_id, "AM")
+    run_id = planned_run.json()["id"]
 
     r = client.post("/schools/", json={"name": "Test School", "address": "123 Test St"})
     assert r.status_code in (200, 201)
@@ -395,6 +412,9 @@ def test_alerts(client):
         },
     )
     assert r.status_code in (200, 201)
+
+    started_run = _start_run_by_id(client, run_id)
+    run_id = started_run.json()["id"]
 
     with client.websocket_connect(f"/ws/gps/{run_id}") as ws:
         ws.send_json({"lat": 40.7580, "lng": -73.9855})
@@ -596,8 +616,21 @@ def test_start_run_blocks_second_active_run_for_same_driver(client):
     assign = client.post(f"/routes/{route_id}/assign_driver/{driver.json()['id']}")
     assert assign.status_code in (200, 201)
 
-    first_start = client.post("/runs/start", json={"route_id": route_id, "run_type": "AM"})
-    second_start = client.post("/runs/start", json={"route_id": route_id, "run_type": "PM"})
+    first_run = _create_planned_run(client, route_id, "AM")
+    first_stop = client.post(
+        f"/runs/{first_run.json()['id']}/stops",
+        json={"name": "First Active Stop", "type": "pickup", "sequence": 1},
+    )
+    assert first_stop.status_code in (200, 201)
+    first_start = _start_run_by_id(client, first_run.json()["id"])
+
+    second_run = _create_planned_run(client, route_id, "PM")
+    second_stop = client.post(
+        f"/runs/{second_run.json()['id']}/stops",
+        json={"name": "Second Active Stop", "type": "pickup", "sequence": 1},
+    )
+    assert second_stop.status_code in (200, 201)
+    second_start = client.post(f"/runs/start?run_id={second_run.json()['id']}")
 
     assert first_start.status_code in (200, 201)
     assert first_start.json()["start_time"] is not None
@@ -649,6 +682,12 @@ def test_start_run_starts_existing_planned_run_by_id(client):
 
     assign = client.post(f"/routes/{route_id}/assign_driver/{driver.json()['id']}")
     assert assign.status_code in (200, 201)
+
+    stop = client.post(
+        f"/runs/{planned_run_id}/stops",
+        json={"name": "Start Existing Stop", "type": "pickup", "sequence": 1},
+    )
+    assert stop.status_code in (200, 201)
 
     started_run = client.post(f"/runs/start?run_id={planned_run_id}")
 
@@ -740,8 +779,13 @@ def test_update_started_run_fails(client):
     assign = client.post(f"/routes/{route_id}/assign_driver/{driver.json()['id']}")
     assert assign.status_code in (200, 201)
 
-    run = client.post("/runs/start", json={"route_id": route_id, "run_type": "Started Label"})
-    assert run.status_code in (200, 201)
+    run = _create_planned_run(client, route_id, "Started Label")
+    stop = client.post(
+        f"/runs/{run.json()['id']}/stops",
+        json={"name": "Started Update Stop", "type": "pickup", "sequence": 1},
+    )
+    assert stop.status_code in (200, 201)
+    run = _start_run_by_id(client, run.json()["id"])
     run_id = run.json()["id"]
     assert run.json()["start_time"] is not None
 
@@ -768,8 +812,13 @@ def test_delete_started_run_fails(client):
     assign = client.post(f"/routes/{route_id}/assign_driver/{driver.json()['id']}")
     assert assign.status_code in (200, 201)
 
-    run = client.post("/runs/start", json={"route_id": route_id, "run_type": "Started Label"})
-    assert run.status_code in (200, 201)
+    run = _create_planned_run(client, route_id, "Started Label")
+    stop = client.post(
+        f"/runs/{run.json()['id']}/stops",
+        json={"name": "Started Delete Stop", "type": "pickup", "sequence": 1},
+    )
+    assert stop.status_code in (200, 201)
+    run = _start_run_by_id(client, run.json()["id"])
     run_id = run.json()["id"]
     assert run.json()["start_time"] is not None
 
@@ -796,7 +845,13 @@ def test_start_run_accepts_legacy_enum_value_as_plain_string(client):
     assign = client.post(f"/routes/{route_id}/assign_driver/{driver.json()['id']}")
     assert assign.status_code in (200, 201)
 
-    run = client.post("/runs/start", json={"route_id": route_id, "run_type": "AM"})
+    planned_run = _create_planned_run(client, route_id, "AM")
+    stop = client.post(
+        f"/runs/{planned_run.json()['id']}/stops",
+        json={"name": "Legacy Start Stop", "type": "pickup", "sequence": 1},
+    )
+    assert stop.status_code in (200, 201)
+    run = _start_run_by_id(client, planned_run.json()["id"])
     assert run.status_code in (200, 201)
     assert run.json()["run_type"] == "AM"
 
@@ -861,6 +916,12 @@ def test_unassign_driver_blocks_future_run_start(client):
     assert run.status_code in (200, 201)
     assert run.json()["start_time"] is None
     assert run.json()["driver_id"] is None
+
+    stop = client.post(
+        f"/runs/{run.json()['id']}/stops",
+        json={"name": "Future Start Stop", "type": "pickup", "sequence": 1},
+    )
+    assert stop.status_code in (200, 201)
 
     started = client.post(f"/runs/start?run_id={run.json()['id']}")
     assert started.status_code == 409
@@ -938,6 +999,7 @@ def test_pickup_student_success(client):
             "route_number": "R1",
             "unit_number": "Bus-01",
             "driver_id": driver_id,
+            "school_ids": [school_id],
         },
     )
     route_id = route.json()["id"]  # Save route ID
@@ -945,14 +1007,7 @@ def test_pickup_student_success(client):
     # -------------------------------------------------------------------------
     # Create run
     # -------------------------------------------------------------------------
-    run = client.post(
-        "/runs/start",
-        json={
-            "driver_id": driver_id,
-            "route_id": route_id,
-            "run_type": "AM",
-        },
-    )
+    run = _create_planned_run(client, route_id, "AM")
     run_id = run.json()["id"]  # Save run ID
 
     # -------------------------------------------------------------------------
@@ -988,29 +1043,17 @@ def test_pickup_student_success(client):
     # Create student assigned to second stop
     # -------------------------------------------------------------------------
     student = client.post(
-        "/students/",
+        f"/runs/{run_id}/stops/{stop2_id}/students",
         json={
             "name": "Student Two",
             "grade": "5",
             "school_id": school_id,
-            "route_id": route_id,
-            "stop_id": stop2_id,
         },
     )
     student_id = student.json()["id"]  # Save student ID
 
-    # -------------------------------------------------------------------------
-    # Create runtime assignment for this run
-    # -------------------------------------------------------------------------
-    assignment = client.post(
-        "/student-run-assignments/",
-        json={
-            "student_id": student_id,
-            "run_id": run_id,
-            "stop_id": stop2_id,
-        },
-    )
-    assert assignment.status_code == 201
+    started_run = _start_run_by_id(client, run_id)
+    run_id = started_run.json()["id"]
 
     # -------------------------------------------------------------------------
     # Move run directly to stop 2 (student's assigned stop)
@@ -1075,6 +1118,7 @@ def test_pickup_student_not_assigned(client):
             "route_number": "R1",
             "unit_number": "Bus-01",
             "driver_id": driver_id,
+            "school_ids": [school_id],
         },
     )
     route_id = route.json()["id"]
@@ -1082,14 +1126,7 @@ def test_pickup_student_not_assigned(client):
     # -------------------------------------------------------------------------
     # Create run
     # -------------------------------------------------------------------------
-    run = client.post(
-        "/runs/start",
-        json={
-            "driver_id": driver_id,
-            "route_id": route_id,
-            "run_type": "AM",
-        },
-    )
+    run = _create_planned_run(client, route_id, "AM")
     run_id = run.json()["id"]
 
     # -------------------------------------------------------------------------
@@ -1134,6 +1171,9 @@ def test_pickup_student_not_assigned(client):
         },
     )
     student_id = student.json()["id"]
+
+    started_run = _start_run_by_id(client, run_id)
+    run_id = started_run.json()["id"]
 
     # -------------------------------------------------------------------------
     # Move run to stop 2
@@ -1191,6 +1231,7 @@ def test_pickup_student_already_picked_up(client):
             "route_number": "R1",
             "unit_number": "Bus-01",
             "driver_id": driver_id,
+            "school_ids": [school_id],
         },
     )
     route_id = route.json()["id"]
@@ -1198,14 +1239,7 @@ def test_pickup_student_already_picked_up(client):
     # -------------------------------------------------------------------------
     # Create run
     # -------------------------------------------------------------------------
-    run = client.post(
-        "/runs/start",
-        json={
-            "driver_id": driver_id,
-            "route_id": route_id,
-            "run_type": "AM",
-        },
-    )
+    run = _create_planned_run(client, route_id, "AM")
     run_id = run.json()["id"]
 
     # -------------------------------------------------------------------------
@@ -1240,29 +1274,17 @@ def test_pickup_student_already_picked_up(client):
     # Create student
     # -------------------------------------------------------------------------
     student = client.post(
-        "/students/",
+        f"/runs/{run_id}/stops/{stop2_id}/students",
         json={
             "name": "Student Two",
             "grade": "5",
             "school_id": school_id,
-            "route_id": route_id,
-            "stop_id": stop2_id,
         },
     )
     student_id = student.json()["id"]
 
-    # -------------------------------------------------------------------------
-    # Create runtime assignment
-    # -------------------------------------------------------------------------
-    assignment = client.post(
-        "/student-run-assignments/",
-        json={
-            "student_id": student_id,
-            "run_id": run_id,
-            "stop_id": stop2_id,
-        },
-    )
-    assert assignment.status_code == 201
+    started_run = _start_run_by_id(client, run_id)
+    run_id = started_run.json()["id"]
 
     # -------------------------------------------------------------------------
     # Move run to stop 2
@@ -1340,6 +1362,7 @@ def test_dropoff_student_success(client):
             "route_number": "R1",
             "unit_number": "Bus-01",
             "driver_id": driver_id,
+            "school_ids": [school_id],
         },
     )
     route_id = route.json()["id"]
@@ -1347,14 +1370,7 @@ def test_dropoff_student_success(client):
     # -------------------------------------------------------------------------
     # Create run
     # -------------------------------------------------------------------------
-    run = client.post(
-        "/runs/start",
-        json={
-            "driver_id": driver_id,
-            "route_id": route_id,
-            "run_type": "AM",
-        },
-    )
+    run = _create_planned_run(client, route_id, "AM")
     run_id = run.json()["id"]
 
     # -------------------------------------------------------------------------
@@ -1389,29 +1405,17 @@ def test_dropoff_student_success(client):
     # Create student
     # -------------------------------------------------------------------------
     student = client.post(
-        "/students/",
+        f"/runs/{run_id}/stops/{stop2_id}/students",
         json={
             "name": "Student Two",
             "grade": "5",
             "school_id": school_id,
-            "route_id": route_id,
-            "stop_id": stop2_id,
         },
     )
     student_id = student.json()["id"]
 
-    # -------------------------------------------------------------------------
-    # Create runtime assignment
-    # -------------------------------------------------------------------------
-    assignment = client.post(
-        "/student-run-assignments/",
-        json={
-            "student_id": student_id,
-            "run_id": run_id,
-            "stop_id": stop2_id,
-        },
-    )
-    assert assignment.status_code == 201
+    started_run = _start_run_by_id(client, run_id)
+    run_id = started_run.json()["id"]
 
     # -------------------------------------------------------------------------
     # Move run to stop 2 and pick up student first
@@ -1482,6 +1486,7 @@ def test_dropoff_student_not_onboard(client):
             "route_number": "R1",
             "unit_number": "Bus-01",
             "driver_id": driver_id,
+            "school_ids": [school_id],
         },
     )
     route_id = route.json()["id"]
@@ -1489,14 +1494,7 @@ def test_dropoff_student_not_onboard(client):
     # -------------------------------------------------------------------------
     # Create run
     # -------------------------------------------------------------------------
-    run = client.post(
-        "/runs/start",
-        json={
-            "driver_id": driver_id,
-            "route_id": route_id,
-            "run_type": "AM",
-        },
-    )
+    run = _create_planned_run(client, route_id, "AM")
     run_id = run.json()["id"]
 
         # -------------------------------------------------------------------------
@@ -1534,29 +1532,17 @@ def test_dropoff_student_not_onboard(client):
     # Create student
     # -------------------------------------------------------------------------
     student = client.post(
-        "/students/",
+        f"/runs/{run_id}/stops/{stop2_id}/students",
         json={
             "name": "Student Two",
             "grade": "5",
             "school_id": school_id,
-            "route_id": route_id,
-            "stop_id": stop2_id,
         },
     )
     student_id = student.json()["id"]
 
-    # -------------------------------------------------------------------------
-    # Create runtime assignment
-    # -------------------------------------------------------------------------
-    assignment = client.post(
-        "/student-run-assignments/",
-        json={
-            "student_id": student_id,
-            "run_id": run_id,
-            "stop_id": stop2_id,
-        },
-    )
-    assert assignment.status_code == 201
+    started_run = _start_run_by_id(client, run_id)
+    run_id = started_run.json()["id"]
 
     # -------------------------------------------------------------------------
     # Move run to stop 2 but do NOT pick up student
@@ -1614,6 +1600,7 @@ def test_dropoff_student_already_dropped_off(client):
             "route_number": "R1",
             "unit_number": "Bus-01",
             "driver_id": driver_id,
+            "school_ids": [school_id],
         },
     )
     route_id = route.json()["id"]
@@ -1621,14 +1608,7 @@ def test_dropoff_student_already_dropped_off(client):
     # -------------------------------------------------------------------------
     # Create run
     # -------------------------------------------------------------------------
-    run = client.post(
-        "/runs/start",
-        json={
-            "driver_id": driver_id,
-            "route_id": route_id,
-            "run_type": "AM",
-        },
-    )
+    run = _create_planned_run(client, route_id, "AM")
     run_id = run.json()["id"]
 
         # -------------------------------------------------------------------------
@@ -1665,29 +1645,17 @@ def test_dropoff_student_already_dropped_off(client):
     # Create student
     # -------------------------------------------------------------------------
     student = client.post(
-        "/students/",
+        f"/runs/{run_id}/stops/{stop2_id}/students",
         json={
             "name": "Student Two",
             "grade": "5",
             "school_id": school_id,
-            "route_id": route_id,
-            "stop_id": stop2_id,
         },
     )
     student_id = student.json()["id"]
 
-    # -------------------------------------------------------------------------
-    # Create runtime assignment
-    # -------------------------------------------------------------------------
-    assignment = client.post(
-        "/student-run-assignments/",
-        json={
-            "student_id": student_id,
-            "run_id": run_id,
-            "stop_id": stop2_id,
-        },
-    )
-    assert assignment.status_code == 201
+    started_run = _start_run_by_id(client, run_id)
+    run_id = started_run.json()["id"]
 
     # -------------------------------------------------------------------------
     # Move run to stop 2, pick up student, then drop off once
@@ -1756,16 +1724,25 @@ def test_get_onboard_students_empty(client):
     # -------------------------------------------------------------------------
     # Create run
     # -------------------------------------------------------------------------
-    run_response = client.post(
-        "/runs/start",
-        json={
-            "driver_id": driver_id,
-            "route_id": route_id,
-            "run_type": "AM",
-        },
-    )
+    run_response = _create_planned_run(client, route_id, "AM")
     assert run_response.status_code in (200, 201)
     run_id = run_response.json()["id"]
+
+    stop = client.post(
+        "/stops/",
+        json={
+            "name": "Onboard Empty Stop",
+            "latitude": 53.5461,
+            "longitude": -113.4938,
+            "type": "pickup",
+            "run_id": run_id,
+            "sequence": 1,
+        },
+    )
+    assert stop.status_code in (200, 201)
+
+    started_run = _start_run_by_id(client, run_id)
+    run_id = started_run.json()["id"]
 
 
     # -------------------------------------------------------------------------
@@ -1826,14 +1803,7 @@ def test_get_occupancy_summary_success(client, db_engine):
     # -------------------------------------------------------------------------
     # Create run
     # -------------------------------------------------------------------------
-    run_response = client.post(
-        "/runs/start",
-        json={
-            "driver_id": driver_id,
-            "route_id": route_id,
-            "run_type": "AM",
-        },
-    )
+    run_response = _create_planned_run(client, route_id, "AM")
     assert run_response.status_code in (200, 201)
     run_id = run_response.json()["id"]
 
@@ -1951,6 +1921,9 @@ def test_get_occupancy_summary_success(client, db_engine):
         db.commit()
     finally:
         db.close()
+
+    started_run = _start_run_by_id(client, run_id)
+    run_id = started_run.json()["id"]
 
     # -------------------------------------------------------------------------
     # Call occupancy summary endpoint
@@ -2081,6 +2054,7 @@ def test_get_run_state_snapshot(client):
             "route_number": "STATE-1",
             "unit_number": "Bus-State",
             "driver_id": driver_id,
+            "school_ids": [school_id],
         },
     )
     assert route.status_code in (200, 201)
@@ -2089,14 +2063,7 @@ def test_get_run_state_snapshot(client):
     # -------------------------------------------------------------------------
     # Create run
     # -------------------------------------------------------------------------
-    run = client.post(
-        "/runs/start",
-        json={
-            "driver_id": driver_id,
-            "route_id": route_id,
-            "run_type": "AM",
-        },
-    )
+    run = _create_planned_run(client, route_id, "AM")
     assert run.status_code in (200, 201)
     run_id = run.json()["id"]
 
@@ -2135,27 +2102,18 @@ def test_get_run_state_snapshot(client):
     # Create student and runtime assignment
     # -------------------------------------------------------------------------
     student = client.post(
-        "/students/",
+        f"/runs/{run_id}/stops/{stop1_id}/students",
         json={
             "name": "State Student",
             "grade": "4",
             "school_id": school_id,
-            "route_id": route_id,
-            "stop_id": stop1_id,
         },
     )
     assert student.status_code in (200, 201)
     student_id = student.json()["id"]
 
-    assignment = client.post(
-        "/student-run-assignments/",
-        json={
-            "student_id": student_id,
-            "run_id": run_id,
-            "stop_id": stop1_id,
-        },
-    )
-    assert assignment.status_code == 201
+    started_run = _start_run_by_id(client, run_id)
+    run_id = started_run.json()["id"]
 
     # -------------------------------------------------------------------------
     # Read initial state before any actions
@@ -2247,12 +2205,15 @@ def test_arrive_stop_allows_backward_movement(client):
     driver_id = driver.json()["id"]  # Extract driver ID from API response
     route = client.post("/routes/", json={"route_number": "R3", "unit_number": "Bus-03", "driver_id": driver_id})  # Create route
     route_id = route.json()["id"]  # Extract route ID from API response
-    run = client.post("/runs/start", json={"driver_id": driver_id, "route_id": route_id, "run_type": "AM"})  # Create active run
+    run = _create_planned_run(client, route_id, "AM")  # Create planned run
     run_id = run.json()["id"]  # Extract run ID from API response
     stop1 = client.post("/stops/", json={"name": "Stop 1", "latitude": 53.5461, "longitude": -113.4938, "type": "pickup", "run_id": run_id, "sequence": 1})  # Create first stop
     stop1_id = stop1.json()["id"]  # Extract first stop ID from API response
     stop2 = client.post("/stops/", json={"name": "Stop 2", "latitude": 53.5561, "longitude": -113.4838, "type": "pickup", "run_id": run_id, "sequence": 2})  # Create second stop
     stop2_id = stop2.json()["id"]  # Extract second stop ID from API response
+
+    started_run = _start_run_by_id(client, run_id)
+    run_id = started_run.json()["id"]
 
     forward_arrival = client.post(f"/runs/{run_id}/arrive_stop?stop_sequence=2")  # Move the bus forward to stop 2
     assert forward_arrival.status_code == 200  # Confirm forward arrival succeeded
@@ -2272,7 +2233,7 @@ def test_flexible_pickup_dropoff_records_actual_stops_and_keeps_occupancy_correc
     school_id = school.json()["id"]  # Extract school ID from API response
     route = client.post("/routes/", json={"route_number": "R4", "unit_number": "Bus-04", "driver_id": driver_id, "school_ids": [school_id]})  # Create route
     route_id = route.json()["id"]  # Extract route ID from API response
-    run = client.post("/runs/start", json={"driver_id": driver_id, "route_id": route_id, "run_type": "AM"})  # Create run
+    run = _create_planned_run(client, route_id, "AM")  # Create planned run
     run_id = run.json()["id"]  # Extract run ID from API response
     stop1 = client.post("/stops/", json={"name": "Corner Pickup", "latitude": 53.5461, "longitude": -113.4938, "type": "pickup", "run_id": run_id, "sequence": 1})  # Create alternate pickup stop
     stop1_id = stop1.json()["id"]  # Extract alternate pickup stop ID
@@ -2280,10 +2241,11 @@ def test_flexible_pickup_dropoff_records_actual_stops_and_keeps_occupancy_correc
     stop2_id = stop2.json()["id"]  # Extract assigned pickup stop ID
     stop3 = client.post("/stops/", json={"name": "School Dropoff", "latitude": 53.5661, "longitude": -113.4738, "type": "dropoff", "run_id": run_id, "sequence": 3})  # Create alternate dropoff stop
     stop3_id = stop3.json()["id"]  # Extract alternate dropoff stop ID
-    student = client.post("/students/", json={"name": "Flexible Rider", "grade": "5", "school_id": school_id, "route_id": route_id, "stop_id": stop2_id})  # Create student assigned to stop 2
+    student = client.post(f"/runs/{run_id}/stops/{stop2_id}/students", json={"name": "Flexible Rider", "grade": "5", "school_id": school_id})  # Create student assigned to stop 2 through canonical stop context
     student_id = student.json()["id"]  # Extract student ID from API response
-    assignment = client.post("/student-run-assignments/", json={"student_id": student_id, "run_id": run_id, "stop_id": stop2_id})  # Create runtime assignment at planned stop 2
-    assert assignment.status_code == 201  # Confirm assignment creation succeeded
+
+    started_run = _start_run_by_id(client, run_id)
+    run_id = started_run.json()["id"]
 
     pickup_arrival = client.post(f"/runs/{run_id}/arrive_stop?stop_sequence=1")  # Move the bus to a different pickup stop
     assert pickup_arrival.status_code == 200  # Confirm alternate pickup arrival succeeded
@@ -2357,6 +2319,7 @@ def test_run_timeline(client):
             "route_number": "TL-1",
             "unit_number": "Bus-TL",
             "driver_id": driver_id,
+            "school_ids": [school_id],
         },
     )
     assert route.status_code in (200, 201)
@@ -2365,14 +2328,7 @@ def test_run_timeline(client):
     # -------------------------------------------------------
     # Create run
     # -------------------------------------------------------
-    run = client.post(
-        "/runs/start",
-        json={
-            "driver_id": driver_id,
-            "route_id": route_id,
-            "run_type": "AM",
-        },
-    )
+    run = _create_planned_run(client, route_id, "AM")
     assert run.status_code in (200, 201)
     run_id = run.json()["id"]  # Save run ID
 
@@ -2411,30 +2367,18 @@ def test_run_timeline(client):
     # Create student
     # -------------------------------------------------------
     student = client.post(
-        "/students/",
+        f"/runs/{run_id}/stops/{stop1_id}/students",
         json={
             "name": "Timeline Student",
             "grade": "5",
             "school_id": school_id,
-            "route_id": route_id,
-            "stop_id": stop1_id,
         },
     )
     assert student.status_code in (200, 201)
     student_id = student.json()["id"]  # Save student ID
 
-    # -------------------------------------------------------
-    # Create runtime assignment
-    # -------------------------------------------------------
-    assignment = client.post(
-        "/student-run-assignments/",
-        json={
-            "student_id": student_id,
-            "run_id": run_id,
-            "stop_id": stop1_id,
-        },
-    )
-    assert assignment.status_code == 201
+    started_run = _start_run_by_id(client, run_id)
+    run_id = started_run.json()["id"]
 
     # -------------------------------------------------------
     # ARRIVE stop 1
@@ -2523,6 +2467,7 @@ def test_run_replay(client):
             "route_number": "RP-1",
             "unit_number": "Bus-RP",
             "driver_id": driver_id,
+            "school_ids": [school_id],
         },
     )
     assert route.status_code in (200, 201)
@@ -2531,14 +2476,7 @@ def test_run_replay(client):
     # -------------------------------------------------------------------------
     # Create run
     # -------------------------------------------------------------------------
-    run = client.post(
-        "/runs/start",
-        json={
-            "driver_id": driver_id,
-            "route_id": route_id,
-            "run_type": "AM",
-        },
-    )
+    run = _create_planned_run(client, route_id, "AM")
     assert run.status_code in (200, 201)
     run_id = run.json()["id"]  # Save run ID
 
@@ -2577,30 +2515,18 @@ def test_run_replay(client):
     # Create student
     # -------------------------------------------------------------------------
     student = client.post(
-        "/students/",
+        f"/runs/{run_id}/stops/{stop1_id}/students",
         json={
             "name": "Replay Student",
             "grade": "6",
             "school_id": school_id,
-            "route_id": route_id,
-            "stop_id": stop1_id,
         },
     )
     assert student.status_code in (200, 201)
     student_id = student.json()["id"]  # Save student ID
 
-    # -------------------------------------------------------------------------
-    # Create runtime assignment
-    # -------------------------------------------------------------------------
-    assignment = client.post(
-        "/student-run-assignments/",
-        json={
-            "student_id": student_id,
-            "run_id": run_id,
-            "stop_id": stop1_id,
-        },
-    )
-    assert assignment.status_code == 201
+    started_run = _start_run_by_id(client, run_id)
+    run_id = started_run.json()["id"]
 
     # -------------------------------------------------------------------------
     # ARRIVE stop 1
@@ -2710,15 +2636,24 @@ def test_run_complete(client):
     # -------------------------------------------------------
     # Create run
     # -------------------------------------------------------
-    run = client.post(
-        "/runs/start",
+    run = _create_planned_run(client, route_id, "AM")
+    run_id = run.json()["id"]
+
+    stop = client.post(
+        "/stops/",
         json={
-            "driver_id": driver_id,
-            "route_id": route_id,
-            "run_type": "AM",
+            "name": "Completion Stop",
+            "latitude": 53.5461,
+            "longitude": -113.4938,
+            "type": "pickup",
+            "run_id": run_id,
+            "sequence": 1,
         },
     )
-    run_id = run.json()["id"]
+    assert stop.status_code in (200, 201)
+
+    started_run = _start_run_by_id(client, run_id)
+    run_id = started_run.json()["id"]
 
     # -------------------------------------------------------
     # Complete run
@@ -2846,7 +2781,7 @@ def test_get_school_mobile_attendance_report(client):
     # -------------------------------------------------------------------------
     # Create run
     # -------------------------------------------------------------------------
-    run = client.post("/runs/start", json={"route_id": route_id, "run_type": "AM"})
+    run = _create_planned_run(client, route_id, "AM")
     assert run.status_code in (200, 201)
     run_id = run.json()["id"]  # Save run ID
 
@@ -2871,13 +2806,11 @@ def test_get_school_mobile_attendance_report(client):
     # Create first student
     # -------------------------------------------------------------------------
     first_student = client.post(
-        "/students/",
+        f"/runs/{run_id}/stops/{stop_id}/students",
         json={
             "name": "Present Student",
             "grade": "4",
             "school_id": school_id,
-            "route_id": route_id,
-            "stop_id": stop_id,
         },
     )
     assert first_student.status_code in (200, 201)
@@ -2887,40 +2820,18 @@ def test_get_school_mobile_attendance_report(client):
     # Create second student
     # -------------------------------------------------------------------------
     second_student = client.post(
-        "/students/",
+        f"/runs/{run_id}/stops/{stop_id}/students",
         json={
             "name": "Absent Student",
             "grade": "5",
             "school_id": school_id,
-            "route_id": route_id,
-            "stop_id": stop_id,
         },
     )
     assert second_student.status_code in (200, 201)
     second_student_id = second_student.json()["id"]  # Save second student ID
 
-    # -------------------------------------------------------------------------
-    # Create runtime assignments
-    # -------------------------------------------------------------------------
-    first_assignment = client.post(
-        "/student-run-assignments/",
-        json={
-            "student_id": first_student_id,
-            "run_id": run_id,
-            "stop_id": stop_id,
-        },
-    )
-    assert first_assignment.status_code == 201
-
-    second_assignment = client.post(
-        "/student-run-assignments/",
-        json={
-            "student_id": second_student_id,
-            "run_id": run_id,
-            "stop_id": stop_id,
-        },
-    )
-    assert second_assignment.status_code == 201
+    started_run = _start_run_by_id(client, run_id)
+    run_id = started_run.json()["id"]
 
     # -------------------------------------------------------------------------
     # Mark one student present
@@ -3098,30 +3009,15 @@ def test_update_school_status(client, db_engine):                              #
     # Create student
     # -------------------------------------------------------------------------
     student = client.post(
-        "/students/",
+        f"/runs/{run_id}/stops/{stop_id}/students",
         json={
             "name": "Student One",
             "grade": "5",
             "school_id": school_id,
-            "route_id": route_id,
-            "stop_id": stop_id,
         },
     )
     assert student.status_code in (200, 201)                                   # Confirm student created
     student_id = student.json()["id"]                                          # Save student ID
-
-    # -------------------------------------------------------------------------
-    # Create runtime assignment
-    # -------------------------------------------------------------------------
-    assignment = client.post(
-        "/student-run-assignments/",
-        json={
-            "student_id": student_id,
-            "run_id": run_id,
-            "stop_id": stop_id,
-        },
-    )
-    assert assignment.status_code == 201                                       # Confirm assignment created
 
     # -------------------------------------------------------------------------
     # Call school status update endpoint
@@ -3207,32 +3103,14 @@ def _build_school_attendance_fixture(client):
     # -------------------------------------------------------------------------
     # Create run 1
     # -------------------------------------------------------------------------
-    run_1 = client.post(
-        "/runs/start",
-        json={
-            "driver_id": driver_id,                                # Assigned driver
-            "route_id": route_id,                                  # Parent route
-            "run_type": "AM",                                      # Morning run
-        },
-    )
+    run_1 = _create_planned_run(client, route_id, "AM")
     assert run_1.status_code in (200, 201)
     run_1_id = run_1.json()["id"]                                  # Save run 1 ID
-    # -------------------------------------------------------------------------
-    # Complete run 1 so the same route driver can create run 2
-    # -------------------------------------------------------------------------
-    complete_run_1 = client.post(f"/runs/{run_1_id}/complete")
-    assert complete_run_1.status_code == 200
+
     # -------------------------------------------------------------------------
     # Create run 2
     # -------------------------------------------------------------------------
-    run_2 = client.post(
-        "/runs/start",
-        json={
-            "driver_id": driver_id,                                      # Use second driver to avoid active-run conflict
-            "route_id": route_id,
-            "run_type": "PM",
-        },
-    )
+    run_2 = _create_planned_run(client, route_id, "PM")
     assert run_2.status_code in (200, 201)
     run_2_id = run_2.json()["id"]                                  # Save run 2 ID
 
@@ -3270,34 +3148,28 @@ def _build_school_attendance_fixture(client):
     assert stop_2.status_code in (200, 201)
     stop_2_id = stop_2.json()["id"]                                # Save stop 2 ID
 
-    # -------------------------------------------------------------------------
-    # Create student on route / school roster
-    # -------------------------------------------------------------------------
-    student = client.post(
-        "/students/",
-        json={
-            "name": f"Kass-{unique}",                                        # Student name
-            "grade": "5",                                          # Student grade
-            "school_id": school_id,                                # Parent school
-            "route_id": route_id,                                  # Parent route
-            "stop_id": stop_1_id,                                  # Default stop
-        },
-    )
-    assert student.status_code in (200, 201)
-    student_id = student.json()["id"]                              # Save student ID
+    started_run_1 = _start_run_by_id(client, run_1_id)
+    run_1_id = started_run_1.json()["id"]                          # Start prepared run 1 only after stops exist
 
     # -------------------------------------------------------------------------
-    # Assign student to run 1 only
+    # Complete run 1 so the same route driver can create run 2
     # -------------------------------------------------------------------------
-    assignment = client.post(
-        "/student-run-assignments/",
+    complete_run_1 = client.post(f"/runs/{run_1_id}/complete")
+    assert complete_run_1.status_code == 200
+
+    # -------------------------------------------------------------------------
+    # Create student in run 1 stop context before start
+    # -------------------------------------------------------------------------
+    student = client.post(
+        f"/runs/{run_1_id}/stops/{stop_1_id}/students",
         json={
-            "student_id": student_id,                              # Assigned student
-            "run_id": run_1_id,                                    # Assigned run
-            "stop_id": stop_1_id,                                  # Assigned stop
+            "name": f"Kass-{unique}",                              # Student name
+            "grade": "5",                                          # Student grade
+            "school_id": school_id,                                # Parent school
         },
     )
-    assert assignment.status_code == 201
+    assert student.status_code == 201
+    student_id = student.json()["id"]                              # Save student ID
 
     return {
         "school_id": school_id,                                    # Test school
@@ -3620,28 +3492,25 @@ def test_student_assignment_update_endpoint_moves_planning_state_safely(client, 
     assert completed_stop.status_code in (200, 201)
 
     student = client.post(
-        "/students/",
+        f"/runs/{source_run.json()['id']}/stops/{source_stop.json()['id']}/students",
          json={
             "name": "Dedicated Assignment Student",
             "grade": "4",
             "school_id": school.json()["id"],
-            "route_id": source_route["id"],
-            "stop_id": source_stop.json()["id"],
         },
     )
-    assert student.status_code in (200, 201)
+    assert student.status_code == 201
     student_id = student.json()["id"]
 
-    current_assignment = client.post(
-        "/student-run-assignments/",
-        json={"student_id": student_id, "run_id": source_run.json()["id"], "stop_id": source_stop.json()["id"]},
+    completed_assignment = client.put(
+        f"/students/{student_id}/assignment",
+        json={
+            "route_id": source_route["id"],
+            "run_id": completed_run.json()["id"],
+            "stop_id": completed_stop.json()["id"],
+        },
     )
-    completed_assignment = client.post(
-        "/student-run-assignments/",
-        json={"student_id": student_id, "run_id": completed_run.json()["id"], "stop_id": completed_stop.json()["id"]},
-    )
-    assert current_assignment.status_code == 201
-    assert completed_assignment.status_code == 201
+    assert completed_assignment.status_code == 200
 
     with Session(db_engine) as db:
         completed_run_row = db.get(run_model.Run, completed_run.json()["id"])

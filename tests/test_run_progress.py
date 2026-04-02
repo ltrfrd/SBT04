@@ -2,21 +2,19 @@
 # tests/test_run_progress.py
 # -----------------------------------------------------------------------------
 # Purpose:
-#   Verify that starting a new run copies stops from the latest route run
-#   that already has stops.
+#   Verify that start only works for prepared runs that already have stops.
 #
 # Endpoint flow tested:
-#   - POST /runs/
+#   - POST /routes/{route_id}/runs
 #   - POST /stops/
 #   - POST /runs/start
-#   - GET /runs/{run_id}/stops
 # =============================================================================
 
 
 # =============================================================================
-# Test: starting a new run copies stops from the latest route run with stops
+# Test: starting an unprepared run fails without stops
 # =============================================================================
-def test_start_run_copies_stops_from_latest_route_run(client):
+def test_start_run_requires_prepared_stops(client):
 
     # -------------------------------------------------------------------------
     # Create driver
@@ -60,99 +58,18 @@ def test_start_run_copies_stops_from_latest_route_run(client):
     assert assign_response.status_code in (200, 201)
 
     # -------------------------------------------------------------------------
-    # Create source run directly
-    # This run will hold the original stops that should be copied later
+    # Create planned run directly
     # -------------------------------------------------------------------------
-    source_run_response = client.post(
-        "/runs/",
-        json={
-            "route_id": route_id,
-            "run_type": "AM",
-        },
-    )
+    source_run_response = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
     assert source_run_response.status_code in (200, 201)
-    source_run_id = source_run_response.json()["id"]  # Original run ID
+    source_run_id = source_run_response.json()["id"]  # Planned run ID
 
     # -------------------------------------------------------------------------
-    # Add stops to the source run
+    # Starting without prepared stops should now fail
     # -------------------------------------------------------------------------
-    stop_1_response = client.post(
-        "/stops/",
-        json={
-            "run_id": source_run_id,
-            "sequence": 1,
-            "type": "pickup",
-            "name": "Stop 1",
-            "address": "123 First Street",
-            "planned_time": "07:10:00",
-            "latitude": 53.5461,
-            "longitude": -113.4938,
-        },
-    )
-    assert stop_1_response.status_code in (200, 201)
-
-    stop_2_response = client.post(
-        "/stops/",
-        json={
-            "run_id": source_run_id,
-            "sequence": 2,
-            "type": "school_arrive",
-            "school_id": school_id,
-            "address": "456 Second Avenue",
-            "planned_time": "07:20:00",
-            "latitude": 53.5561,
-            "longitude": -113.5038,
-        },
-    )
-    assert stop_2_response.status_code in (200, 201)
-
-    # -------------------------------------------------------------------------
-    # Start a fresh run on the same route
-    # Expected behavior: stops are copied from the latest route run with stops
-    # -------------------------------------------------------------------------
-    new_run_response = client.post(
-        "/runs/start",
-        json={
-            "route_id": route_id,
-            "run_type": "PM",
-        },
-    )
-    assert new_run_response.status_code in (200, 201)
-    new_run_id = new_run_response.json()["id"]  # New active run ID
-
-    assert new_run_id != source_run_id  # Ensure this is a different run
-
-    # -------------------------------------------------------------------------
-    # Load copied stops from the new run
-    # -------------------------------------------------------------------------
-    new_stops_response = client.get(f"/runs/{new_run_id}/stops")
-    assert new_stops_response.status_code == 200
-
-    new_stops = new_stops_response.json()
-    assert len(new_stops) == 2  # Two stops should be copied
-
-    # -------------------------------------------------------------------------
-    # Validate copied stop 1
-    # -------------------------------------------------------------------------
-    assert new_stops[0]["run_id"] == new_run_id
-    assert new_stops[0]["sequence"] == 1
-    assert new_stops[0]["name"] == "Stop 1"
-    assert new_stops[0]["address"] == "123 First Street"
-    assert new_stops[0]["planned_time"] == "07:10:00"
-    assert new_stops[0]["latitude"] == 53.5461
-    assert new_stops[0]["longitude"] == -113.4938
-
-    # -------------------------------------------------------------------------
-    # Validate copied stop 2
-    # -------------------------------------------------------------------------
-    assert new_stops[1]["run_id"] == new_run_id
-    assert new_stops[1]["sequence"] == 2
-    assert new_stops[1]["name"] == "Copy School"
-    assert new_stops[1]["school_id"] == school_id
-    assert new_stops[1]["address"] == "456 Second Avenue"
-    assert new_stops[1]["planned_time"] == "07:20:00"
-    assert new_stops[1]["latitude"] == 53.5561
-    assert new_stops[1]["longitude"] == -113.5038
+    start_response = client.post(f"/runs/start?run_id={source_run_id}")
+    assert start_response.status_code == 400
+    assert start_response.json()["detail"] == "Run has no stops. Prepare stops before starting the run."
 
 
 # =============================================================================
@@ -191,15 +108,9 @@ def test_run_state_uses_stored_current_stop_sequence(client):
     assert assign_res.status_code in (200, 201)
 
     # -------------------------------------------------------------------------
-    # Create source run with ordered stops
+    # Create planned run with ordered stops
     # -------------------------------------------------------------------------
-    seed_run_res = client.post(
-        "/runs/",
-        json={
-            "route_id": route_id,
-            "run_type": "AM",
-        },
-    )
+    seed_run_res = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
     assert seed_run_res.status_code in (200, 201)
     seed_run_id = seed_run_res.json()["id"]  # Seed run ID
 
@@ -249,20 +160,12 @@ def test_run_state_uses_stored_current_stop_sequence(client):
     assert stop_3_res.status_code in (200, 201)
 
     # -------------------------------------------------------------------------
-    # Start the copied active run from the same route
+    # Start the prepared run
     # -------------------------------------------------------------------------
-    active_run_res = client.post(
-        "/runs/start",
-        json={
-            "route_id": route_id,
-            "run_type": "PM",
-        },
-    )
+    active_run_res = client.post(f"/runs/start?run_id={seed_run_id}")
     assert active_run_res.status_code in (200, 201)
-    active_run_id = active_run_res.json()["id"]  # New active run ID
-    active_stops_res = client.get(f"/runs/{active_run_id}/stops")
-    assert active_stops_res.status_code == 200
-    active_stop_2_id = active_stops_res.json()[1]["id"]  # Copied stop 2 ID for the active run
+    active_run_id = active_run_res.json()["id"]  # Started run ID
+    active_stop_2_id = stop_2_res.json()["id"]   # Existing stop 2 ID for the started run
 
     # -------------------------------------------------------------------------
     # Store live location at stop sequence 2

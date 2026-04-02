@@ -50,14 +50,16 @@ After the setup hierarchy exists, real usage should continue from route and run 
 Current `/runs/start` meaning:
 
 - operational runtime endpoint only
-- starts an existing planned run by `run_id`, or creates-and-starts a run for the selected route when needed
-- copies stops from the latest prior route run only when the started run has no stops yet
+- starts an existing prepared run by `run_id`, or creates-and-starts a run for the selected route when needed
+- requires the run to already have stops before start succeeds
 - does not create students
 - does not create `StudentRunAssignment` rows
 
 Maintenance and compatibility remain separate from the normal setup path:
 
 - `PUT /students/{student_id}/assignment` is a correction / reassignment endpoint
+- `POST /student-run-assignments/` is blocked and returns guidance to use stop-context student creation
+- `GET /student-run-assignments/{run_id}` and `GET /student-run-assignments/?student_id=...` remain compatibility read views
 - `POST /runs/` is legacy compatibility
 - `POST /stops/` is legacy compatibility
 - `POST /students/` is secondary compatibility

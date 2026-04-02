@@ -44,22 +44,16 @@ def test_next_stop_advances_progress(client):
     assert assign_res.status_code in (200, 201)
 
     # -------------------------------------------------------------------------
-    # Create run
+    # Create planned run
     # -------------------------------------------------------------------------
-    run_res = client.post(
-        "/runs/start",
-        json={
-            "route_id": route_id,
-            "run_type": "AM",
-        },
-    )
+    run_res = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
     assert run_res.status_code in (200, 201)
     run_id = run_res.json()["id"]
 
     # -------------------------------------------------------------------------
     # Add stops
     # -------------------------------------------------------------------------
-    client.post("/stops/", json={
+    first_stop = client.post("/stops/", json={
         "run_id": run_id,
         "sequence": 1,
         "type": "pickup",
@@ -69,8 +63,9 @@ def test_next_stop_advances_progress(client):
         "latitude": 1,
         "longitude": 1,
     })
+    assert first_stop.status_code in (200, 201)
 
-    client.post("/stops/", json={
+    second_stop = client.post("/stops/", json={
         "run_id": run_id,
         "sequence": 2,
         "type": "pickup",
@@ -80,6 +75,13 @@ def test_next_stop_advances_progress(client):
         "latitude": 2,
         "longitude": 2,
     })
+    assert second_stop.status_code in (200, 201)
+
+    # -------------------------------------------------------------------------
+    # Start prepared run
+    # -------------------------------------------------------------------------
+    start_res = client.post(f"/runs/start?run_id={run_id}")
+    assert start_res.status_code in (200, 201)
 
     # -------------------------------------------------------------------------
     # First next_stop → should set progress to 1

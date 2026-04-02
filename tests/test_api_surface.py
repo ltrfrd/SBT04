@@ -15,6 +15,19 @@ def _create_route_with_assignment(client, route_number: str, unit_number: str, d
     return route_id
 
 
+def _create_prepared_started_run(client, route_id: int, run_type: str, stop_payload: dict):
+    run = client.post(f"/routes/{route_id}/runs", json={"run_type": run_type})
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    stop = client.post(f"/runs/{run_id}/stops", json=stop_payload)
+    assert stop.status_code in (200, 201)
+
+    started = client.post(f"/runs/start?run_id={run_id}")
+    assert started.status_code in (200, 201)
+    return started, stop
+
+
 def test_schools_crud(client):
     r = client.post("/schools/", json={"name": "S1", "address": "1 Main St"})
     assert r.status_code in (200, 201)
@@ -97,15 +110,13 @@ def test_routes_list_returns_summary_fields(client):
     assign = client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
     assert assign.status_code in (200, 201)
 
-    run = client.post("/runs/start", json={"route_id": route_id, "run_type": "Morning"})
-    assert run.status_code in (200, 201)
-    run_id = run.json()["id"]
-
-    stop = client.post(
-        f"/runs/{run_id}/stops",
-        json={"name": "Summary Stop", "latitude": 1, "longitude": 1, "type": "pickup", "sequence": 1},
+    run, stop = _create_prepared_started_run(
+        client,
+        route_id,
+        "Morning",
+        {"name": "Summary Stop", "latitude": 1, "longitude": 1, "type": "pickup", "sequence": 1},
     )
-    assert stop.status_code in (200, 201)
+    run_id = run.json()["id"]
     stop_id = stop.json()["id"]
 
     student = client.post(
@@ -158,13 +169,11 @@ def test_route_detail_returns_nested_route_data(client):
     assign = client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
     assert assign.status_code in (200, 201)
 
-    run = client.post("/runs/start", json={"route_id": route_id, "run_type": "Afternoon"})
-    assert run.status_code in (200, 201)
-    run_id = run.json()["id"]
-
-    stop = client.post(
-        f"/runs/{run_id}/stops",
-        json={
+    run, stop = _create_prepared_started_run(
+        client,
+        route_id,
+        "Afternoon",
+        {
             "name": "Detail Stop",
             "address": "30 Detail St",
             "planned_time": "14:10:00",
@@ -174,7 +183,7 @@ def test_route_detail_returns_nested_route_data(client):
             "sequence": 1,
         },
     )
-    assert stop.status_code in (200, 201)
+    run_id = run.json()["id"]
     stop_id = stop.json()["id"]
 
     student = client.post(
@@ -259,7 +268,7 @@ def test_students_crud(client):
 
     route_id = _create_route_with_assignment(client, "R1", "Bus-01", driver_id)
 
-    r = client.post("/runs/start", json={"route_id": route_id, "run_type": "AM"})
+    r = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
     assert r.status_code in (200, 201)
     run_id = r.json()["id"]
 
@@ -978,28 +987,25 @@ def test_update_student_assignment_moves_student_and_synchronizes_runtime_rows(c
     assert historical_stop.status_code in (200, 201)
 
     student = client.post(
-        "/students/",
+        f"/runs/{source_run.json()['id']}/stops/{source_stop.json()['id']}/students",
         json={
             "name": "Assignment Move Student",
             "grade": "5",
             "school_id": school_id,
-            "route_id": source_route_id,
-            "stop_id": source_stop.json()["id"],
         },
     )
-    assert student.status_code in (200, 201)
+    assert student.status_code == 201
     student_id = student.json()["id"]
 
-    current_assignment = client.post(
-        "/student-run-assignments/",
-        json={"student_id": student_id, "run_id": source_run.json()["id"], "stop_id": source_stop.json()["id"]},
+    historical_assignment = client.put(
+        f"/students/{student_id}/assignment",
+        json={
+            "route_id": source_route_id,
+            "run_id": historical_run.json()["id"],
+            "stop_id": historical_stop.json()["id"],
+        },
     )
-    historical_assignment = client.post(
-        "/student-run-assignments/",
-        json={"student_id": student_id, "run_id": historical_run.json()["id"], "stop_id": historical_stop.json()["id"]},
-    )
-    assert current_assignment.status_code == 201
-    assert historical_assignment.status_code == 201
+    assert historical_assignment.status_code == 200
 
     with Session(db_engine) as db:
         historical_run_row = db.get(Run, historical_run.json()["id"])
@@ -1202,15 +1208,13 @@ def test_run_detail_returns_nested_run_data(client):
     assign = client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
     assert assign.status_code in (200, 201)
 
-    run = client.post("/runs/start", json={"route_id": route_id, "run_type": "Morning"})
-    assert run.status_code in (200, 201)
-    run_id = run.json()["id"]
-
-    stop = client.post(
-        f"/runs/{run_id}/stops",
-        json={"sequence": 1, "type": "pickup", "name": "Run Detail Stop", "address": "51 Run Detail Rd", "planned_time": "07:05:00", "latitude": 1, "longitude": 1},
+    run, stop = _create_prepared_started_run(
+        client,
+        route_id,
+        "Morning",
+        {"sequence": 1, "type": "pickup", "name": "Run Detail Stop", "address": "51 Run Detail Rd", "planned_time": "07:05:00", "latitude": 1, "longitude": 1},
     )
-    assert stop.status_code in (200, 201)
+    run_id = run.json()["id"]
     stop_id = stop.json()["id"]
 
     student = client.post(
@@ -1501,6 +1505,20 @@ def test_student_assignment_update_endpoint_appears_in_openapi(client):
     assert "Maintenance endpoint" in operation["description"]
     assert "not the normal creation workflow" in operation["description"]
     assert "POST /runs/{run_id}/stops/{stop_id}/students" in operation["description"]
+
+
+def test_student_run_assignment_direct_create_is_blocked_in_openapi(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    operation = response.json()["paths"]["/student-run-assignments/"]["post"]
+
+    assert operation["summary"] == "Create student run assignment (disabled)"
+    assert "Direct raw StudentRunAssignment creation is disabled" in operation["description"]
+    assert "POST /runs/{run_id}/stops/{stop_id}/students" in operation["description"]
+
+    schema_ref = operation["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+    assert schema_ref.endswith("/StudentRunAssignmentCreate")
 
 
 def test_driver_routes_endpoint_appears_in_openapi(client):

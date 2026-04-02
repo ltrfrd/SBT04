@@ -497,7 +497,7 @@ def create_run(run: RunStart, db: Session = Depends(get_db)):
 
 # -----------------------------------------------------------
 # - Start run
-# - Start a run, copy stops, and create runtime assignments
+# - Start a prepared run only
 # -----------------------------------------------------------
 @router.post(
     "/start",
@@ -506,7 +506,7 @@ def create_run(run: RunStart, db: Session = Depends(get_db)):
     description=(
         "Operational runtime endpoint. Start an existing planned run prepared through the Route -> Run -> Stop -> Student workflow, "
         "or create and start a run for the selected route when needed. "
-        "This endpoint starts the run only and does not create students or runtime assignments."
+        "This endpoint starts the run only and does not create students, stops, or runtime assignments."
     ),
     response_description="Started run",
 )
@@ -539,12 +539,13 @@ def start_run(
             )
             .filter(route_model.Route.id == target_run.route_id)
             .first()
-        )  # Load route context for assignment generation
+        )  # Load route context for runtime start
         if not route:
             raise HTTPException(status_code=404, detail="Route not found")
 
-        resolved_driver_id = _resolve_run_driver(route)  # Resolve the active driver at actual start time
-        target_run.driver_id = resolved_driver_id  # Persist the current start-time driver on the run
+        resolved_driver_id = _resolve_run_driver(route)  # Resolve active driver at actual start time
+        target_run.driver_id = resolved_driver_id        # Persist the current start-time driver on the run
+
     else:
         if run is None:
             raise HTTPException(status_code=422, detail="Run payload required")
@@ -567,13 +568,16 @@ def start_run(
             db=db,
         )
         target_run = run_model.Run(
-            driver_id=resolved_driver_id,  # Route-derived driver
-            route_id=run.route_id,  # Assigned route
-            run_type=run.run_type,  # Flexible run label
-            start_time=None,  # Mark started only after active-run checks
-            current_stop_id=None,  # Start with no actual stop location recorded
-            current_stop_sequence=None,  # No stop reached yet
+            driver_id=resolved_driver_id,   # Route-derived driver
+            route_id=run.route_id,          # Assigned route
+            run_type=run.run_type,          # Flexible run label
+            start_time=None,                # Mark started only after validation checks
+            current_stop_id=None,           # Start with no actual stop location recorded
+            current_stop_sequence=None,     # No stop reached yet
         )  # Build a new run when no planned run was selected
+
+        db.add(target_run)
+        db.flush()  # Get generated id before stop validation
 
     driver = db.get(driver_model.Driver, resolved_driver_id)  # Load resolved driver
 
@@ -589,28 +593,17 @@ def start_run(
         .first()
     )
 
-    if existing_active_run:  # Driver already has an active run
+    if existing_active_run:
         raise HTTPException(
             status_code=409,
             detail="Driver already has an active run"
         )
 
-    if not driver:  # Validate resolved driver reference
+    if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
 
     # -------------------------------------------------------------------------
-    # Mark the selected run as started
-    # -------------------------------------------------------------------------
-    target_run.start_time = datetime.now(timezone.utc).replace(tzinfo=None)  # Start timestamp
-    target_run.current_stop_id = None  # Clear any stale planned location
-    target_run.current_stop_sequence = None  # Reset live stop progress
-
-    if target_run.id is None:
-        db.add(target_run)  # Add run to session
-        db.flush()  # Get generated id for assignment rows
-
-    # -------------------------------------------------------------------------
-    # Copy stops from the latest prior route run when this run has no stops yet
+    # Require prepared stops before runtime start
     # -------------------------------------------------------------------------
     existing_stop_count = (
         db.query(stop_model.Stop)
@@ -619,54 +612,21 @@ def start_run(
     )  # Determine whether this run already has its own stop plan
 
     if existing_stop_count == 0:
-        source_run = (
-            db.query(run_model.Run)
-            .join(stop_model.Stop, stop_model.Stop.run_id == run_model.Run.id)
-            .filter(run_model.Run.route_id == route.id)
-            .filter(run_model.Run.id != target_run.id)
-            .order_by(run_model.Run.start_time.desc(), run_model.Run.id.desc())
-            .first()
-        )  # Find the latest prior run on this route that already has stops
-
-        if source_run:
-            source_stops = (
-                db.query(stop_model.Stop)
-                .filter(stop_model.Stop.run_id == source_run.id)
-                .order_by(
-                    stop_model.Stop.sequence.asc(),
-                    stop_model.Stop.id.asc(),
-                )
-                .all()
-            )
-
-            for stop in source_stops:
-                db.add(
-                    stop_model.Stop(
-                        sequence=stop.sequence,  # Keep stop order
-                        type=stop.type,  # Keep stop type
-                        run_id=target_run.id,  # Attach copied stop to the started run
-                        school_id=stop.school_id,  # Preserve school-linked stop context
-                        name=stop.name,  # Keep stop name
-                        address=stop.address,  # Keep stop address
-                        planned_time=stop.planned_time,  # Keep planned time
-                        latitude=stop.latitude,  # Keep latitude
-                        longitude=stop.longitude,  # Keep longitude
-                    )
-                )
-
-        db.flush()  # Persist copied stops before building runtime assignments
+        raise HTTPException(
+            status_code=400,
+            detail="Run has no stops. Prepare stops before starting the run."
+        )
 
     # -------------------------------------------------------------------------
-    # Auto-create StudentRunAssignment rows for this run
-    # - Ensures every route student is inserted into runtime table
-    # - School and report views depend on these rows
+    # Mark the selected run as started
     # -------------------------------------------------------------------------
-    
-    db.flush()  # Validate and insert all assignment rows before final commit
-    db.commit()  # Save run and student assignments
-    db.refresh(target_run)  # Reload saved run
+    target_run.start_time = datetime.now(timezone.utc).replace(tzinfo=None)  # Start timestamp
+    target_run.current_stop_id = None                                        # Clear any stale planned location
+    target_run.current_stop_sequence = None                                  # Reset live stop progress
+
+    db.commit()               # Save started run only
+    db.refresh(target_run)    # Reload saved run
     return _serialize_run(target_run)  # Return started run
-
 # -----------------------------------------------------------
 # - End run
 # - End an active run by run id

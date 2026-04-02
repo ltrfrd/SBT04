@@ -12,9 +12,9 @@ from pydantic import BaseModel, ConfigDict  # Pydantic schema helpers
 # Router / Model / Schema
 # -----------------------------
 class StudentRunAssignmentCreate(BaseModel):
-    student_id: int  # Student being assigned
-    run_id: int  # Run receiving the assignment
-    stop_id: int  # Planned stop for the assignment
+    student_id: int  # Compatibility request student ID for the blocked direct-create route
+    run_id: int  # Compatibility request run ID for the blocked direct-create route
+    stop_id: int  # Compatibility request stop ID for the blocked direct-create route
 
 
 # -----------------------------

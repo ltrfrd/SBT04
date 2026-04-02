@@ -360,7 +360,7 @@ def test_bus_detail_returns_assigned_route_with_nested_context(client):
     assert assign_driver.status_code in (200, 201)
     assert assign_bus.status_code == 200
 
-    run = client.post("/runs/start", json={"route_id": route.json()["id"], "run_type": "Morning"})
+    run = client.post(f"/routes/{route.json()['id']}/runs", json={"run_type": "Morning"})
     assert run.status_code in (200, 201)
 
     stop = client.post(
@@ -376,6 +376,9 @@ def test_bus_detail_returns_assigned_route_with_nested_context(client):
         },
     )
     assert stop.status_code in (200, 201)
+
+    start = client.post(f"/runs/start?run_id={run.json()['id']}")
+    assert start.status_code in (200, 201)
 
     student = client.post(
         f"/runs/{run.json()['id']}/stops/{stop.json()['id']}/students",
