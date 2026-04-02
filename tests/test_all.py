@@ -871,14 +871,39 @@ def test_create_run_fails_when_route_has_multiple_active_assignments(client, db_
     assert driver_one.status_code in (200, 201)
     assert driver_two.status_code in (200, 201)
 
+    school = client.post(
+        "/schools/",
+        json={"name": "Multi Driver School", "address": "100 Multi Driver Way"},
+    )
+    assert school.status_code in (200, 201)
+
     route = client.post(
         "/routes/",
-        json={"route_number": "MULTI-ROUTE", "unit_number": "BUS-MULTI"},
+        json={
+            "route_number": "MULTI-ROUTE",
+            "unit_number": "BUS-MULTI",
+            "school_ids": [school.json()["id"]],
+        },
     )
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
 
     client.post(f"/routes/{route_id}/assign_driver/{driver_one.json()['id']}")
+
+    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
+    assert run.status_code in (200, 201)
+
+    stop = client.post(
+        f"/runs/{run.json()['id']}/stops",
+        json={"name": "Multi Driver Start Stop", "type": "pickup", "sequence": 1},
+    )
+    assert stop.status_code in (200, 201)
+
+    student = client.post(
+        f"/runs/{run.json()['id']}/stops/{stop.json()['id']}/students",
+        json={"name": "Multi Driver Start Student", "school_id": school.json()["id"]},
+    )
+    assert student.status_code in (200, 201)
 
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
     db = TestingSessionLocal()
@@ -896,7 +921,7 @@ def test_create_run_fails_when_route_has_multiple_active_assignments(client, db_
     finally:
         db.close()
 
-    run = client.post("/runs/start", json={"route_id": route_id, "run_type": "AM"})
+    run = client.post(f"/runs/start?run_id={run.json()['id']}")
     assert run.status_code == 409
     assert run.json()["detail"] == "Route has multiple active driver assignments"
 
@@ -938,7 +963,38 @@ def test_start_run_fails_without_active_route_driver_assignment(client):
     )
     assert route.status_code in (200, 201)
 
-    run = client.post("/runs/start", json={"route_id": route.json()["id"], "run_type": "AM"})
+    run = client.post(f"/routes/{route.json()['id']}/runs", json={"run_type": "AM"})
+    assert run.status_code in (200, 201)
+
+    school = client.post(
+        "/schools/",
+        json={"name": "Start No Driver School", "address": "1 No Driver Way"},
+    )
+    assert school.status_code in (200, 201)
+
+    route_update = client.put(
+        f"/routes/{route.json()['id']}",
+        json={
+            "route_number": "START-NO-DRIVER",
+            "unit_number": "BUS-START-NO-DRIVER",
+            "school_ids": [school.json()["id"]],
+        },
+    )
+    assert route_update.status_code == 200
+
+    stop = client.post(
+        f"/runs/{run.json()['id']}/stops",
+        json={"name": "No Driver Start Stop", "type": "pickup", "sequence": 1},
+    )
+    assert stop.status_code in (200, 201)
+
+    student = client.post(
+        f"/runs/{run.json()['id']}/stops/{stop.json()['id']}/students",
+        json={"name": "No Driver Start Student", "school_id": school.json()["id"]},
+    )
+    assert student.status_code in (200, 201)
+
+    run = client.post(f"/runs/start?run_id={run.json()['id']}")
     assert run.status_code == 409
     assert run.json()["detail"] == "Route has no active driver assignment"
 

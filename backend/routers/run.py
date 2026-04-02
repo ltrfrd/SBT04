@@ -22,7 +22,7 @@ from backend.models.student import Student                      # Student model
 from backend.models.stop import Stop                            # Stop model
 from backend.models.associations import StudentRunAssignment  # Runtime rider assignments
 from backend.models.associations import RouteDriverAssignment  # Route-level driver assignments
-from backend.schemas.run import RunStart, RunOut, RunUpdate, RunDetailOut, RunDetailRouteOut, RunDetailDriverOut, RunDetailStopOut, RunDetailStudentOut, RunListOut, normalize_run_type
+from backend.schemas.run import RunCreateLegacy, RunOut, RunUpdate, RunDetailOut, RunDetailRouteOut, RunDetailDriverOut, RunDetailStopOut, RunDetailStudentOut, RunListOut, normalize_run_type
 from backend.models.run_event import RunEvent                  # Run timeline event model
 from backend.models import student as student_model  # Student model for replay names
 from backend.schemas.run import RunReplayOut, RunReplayEventOut, RunReplaySummaryOut
@@ -468,7 +468,7 @@ def _serialize_run_list_item(run: run_model.Run) -> RunListOut:
     ),                                                           # Swagger description
     response_description="Created run",                          # Swagger response text
 )
-def create_run(run: RunStart, db: Session = Depends(get_db)):
+def create_run(run: RunCreateLegacy, db: Session = Depends(get_db)):
     # -----------------------------------------------------------
     # - Validate route exists
     # - Load route context and optional active driver assignment
@@ -511,73 +511,38 @@ def create_run(run: RunStart, db: Session = Depends(get_db)):
     response_description="Started run",
 )
 def start_run(
-    run: RunStart | None = None,
-    run_id: int | None = None,
+    run_id: int,
     db: Session = Depends(get_db),
 ):
-    if run_id is not None:
-        target_run = (
-            db.query(run_model.Run)
-            .options(
-                joinedload(run_model.Run.driver),
-                joinedload(run_model.Run.route),
-            )
-            .filter(run_model.Run.id == run_id)
-            .first()
-        )  # Load the selected planned run
-
-        if not target_run:
-            raise HTTPException(status_code=404, detail="Run not found")
-
-        if target_run.start_time is not None:
-            raise HTTPException(status_code=400, detail="Run already started")
-
-        route = (
-            db.query(route_model.Route)
-            .options(
-                joinedload(route_model.Route.driver_assignments).joinedload(RouteDriverAssignment.driver)
-            )
-            .filter(route_model.Route.id == target_run.route_id)
-            .first()
-        )  # Load route context for runtime start
-        if not route:
-            raise HTTPException(status_code=404, detail="Route not found")
-
-        resolved_driver_id = _resolve_run_driver(route)  # Resolve active driver at actual start time
-        target_run.driver_id = resolved_driver_id        # Persist the current start-time driver on the run
-
-    else:
-        if run is None:
-            raise HTTPException(status_code=422, detail="Run payload required")
-
-        route = (
-            db.query(route_model.Route)
-            .options(
-                joinedload(route_model.Route.driver_assignments).joinedload(RouteDriverAssignment.driver)
-            )
-            .filter(route_model.Route.id == run.route_id)
-            .first()
-        )  # Load route with assignments
-        if not route:
-            raise HTTPException(status_code=404, detail="Route not found")
-
-        resolved_driver_id = _resolve_run_driver(route)  # Derive driver from route assignment
-        _assert_unique_route_run_type(
-            route_id=route.id,
-            normalized_run_type=run.run_type,
-            db=db,
+    target_run = (
+        db.query(run_model.Run)
+        .options(
+            joinedload(run_model.Run.driver),
+            joinedload(run_model.Run.route),
         )
-        target_run = run_model.Run(
-            driver_id=resolved_driver_id,   # Route-derived driver
-            route_id=run.route_id,          # Assigned route
-            run_type=run.run_type,          # Flexible run label
-            start_time=None,                # Mark started only after validation checks
-            current_stop_id=None,           # Start with no actual stop location recorded
-            current_stop_sequence=None,     # No stop reached yet
-        )  # Build a new run when no planned run was selected
+        .filter(run_model.Run.id == run_id)
+        .first()
+    )  # Load the selected planned run
 
-        db.add(target_run)
-        db.flush()  # Get generated id before stop validation
+    if not target_run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    if target_run.start_time is not None:
+        raise HTTPException(status_code=400, detail="Run already started")
+
+    route = (
+        db.query(route_model.Route)
+        .options(
+            joinedload(route_model.Route.driver_assignments).joinedload(RouteDriverAssignment.driver)
+        )
+        .filter(route_model.Route.id == target_run.route_id)
+        .first()
+    )  # Load route context for runtime start
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
+
+    resolved_driver_id = _resolve_run_driver(route)  # Resolve active driver at actual start time
+    target_run.driver_id = resolved_driver_id        # Persist the current start-time driver on the run
 
     driver = db.get(driver_model.Driver, resolved_driver_id)  # Load resolved driver
 

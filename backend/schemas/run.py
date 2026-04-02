@@ -32,7 +32,7 @@ def normalize_run_type(value: str) -> str:
 # -----------------------------
 # Logic
 # -----------------------------
-class RunStart(BaseModel):
+class RunCreateLegacy(BaseModel):
     route_id: int  # Route being run
     run_type: str = Field(min_length=1)  # Flexible run label
 

@@ -194,7 +194,7 @@ def client(db_engine):
 
                 return response
 
-            if url in {"/runs/", "/runs/start"} and isinstance(payload, dict) and "driver_id" in payload:
+            if url == "/runs/" and isinstance(payload, dict) and "driver_id" in payload:
                 run_payload = dict(payload)
                 run_payload.pop("driver_id", None)
                 return self._wrapped_client.post(url, *args, json=run_payload, **{k: v for k, v in kwargs.items() if k != "json"})

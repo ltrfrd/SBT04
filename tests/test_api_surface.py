@@ -1374,10 +1374,28 @@ def test_generic_run_create_endpoint_is_legacy_in_openapi(client):
     assert "Preferred workflow-first creation is POST /routes/{route_id}/runs" in path_item["description"]
 
     schema_ref = path_item["requestBody"]["content"]["application/json"]["schema"]["$ref"]
-    assert schema_ref.endswith("/RunStart")
+    assert schema_ref.endswith("/RunCreateLegacy")
 
-    properties = response.json()["components"]["schemas"]["RunStart"]["properties"]
+    properties = response.json()["components"]["schemas"]["RunCreateLegacy"]["properties"]
     assert "route_id" in properties
+
+
+def test_start_run_endpoint_has_query_param_only_in_openapi(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    path_item = response.json()["paths"]["/runs/start"]["post"]
+    assert path_item["summary"] == "Start run"
+    assert "Operational runtime endpoint." in path_item["description"]
+    assert "existing prepared run" in path_item["description"]
+    assert "does not create students, stops, or runtime assignments" in path_item["description"]
+    assert "requestBody" not in path_item
+
+    parameters = path_item["parameters"]
+    assert len(parameters) == 1
+    assert parameters[0]["name"] == "run_id"
+    assert parameters[0]["in"] == "query"
+    assert parameters[0]["required"] is True
 
 
 def test_stop_context_student_create_rejects_school_not_on_route(client):
