@@ -18,6 +18,8 @@ Supporting configuration steps:
 Important rule:
 - operators should work in routes, runs, stops, and students
 - operators should not think in StudentRunAssignment rows
+- runtime assignment truth is stop-based and explicit
+- no assignment exists without stop context
 
 ===============================================================================
 INTERNAL VS OPERATOR
@@ -47,6 +49,10 @@ Workflow context endpoints:
 - POST /runs/{run_id}/stops
 - POST /runs/{run_id}/stops/{stop_id}/students
 - POST /runs/{run_id}/stops/{stop_id}/students/bulk
+- stop-context student creation creates StudentRunAssignment internally
+- /runs/start is operational runtime only
+- /runs/start does not create students
+- /runs/start does not auto-create StudentRunAssignment rows
 - NOT FOR OPERATOR WORKFLOW
 - internal runtime engine
 - still exists in the backend
@@ -65,7 +71,7 @@ ROOT LEVEL
 |-- .env                           Local development environment values
 |-- .gitignore                     Git ignore rules
 |-- alembic.ini                    Alembic configuration
-|-- app.py                         Bootstrap-focused FastAPI entry point: app setup, middleware, static mount, router registration, root endpoint, startup DB init, get_db compatibility export
+|-- app.py                         Bootstrap-focused FastAPI entry point: app setup, middleware, static mount, router registration, root endpoint, lifespan DB init, get_db compatibility export
 |-- database.py                    SQLAlchemy engine, session, Base, and DB dependency
 |-- README.md                      Main SBT04 project documentation
 |-- requirements.txt               Python dependency list
@@ -118,8 +124,8 @@ backend/
 |   |-- dispatch.py                Dispatch and payroll endpoints
 |   |-- driver.py                  Driver CRUD and route lookup
 |   |-- report.py                  Compatibility layer re-exporting attendance router
-|   |-- route.py                   Route CRUD, route detail, school assignment, driver assignment
-|   |-- run.py                     Run CRUD, lifecycle, running board, replay, stop-context student workflow
+|   |-- route.py                   Route CRUD, route detail, school assignment, driver assignment, bus assignment
+|   |-- run.py                     Run CRUD, operational start/end, running board, replay, stop-context student workflow
 |   |-- school.py                  School CRUD and route assignment
 |   |-- stop.py                    Stop CRUD, reorder, normalize, validate
 |   |-- student.py                 Student CRUD and filtered lookup
@@ -147,9 +153,9 @@ backend/
 |   |-- driver_run.html            Main driver route/run workspace
 |   |-- route_report.html          Route report page
 |   |-- school_attendance_routes.html
-|   |                              School mobile route selection page
+|   |                              School mobile route selection page (also currently used for route-run selection)
 |   |-- school_attendance_runs.html
-|   |                              School mobile run selection page
+|   |                              School mobile run selection template present in repo
 |   |-- school_mobile_report.html  School mobile attendance page
 |   |-- summary_report.html        Summary/payroll-oriented report page
 |
@@ -168,10 +174,10 @@ backend/ architecture note:
 - Route is the planning container.
 - Run belongs to route.
 - Stop belongs to run.
-- Students are increasingly managed from stop context.
+- Students are managed from explicit stop context in the preferred workflow.
 - StudentRunAssignment remains the internal runtime engine.
 - app.py is now bootstrap-focused.
-- database tables are initialized on startup, not at import time.
+- database tables are initialized in FastAPI lifespan, not at import time.
 - server-rendered page routes live in backend/routers/web_pages.py.
 - session/auth endpoints live in backend/routers/auth.py.
 - the GPS websocket endpoint and active connection state live in backend/routers/ws.py.
@@ -180,12 +186,24 @@ backend/ architecture note:
 - Route may point to one current bus through route.bus_id.
 - existing route.unit_number, route.capacity, and route.operator remain for compatibility.
 - read surfaces may prefer assigned bus values and fall back to legacy route values.
+- active route-driver assignment is the route-level source used for run start.
+- /runs/start starts runs only; it does not create students or runtime assignment rows.
+- stop-context student creation is the preferred path that creates runtime assignment rows.
+- school mobile attendance pages currently map as:
+- /reports/school/{school_id}/mobile -> school_attendance_routes.html
+- /reports/school/{school_id}/mobile/route/{route_id} -> school_attendance_routes.html
+- /reports/school/{school_id}/mobile/run/{run_id} -> school_mobile_report.html
+- attendance templates use TemplateResponse(request, template_name, context).
 
 Real workflow-related endpoint note:
 - run router already contains stop-context student endpoints
 - single add: POST /runs/{run_id}/stops/{stop_id}/students
 - bulk add:   POST /runs/{run_id}/stops/{stop_id}/students/bulk
 - student_run_assignment router still exists for compatibility/internal use
+- legacy direct creates still exist:
+- POST /runs/ for planned-run compatibility
+- POST /stops/ for stop compatibility
+- POST /students/ for student compatibility
 
 ===============================================================================
 frontend/
@@ -278,6 +296,7 @@ Current operator direction:
 - create runs inside route
 - create stops inside run
 - add students from stop context
+- start prepared runs through /runs/start
 
 Key reality from the current repo:
 - templates remain the main UI

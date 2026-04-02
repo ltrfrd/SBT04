@@ -1,11 +1,11 @@
 # SBT
 
 ## Overview
-SBT is a workflow-first bus operations backend built on FastAPI, SQLAlchemy, Alembic, and Jinja templates. The repository is organized around a simple operator flow:
+SBT is a workflow-first school bus operations backend built on FastAPI, SQLAlchemy, Alembic, and Jinja templates. The repository is organized around a simple layered operator flow:
 
 Route -> Run -> Stop -> Student
 
-This is not a rewrite. The protected runtime engine stays in place while the setup flow becomes simpler and more context-driven.
+This is not a rewrite. The protected runtime and attendance engine stays in place while the setup flow becomes more explicit and context-driven.
 
 ## Preferred Workflow
 The intended operator path is:
@@ -29,16 +29,31 @@ These endpoints reduce repeated manual IDs in the normal workflow:
 
 - route context creates runs
 - run context creates stops
-- stop context creates students
-- `StudentRunAssignment` is created internally
+- stop context creates students in explicit stop context
+- stop-context student creation creates the internal `StudentRunAssignment`
+
+Core workflow rule:
+
+- runtime assignment truth is explicit and stop-based
+- no runtime assignment exists without stop context
+- `/runs/start` does not create students
+- `/runs/start` does not auto-create `StudentRunAssignment` rows
 
 ## Runtime And Maintenance Flow
 After the setup hierarchy exists, real usage should continue from route and run context:
 
 1. Driver selects an assigned route
 2. Driver reviews the route's prepared runs
-3. Driver starts and operates the selected run
-4. Runtime views read the prepared stop and student structure from that run
+3. Driver starts and operates the selected run through `/runs/start`
+4. Runtime views read the already prepared stop and student structure from that run
+
+Current `/runs/start` meaning:
+
+- operational runtime endpoint only
+- starts an existing planned run by `run_id`, or creates-and-starts a run for the selected route when needed
+- copies stops from the latest prior route run only when the started run has no stops yet
+- does not create students
+- does not create `StudentRunAssignment` rows
 
 Maintenance and compatibility remain separate from the normal setup path:
 
@@ -58,6 +73,9 @@ The active SBT backend surface follows these rules:
 - stop types support `PICKUP`, `DROPOFF`, `SCHOOL_ARRIVE`, and `SCHOOL_DEPART`
 - school stops can store `stop.school_id`
 - stop order is controlled by `sequence`
+- route-driver assignment is route-level and explicit
+- one active route-driver assignment is used for operational run start
+- `StudentRunAssignment` is the explicit runtime mapping between student, run, and stop
 - Bus is now a standalone entity with its own CRUD and detail surface
 - `Route.bus_id` is an optional current bus assignment
 - legacy route bus-like fields remain in place for compatibility:
@@ -87,7 +105,9 @@ Configuration and workflow:
 
 Application bootstrap and extracted UI/session layers:
 
-- `app.py` keeps FastAPI bootstrap, middleware, static mount, router registration, the root endpoint, startup-based DB init, and the `get_db` compatibility export used by tests
+- `app.py` is bootstrap-focused and now uses FastAPI lifespan for startup initialization
+- DB table initialization runs inside lifespan instead of import-time startup side effects
+- `app.py` keeps the `get_db` compatibility export used by tests
 - `backend/routers/web_pages.py` contains the server-rendered page routes
 - `backend/routers/auth.py` contains the session/auth endpoints
 - `backend/routers/ws.py` contains the GPS WebSocket endpoint
@@ -109,6 +129,28 @@ Protected runtime and reporting:
 - `backend/routers/report.py`
 - `backend/utils/attendance_generator.py`
 - `backend/utils/report_generator.py`
+
+Explicit runtime mapping and compatibility:
+
+- `backend/models/associations.py` defines `RouteDriverAssignment` and `StudentRunAssignment`
+- `backend/routers/student_run_assignment.py` exposes explicit assignment endpoints for compatibility and advanced/internal use
+- `backend/routers/student.py` keeps the direct student create/update compatibility surface, but the preferred assignment flow is stop-context student creation
+
+School mobile attendance flow:
+
+- `/reports/school/{school_id}/mobile` renders `school_attendance_routes.html`
+- `/reports/school/{school_id}/mobile/route/{route_id}` currently also renders `school_attendance_routes.html`
+- `/reports/school/{school_id}/mobile/run/{run_id}` renders `school_mobile_report.html`
+- attendance template rendering uses the current `TemplateResponse(request, template_name, context)` signature
+
+## Structure Snapshot
+- `app.py` bootstrap and lifespan setup
+- `backend/models/` SQLAlchemy models including bus, route, run, stop, student, and associations
+- `backend/routers/` API and HTML routers
+- `backend/schemas/` request/response contracts
+- `backend/templates/` server-rendered UI templates
+- `backend/utils/` shared workflow, attendance, GPS, and auth helpers
+- `tests/` API surface and behavior protection
 
 Core models:
 
@@ -141,3 +183,4 @@ pytest -q
 - The main live UI is still primarily template-driven through `backend/templates/`.
 - The `frontend/` folder exists as a separate React/Vite scaffold.
 - Workflow improvements should remain additive and backward compatible.
+- Tests are green against the current behavior, so docs should be read as describing the live repo rather than an intermediate migration plan.
