@@ -7,7 +7,7 @@
 from datetime import datetime, time
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # -----------------------------------------------------------
@@ -41,12 +41,30 @@ class RouteDriverAssignmentOut(RouteDriverAssignmentBase):
 
 # -----------------------------------------------------------
 # Schema for creating a new route (POST request)
+# - Route creation does not require bus assignment data
+# - Bus assignment happens later through the separate route-bus flow
+# - Legacy bus-like route fields remain optional for compatibility/fallback
 # -----------------------------------------------------------
 class RouteCreate(BaseModel):
-    route_number: str
-    unit_number: str
-    operator: Optional[str] = None
-    capacity: Optional[int] = None
+    route_number: str = Field(
+        ...,
+        description="Required public route identifier used during normal route creation.",
+    )
+    unit_number: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional legacy bus-like field kept for compatibility and fallback reads. "
+            "Normal route creation does not require bus assignment data."
+        ),
+    )
+    operator: Optional[str] = Field(
+        default=None,
+        description="Optional legacy bus-like compatibility field. Bus assignment is handled separately.",
+    )
+    capacity: Optional[int] = Field(
+        default=None,
+        description="Optional legacy bus-like compatibility field. Bus assignment is handled separately.",
+    )
     school_ids: Optional[List[int]] = []
 
     model_config = ConfigDict(extra="forbid")
@@ -62,6 +80,19 @@ class RouteCreate(BaseModel):
         if not normalized:
             raise ValueError("route_number is required")
         return normalized
+
+    # -----------------------------------------------------------
+    # Legacy unit normalization
+    # Allow omission entirely while keeping compatibility values tidy
+    # -----------------------------------------------------------
+    @field_validator("unit_number")
+    @classmethod
+    def normalize_unit_number(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+
+        normalized = value.strip()
+        return normalized or None
 
 
 # -----------------------------------------------------------

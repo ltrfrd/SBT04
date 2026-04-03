@@ -242,8 +242,10 @@ def _serialize_route_detail(route: Route) -> RouteDetailOut:
     response_model=RouteOut,                                     # Successful response model
     summary="Create route",                                      # Clear Swagger title
     description=(                                                # Explain real route creation flow
-        "Create a route without assigning a driver. "
-        "Driver assignment is handled separately. "
+        "Create a route without requiring bus-like route fields. "
+        "Bus assignment is handled separately. "
+        "Legacy route unit_number, operator, and capacity fields remain optional for compatibility and fallback reads. "
+        "Driver assignment is also handled separately. "
         "Route numbers must be unique."
     ),
     response_description="Created route",                        # Swagger success text
@@ -345,7 +347,17 @@ def get_route(route_id: int, db: Session = Depends(get_db)):
 # - Update route
 # - Modify one route while preserving uniqueness rules
 # -----------------------------------------------------------
-@router.put("/{route_id}", response_model=RouteOut)
+@router.put(
+    "/{route_id}",
+    response_model=RouteOut,
+    summary="Update route",
+    description=(
+        "Update one route without requiring bus-like route fields. "
+        "Bus assignment is handled separately. "
+        "Legacy route unit_number, operator, and capacity fields remain optional for compatibility and fallback reads."
+    ),
+    response_description="Updated route",
+)
 def update_route(route_id: int, route_in: RouteCreate, db: Session = Depends(get_db)):
     route = (
         db.query(Route)

@@ -524,6 +524,30 @@ def test_route_driver_assignment_flow(client):
     assert [item["id"] for item in driver_routes.json()] == [route_id]
 
 
+def test_route_create_allows_missing_unit_number(client):
+    school = client.post(
+        "/schools/",
+        json={"name": "No Unit School", "address": "101 No Unit Ave"},
+    )
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]
+
+    route = client.post(
+        "/routes/",
+        json={"route_number": "NO-UNIT-1", "school_ids": [school_id]},
+    )
+    assert route.status_code in (200, 201)
+
+    body = route.json()
+    assert body["route_number"] == "NO-UNIT-1"
+    assert body["unit_number"] is None
+    assert body["school_ids"] == [school_id]
+
+    detail = client.get(f"/routes/{body['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["unit_number"] is None
+
+
 def test_create_run_uses_single_active_route_assignment(client):
     first_driver = client.post(
         "/drivers/",

@@ -1195,6 +1195,33 @@ def test_route_update_rejects_duplicate_route_number(client):
 
 
 # -----------------------------------------------------------
+# - Route create OpenAPI contract
+# - Keep route_number required while legacy bus-like fields stay optional
+# -----------------------------------------------------------
+def test_route_create_openapi_marks_unit_number_optional(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    schemas = response.json()["components"]["schemas"]
+    route_create_schema = schemas["RouteCreate"]
+
+    assert route_create_schema["required"] == ["route_number"]
+    assert "unit_number" in route_create_schema["properties"]
+    assert "Normal route creation does not require bus assignment data." in route_create_schema["properties"]["unit_number"]["description"]
+
+    create_operation = response.json()["paths"]["/routes/"]["post"]
+    assert create_operation["summary"] == "Create route"
+    assert "without requiring bus-like route fields" in create_operation["description"]
+    assert "Bus assignment is handled separately" in create_operation["description"]
+    assert "remain optional for compatibility and fallback reads" in create_operation["description"]
+
+    update_operation = response.json()["paths"]["/routes/{route_id}"]["put"]
+    assert update_operation["summary"] == "Update route"
+    assert "without requiring bus-like route fields" in update_operation["description"]
+    assert "Bus assignment is handled separately" in update_operation["description"]
+
+
+# -----------------------------------------------------------
 # - Run detail endpoint
 # - Return nested route, stop, and student data for one run
 # -----------------------------------------------------------

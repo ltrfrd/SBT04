@@ -200,6 +200,7 @@ backend/ architecture note:
 - Bus is now a standalone entity.
 - Route may point to one current bus through route.bus_id.
 - existing route.unit_number, route.capacity, and route.operator remain for compatibility.
+- route creation/update does not require those legacy bus-like fields in the preferred workflow.
 - read surfaces may prefer assigned bus values and fall back to legacy route values.
 - route-driver assignment supports one primary/default driver and one active/current driver.
 - primary and active may differ during temporary replacement coverage.
@@ -313,6 +314,7 @@ Active layer:
 
 Current operator direction:
 - create route
+- route creation does not require bus/unit data
 - assign schools to route
 - assign driver to route
 - assign bus to route

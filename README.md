@@ -10,7 +10,7 @@ This is not a rewrite. The protected runtime and attendance engine stays in plac
 ## Preferred Workflow
 The intended operator path is:
 
-1. Create a route
+1. Create a route without requiring bus/unit data
 2. Assign schools to the route
 3. Assign a driver to the route
 4. Assign a bus to the route
@@ -98,6 +98,7 @@ The active SBT backend surface follows these rules:
   - `route.unit_number`
   - `route.capacity`
   - `route.operator`
+- route creation/update does not require those legacy bus-like fields in the preferred workflow
 - read surfaces can prefer assigned bus values and fall back to legacy route values when no bus is assigned
 
 ## Protected Engine
@@ -200,3 +201,81 @@ pytest -q
 - The `frontend/` folder exists as a separate React/Vite scaffold.
 - Workflow improvements should remain additive and backward compatible.
 - Tests are green against the current behavior, so docs should be read as describing the live repo rather than an intermediate migration plan.
+
+
+## Future Improvement Notes (Run Module Consolidation)
+
+This section captures observations from backend inspection and is not yet implemented.
+
+### Run Module Structure
+The current `run.py` router mixes multiple responsibilities:
+
+- run lifecycle (create, start, end, update, delete)
+- run-context setup (stops and student assignment)
+- runtime driver actions (arrive, pickup, dropoff, complete)
+- read/report views (state, summary, running board, timeline)
+
+Future improvement may separate these concerns into clearer layers or routers while preserving the current workflow.
+
+---
+
+### to decide on later:
+### Endpoint Overlap Observations
+
+Some endpoints provide similar or overlapping data:
+
+- `GET /runs/{run_id}/assignments`
+- `GET /student-run-assignments/{run_id}`
+
+These both expose assignment-level data for a run.  
+Current direction is to treat `/runs/{run_id}/assignments` as the preferred workflow surface and keep the student-run-assignment router as compatibility/internal.
+
+---
+
+Additional possible overlaps:
+
+- `GET /runs/{run_id}/summary`
+- `GET /runs/{run_id}/state`
+- `GET /runs/{run_id}/occupancy_summary`
+
+These endpoints provide related operational views with partial overlap.  
+No removal is planned yet, but future consolidation may unify or simplify these views.
+
+---
+
+### Compatibility vs Preferred Endpoints
+
+The backend intentionally keeps both:
+
+Preferred workflow (context-based):
+- `/routes/{route_id}/runs`
+- `/runs/{run_id}/stops`
+- `/runs/{run_id}/stops/{stop_id}/students`
+
+Legacy compatibility:
+- `/runs/`
+- `/stops/`
+- `/students/`
+- `/student-run-assignments/...`
+
+Future cleanup may:
+- de-emphasize compatibility endpoints in Swagger
+- keep them for backward compatibility only
+
+---
+
+### Important Constraint
+
+Any future consolidation must:
+
+- preserve existing test coverage
+- keep backward compatibility unless explicitly removed
+- avoid breaking the Route → Run → Stop → Student workflow
+- keep `StudentRunAssignment` as the internal runtime engine
+
+---
+
+### Status
+
+This is a planning note only.  
+No refactor or removal has been applied yet.
