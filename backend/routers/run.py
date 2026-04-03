@@ -100,6 +100,16 @@ def _is_run_active(run: Run) -> bool:
 
 
 # -----------------------------------------------------------
+# - Planned run mutation guard
+# - Allow setup mutations only while the run is still planned
+# -----------------------------------------------------------
+def _ensure_run_is_planned_for_setup(run: run_model.Run) -> run_model.Run:
+    if run.start_time is not None or run.end_time is not None or run.is_completed:
+        raise HTTPException(status_code=400, detail="Only planned runs can be modified")
+    return run
+
+
+# -----------------------------------------------------------
 # - Stop-context student workflow helpers
 # - Keep student-run-assignment internal to route/run/stop UX
 # -----------------------------------------------------------
@@ -107,6 +117,7 @@ def _get_run_stop_or_404(run_id: int, stop_id: int, db: Session) -> tuple[run_mo
     run = db.get(run_model.Run, run_id)  # Validate run exists once for stop-context workflows
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
+    _ensure_run_is_planned_for_setup(run)                       # Run-context setup is planned-only
 
     stop = db.get(stop_model.Stop, stop_id)  # Validate stop exists once for stop-context workflows
     if not stop:
@@ -830,7 +841,7 @@ def get_run_stops(run_id: int, db: Session = Depends(get_db)):
     response_model=StopOut,
     status_code=status.HTTP_201_CREATED,
     summary="Create stop inside run",
-    description="Create a stop inside the selected run context without sending run_id in the body. This is the preferred workflow-first stop creation path.",
+    description="Create a stop inside the selected planned run context without sending run_id in the body. This is a setup workflow endpoint and is not available after the run has started.",
     response_description="Created stop",
 )
 def create_stop_inside_run(
@@ -855,7 +866,7 @@ def create_stop_inside_run(
     "/{run_id}/stops/{stop_id}",
     response_model=StopOut,
     summary="Update stop inside run",
-    description="Update a stop inside the selected run context without sending run_id again. The path run_id is authoritative and cross-run movement is not allowed.",
+    description="Update a stop inside the selected planned run context without sending run_id again. This is a setup workflow endpoint and is not available after the run has started.",
     response_description="Updated stop",
 )
 def update_stop_inside_run(
@@ -883,7 +894,7 @@ def update_stop_inside_run(
     response_model=schemas.StudentOut,
     status_code=status.HTTP_201_CREATED,
     summary="Add student to run stop",
-    description="Create one student from run-stop context without repeating route_id, run_id, or stop_id in the body. Stop, run, and route context are inherited automatically and the internal student run assignment is created automatically.",
+    description="Create one student from planned run-stop context without repeating route_id, run_id, or stop_id in the body. This is a setup workflow endpoint and is not available after the run has started.",
     response_description="Created student",
 )
 def create_run_stop_student(
@@ -919,7 +930,7 @@ def create_run_stop_student(
     "/{run_id}/stops/{stop_id}/students/{student_id}",
     response_model=schemas.StudentOut,
     summary="Update student inside run stop",
-    description="Update a student from run-stop context without repeating run_id, stop_id, or student_id in the body. The path context is authoritative.",
+    description="Update a student from planned run-stop context without repeating run_id, stop_id, or student_id in the body. This is a setup workflow endpoint and is not available after the run has started.",
     response_description="Updated student",
 )
 def update_run_stop_student(
@@ -952,6 +963,42 @@ def update_run_stop_student(
 
 
 # -----------------------------------------------------------
+# - Remove one student from stop context
+# - Delete only the selected runtime assignment for one planned run
+# -----------------------------------------------------------
+@router.delete(
+    "/{run_id}/stops/{stop_id}/students/{student_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove student from run stop",
+    description="Remove the student from the selected run-stop planning context without deleting the student record entirely. Planned run only.",
+    response_description="Student removed from run stop",
+)
+def delete_run_stop_student(
+    run_id: int,
+    stop_id: int,
+    student_id: int,
+    db: Session = Depends(get_db),
+):
+    run, stop, student, assignment = _get_run_stop_student_context_or_404(
+        run_id=run_id,
+        stop_id=stop_id,
+        student_id=student_id,
+        db=db,
+    )
+
+    db.delete(assignment)                                       # Remove only the selected run-scoped assignment row
+
+    if student.route_id == run.route_id:
+        student.route_id = None                                 # Clear route pointer when it still points at removed context
+
+    if student.stop_id == stop.id:
+        student.stop_id = None                                  # Clear stop pointer when it still points at removed context
+
+    db.commit()
+    return None
+
+
+# -----------------------------------------------------------
 # - Bulk add students from stop context
 # - Create students and internal runtime assignments together
 # -----------------------------------------------------------
@@ -960,7 +1007,7 @@ def update_run_stop_student(
     response_model=schemas.StopStudentBulkResult,
     status_code=status.HTTP_201_CREATED,
     summary="Bulk add students to run stop",
-    description="Create multiple students from run-stop context without repeating route_id, run_id, or stop_id in the body. Stop, run, and route context are inherited automatically.",
+    description="Create multiple students from planned run-stop context without repeating route_id, run_id, or stop_id in the body. This is a setup workflow endpoint and is not available after the run has started.",
     response_description="Bulk student creation summary",
 )
 def bulk_create_run_stop_students(

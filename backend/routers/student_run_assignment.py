@@ -113,12 +113,16 @@ def list_assignments(
     summary="Delete student run assignment (disabled)",
     description=(
         "Direct assignment deletion is not allowed. "
-        "Use the stop-context student workflow instead so runtime and planning state stay synchronized."
+        "Use DELETE /runs/{run_id}/stops/{stop_id}/students/{student_id} "
+        "so runtime and planning state stay synchronized."
     ),
     response_description="Direct delete blocked",
 )
 def delete_assignment(assignment_id: int, db: Session = Depends(get_db)):
     raise HTTPException(
         status_code=405,
-        detail="Direct assignment deletion is not allowed. Remove student via stop-context endpoint.",
+        detail=(
+            "Direct assignment deletion is not allowed. "
+            "Use DELETE /runs/{run_id}/stops/{stop_id}/students/{student_id}."
+        ),
     )

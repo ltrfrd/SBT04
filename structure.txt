@@ -59,7 +59,9 @@ Workflow context endpoints:
 - /runs/start does not auto-create StudentRunAssignment rows
 - StudentRunAssignment is the runtime + planning bridge for the selected run/stop
 - assignment create is stop-context only: POST /runs/{run_id}/stops/{stop_id}/students
+- assignment contextual remove is stop-context only: DELETE /runs/{run_id}/stops/{stop_id}/students/{student_id}
 - assignment update is maintenance only: PUT /students/{student_id}/assignment
+- DELETE /students/{student_id} is full student deletion, not normal run-stop workflow removal
 - assignment delete is blocked directly: DELETE /student-run-assignments/{id}
 - NOT FOR OPERATOR WORKFLOW
 - internal runtime engine
@@ -208,11 +210,12 @@ backend/ architecture note:
 Real workflow-related endpoint note:
 - run router already contains stop-context student endpoints
 - single add: POST /runs/{run_id}/stops/{stop_id}/students
+- single remove: DELETE /runs/{run_id}/stops/{stop_id}/students/{student_id}
 - bulk add:   POST /runs/{run_id}/stops/{stop_id}/students/bulk
 - student_run_assignment router still exists for compatibility/internal read visibility
 - direct assignment update intentionally lives in student router maintenance endpoint: PUT /students/{student_id}/assignment
 - direct POST /student-run-assignments/ is blocked and points callers to stop-context student creation
-- direct DELETE /student-run-assignments/{id} is blocked and points callers to stop-context student workflows
+- direct DELETE /student-run-assignments/{id} is blocked and points callers to the canonical stop-context delete workflow
 - legacy direct creates still exist:
 - POST /runs/ for planned-run compatibility
 - POST /stops/ for stop compatibility

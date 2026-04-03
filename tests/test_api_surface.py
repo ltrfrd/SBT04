@@ -1437,6 +1437,8 @@ def test_run_context_stop_update_endpoint_appears_in_openapi(client):
     path_item = response.json()["paths"]["/runs/{run_id}/stops/{stop_id}"]["put"]
     assert path_item["summary"] == "Update stop inside run"
     assert "without sending run_id again" in path_item["description"]
+    assert "planned run context" in path_item["description"]
+    assert "not available after the run has started" in path_item["description"]
 
 
 def test_run_context_stop_create_endpoint_appears_in_openapi(client):
@@ -1446,7 +1448,8 @@ def test_run_context_stop_create_endpoint_appears_in_openapi(client):
     path_item = response.json()["paths"]["/runs/{run_id}/stops"]["post"]
     assert path_item["summary"] == "Create stop inside run"
     assert "without sending run_id in the body" in path_item["description"]
-    assert "preferred workflow-first stop creation path" in path_item["description"]
+    assert "planned run context" in path_item["description"]
+    assert "not available after the run has started" in path_item["description"]
 
     schema_ref = path_item["requestBody"]["content"]["application/json"]["schema"]["$ref"]
     assert schema_ref.endswith("/RunStopCreate")
@@ -1476,8 +1479,8 @@ def test_run_context_student_create_endpoint_appears_in_openapi(client):
 
     path_item = response.json()["paths"]["/runs/{run_id}/stops/{stop_id}/students"]["post"]
     assert path_item["summary"] == "Add student to run stop"
-    assert "without repeating route_id, run_id, or stop_id in the body" in path_item["description"]
-    assert "inherited automatically" in path_item["description"]
+    assert "planned run-stop context" in path_item["description"]
+    assert "not available after the run has started" in path_item["description"]
 
     schema_ref = path_item["requestBody"]["content"]["application/json"]["schema"]["$ref"]
     assert schema_ref.endswith("/StopStudentCreate")
@@ -1511,7 +1514,28 @@ def test_run_context_student_update_endpoint_appears_in_openapi(client):
 
     path_item = response.json()["paths"]["/runs/{run_id}/stops/{stop_id}/students/{student_id}"]["put"]
     assert path_item["summary"] == "Update student inside run stop"
-    assert "without repeating run_id, stop_id, or student_id in the body" in path_item["description"]
+    assert "planned run-stop context" in path_item["description"]
+    assert "not available after the run has started" in path_item["description"]
+
+
+def test_run_context_student_delete_endpoint_appears_in_openapi(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    path_item = response.json()["paths"]["/runs/{run_id}/stops/{stop_id}/students/{student_id}"]["delete"]
+    assert path_item["summary"] == "Remove student from run stop"
+    assert "without deleting the student record entirely" in path_item["description"]
+    assert "Planned run only" in path_item["description"]
+
+
+def test_run_context_bulk_student_create_endpoint_appears_in_openapi(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    path_item = response.json()["paths"]["/runs/{run_id}/stops/{stop_id}/students/bulk"]["post"]
+    assert path_item["summary"] == "Bulk add students to run stop"
+    assert "planned run-stop context" in path_item["description"]
+    assert "not available after the run has started" in path_item["description"]
 
 
 def test_student_assignment_update_endpoint_appears_in_openapi(client):
@@ -1549,7 +1573,18 @@ def test_student_run_assignment_direct_delete_is_blocked_in_openapi(client):
 
     assert operation["summary"] == "Delete student run assignment (disabled)"
     assert "Direct assignment deletion is not allowed" in operation["description"]
-    assert "stop-context student workflow" in operation["description"]
+    assert "DELETE /runs/{run_id}/stops/{stop_id}/students/{student_id}" in operation["description"]
+
+
+def test_student_delete_entirely_endpoint_appears_in_openapi(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    operation = response.json()["paths"]["/students/{student_id}"]["delete"]
+
+    assert operation["summary"] == "Delete student entirely"
+    assert "Permanently remove the student record from the system" in operation["description"]
+    assert "not the normal run-stop workflow removal action" in operation["description"]
 
 
 def test_driver_routes_endpoint_appears_in_openapi(client):

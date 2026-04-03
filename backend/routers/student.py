@@ -335,9 +335,12 @@ def update_student_assignment(
 @router.delete(
     "/{student_id}",                                             # Endpoint path with student id
     status_code=status.HTTP_204_NO_CONTENT,                      # HTTP 204 on success
-    summary="Delete student",                                    # Swagger title
-    description="Delete a student record by id.",                # Swagger description
-    response_description="Student deleted",                      # Swagger response text
+    summary="Delete student entirely",                           # Swagger title
+    description=(
+        "Permanently remove the student record from the system. "
+        "This is full student deletion, not the normal run-stop workflow removal action."
+    ),                                                           # Swagger description
+    response_description="Student permanently deleted",          # Swagger response text
 )
 def delete_student(student_id: int, db: Session = Depends(get_db)):
     """Delete a student record."""                               # Internal docstring

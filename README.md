@@ -63,10 +63,12 @@ Current `/runs/start` meaning:
 Maintenance and compatibility remain separate from the normal setup path:
 
 - assignment creation is stop-context only through `POST /runs/{run_id}/stops/{stop_id}/students`
+- contextual remove is stop-context only through `DELETE /runs/{run_id}/stops/{stop_id}/students/{student_id}` and removes the student from that run-stop planning context without deleting the student record
 - `PUT /students/{student_id}/assignment` is an intentional maintenance endpoint for corrections and controlled moves
+- `DELETE /students/{student_id}` is full student deletion from the system and is not the normal run-stop workflow remove action
 - `StudentRunAssignment` acts as the runtime + planning bridge between the student record and the selected run/stop context
 - `POST /student-run-assignments/` is blocked and returns guidance to use stop-context student creation
-- `DELETE /student-run-assignments/{id}` is blocked and returns guidance to use stop-context student workflows
+- `DELETE /student-run-assignments/{id}` is blocked and returns guidance to use the canonical stop-context delete endpoint
 - `GET /student-run-assignments/{run_id}` and `GET /student-run-assignments/?student_id=...` remain compatibility read views
 - `POST /runs/` is legacy compatibility
 - `POST /stops/` is legacy compatibility

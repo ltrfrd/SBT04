@@ -31,6 +31,12 @@ router = APIRouter(prefix="/stops", tags=["Stops"])
 SHIFT_OFFSET = 100000  # Temporary sequence offset used to avoid unique collisions during moves
 
 
+def _ensure_run_is_planned_for_setup(run: run_model.Run) -> run_model.Run:
+    if run.start_time is not None or run.end_time is not None or run.is_completed:
+        raise HTTPException(status_code=400, detail="Only planned runs can be modified")
+    return run
+
+
 def shift_block_up(db: Session, run_id: int, start_seq: int, end_seq: int) -> None:
     if start_seq > end_seq:  # Ignore empty ranges
         return
@@ -429,6 +435,7 @@ def create_run_stop(
         run = db.get(run_model.Run, run_id)
         if not run:
             raise HTTPException(status_code=404, detail="Run not found")
+        _ensure_run_is_planned_for_setup(run)                   # Run-context setup is planned-only
 
         data = _build_stop_payload(                             # Apply shared stop workflow rules
             run_id=run_id,                                      # Parent run from path context
@@ -527,6 +534,7 @@ def update_run_stop(
         run = db.get(run_model.Run, run_id)                     # Path run is the authority in context mode
         if not run:
             raise HTTPException(status_code=404, detail="Run not found")
+        _ensure_run_is_planned_for_setup(run)                   # Run-context setup is planned-only
 
         stop = db.get(stop_model.Stop, stop_id)
         if not stop:

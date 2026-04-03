@@ -70,6 +70,53 @@ def _start_run_by_id(client, run_id: int):
     assert start_response.status_code in (200, 201)
     return start_response
 
+
+def _create_started_run_context(client, *, route_number: str, unit_number: str, run_type: str):
+    school = client.post(
+        "/schools/",
+        json={"name": f"{route_number} School", "address": f"{route_number} Way"},
+    )
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]
+
+    driver = client.post(
+        "/drivers/",
+        json={"name": f"{route_number} Driver", "email": f"{route_number.lower()}@test.com", "phone": "5550001"},
+    )
+    assert driver.status_code in (200, 201)
+
+    route = _create_route_with_assignment_flow(
+        client,
+        route_number,
+        unit_number,
+        driver_id=driver.json()["id"],
+        school_ids=[school_id],
+    )
+
+    run = _create_planned_run(client, route["id"], run_type)
+    run_id = run.json()["id"]
+
+    stop = client.post(
+        f"/runs/{run_id}/stops",
+        json={"name": f"{route_number} Stop", "type": "pickup", "sequence": 1},
+    )
+    assert stop.status_code in (200, 201)
+    stop_id = stop.json()["id"]
+
+    student = client.post(
+        f"/runs/{run_id}/stops/{stop_id}/students",
+        json={"name": f"{route_number} Student", "grade": "4", "school_id": school_id},
+    )
+    assert student.status_code in (200, 201)
+
+    started_run = _start_run_by_id(client, run_id)
+    return {
+        "run_id": started_run.json()["id"],
+        "stop_id": stop_id,
+        "student_id": student.json()["id"],
+        "school_id": school_id,
+    }
+
 def test_root(client):
     r = client.get("/")
     assert r.status_code == 200
@@ -997,6 +1044,95 @@ def test_start_run_fails_without_active_route_driver_assignment(client):
     run = client.post(f"/runs/start?run_id={run.json()['id']}")
     assert run.status_code == 409
     assert run.json()["detail"] == "Route has no active driver assignment"
+
+
+def test_run_context_stop_create_is_blocked_after_start(client):
+    context = _create_started_run_context(
+        client,
+        route_number="LOCK-STOP-CREATE",
+        unit_number="BUS-LOCK-STOP-CREATE",
+        run_type="AM",
+    )
+
+    response = client.post(
+        f"/runs/{context['run_id']}/stops",
+        json={"name": "Blocked Stop", "type": "pickup", "sequence": 2},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Only planned runs can be modified"
+
+
+def test_run_context_stop_update_is_blocked_after_start(client):
+    context = _create_started_run_context(
+        client,
+        route_number="LOCK-STOP-UPDATE",
+        unit_number="BUS-LOCK-STOP-UPDATE",
+        run_type="AM",
+    )
+
+    response = client.put(
+        f"/runs/{context['run_id']}/stops/{context['stop_id']}",
+        json={"name": "Blocked Stop Update"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Only planned runs can be modified"
+
+
+def test_run_context_student_create_is_blocked_after_start(client):
+    context = _create_started_run_context(
+        client,
+        route_number="LOCK-STUDENT-CREATE",
+        unit_number="BUS-LOCK-STUDENT-CREATE",
+        run_type="AM",
+    )
+
+    response = client.post(
+        f"/runs/{context['run_id']}/stops/{context['stop_id']}/students",
+        json={"name": "Blocked Student", "grade": "5", "school_id": context["school_id"]},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Only planned runs can be modified"
+
+
+def test_run_context_student_update_is_blocked_after_start(client):
+    context = _create_started_run_context(
+        client,
+        route_number="LOCK-STUDENT-UPDATE",
+        unit_number="BUS-LOCK-STUDENT-UPDATE",
+        run_type="AM",
+    )
+
+    response = client.put(
+        f"/runs/{context['run_id']}/stops/{context['stop_id']}/students/{context['student_id']}",
+        json={"name": "Blocked Student Update"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Only planned runs can be modified"
+
+
+def test_run_context_bulk_student_create_is_blocked_after_start(client):
+    context = _create_started_run_context(
+        client,
+        route_number="LOCK-STUDENT-BULK",
+        unit_number="BUS-LOCK-STUDENT-BULK",
+        run_type="AM",
+    )
+
+    response = client.post(
+        f"/runs/{context['run_id']}/stops/{context['stop_id']}/students/bulk",
+        json={
+            "students": [
+                {"name": "Blocked Bulk Student", "grade": "5", "school_id": context["school_id"]},
+            ]
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Only planned runs can be modified"
 
 
 # =============================================================================
@@ -3486,6 +3622,224 @@ def test_context_student_update_repairs_same_run_assignment_drift(client, db_eng
         assert stored_student.stop_id == stop_a.json()["id"]
         assert stored_student.route_id == route["id"]
         assert stored_assignment.stop_id == stop_a.json()["id"]
+
+
+# -----------------------------------------------------------
+# - Stop-context student delete
+# - Remove only the selected run-stop assignment and keep student record
+# -----------------------------------------------------------
+def test_delete_student_inside_run_stop_context_removes_assignment_but_keeps_student(client, db_engine):
+    school = client.post(
+        "/schools/",
+        json={"name": "Context Delete School", "address": "105 Delete Way"},
+    )
+    assert school.status_code in (200, 201)
+
+    driver = client.post(
+        "/drivers/",
+        json={"name": "Context Delete Driver", "email": "context.delete@test.com", "phone": "10105"},
+    )
+    assert driver.status_code in (200, 201)
+
+    route = _create_route_with_assignment_flow(
+        client,
+        "CTX-DELETE-1",
+        "BUS-CTX-DELETE-1",
+        driver_id=driver.json()["id"],
+        school_ids=[school.json()["id"]],
+    )
+
+    run = client.post(f"/routes/{route['id']}/runs", json={"run_type": "AM"})
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    stop = client.post(
+        f"/runs/{run_id}/stops",
+        json={"sequence": 1, "type": "pickup", "name": "Context Delete Stop"},
+    )
+    assert stop.status_code in (200, 201)
+    stop_id = stop.json()["id"]
+
+    student = client.post(
+        f"/runs/{run_id}/stops/{stop_id}/students",
+        json={"name": "Context Delete Student", "grade": "4", "school_id": school.json()["id"]},
+    )
+    assert student.status_code == 201
+    student_id = student.json()["id"]
+
+    removed = client.delete(f"/runs/{run_id}/stops/{stop_id}/students/{student_id}")
+    assert removed.status_code == 204
+
+    student_response = client.get(f"/students/{student_id}")
+    assert student_response.status_code == 200
+    assert student_response.json()["route_id"] is None
+    assert student_response.json()["stop_id"] is None
+
+    assignments = client.get(f"/student-run-assignments/{run_id}")
+    assert assignments.status_code == 200
+    assert assignments.json() == []
+
+    with Session(db_engine) as db:
+        stored_student = db.get(Student, student_id)
+        stored_assignment = (
+            db.query(StudentRunAssignment)
+            .filter(StudentRunAssignment.run_id == run_id)
+            .filter(StudentRunAssignment.student_id == student_id)
+            .first()
+        )
+        assert stored_student is not None
+        assert stored_student.route_id is None
+        assert stored_student.stop_id is None
+        assert stored_assignment is None
+
+
+# -----------------------------------------------------------
+# - Stop-context delete mismatch guard
+# - Reject remove when stop does not belong to the selected run
+# -----------------------------------------------------------
+def test_delete_student_inside_run_stop_context_rejects_wrong_stop_run_pairing(client):
+    school = client.post("/schools/", json={"name": "Delete Mismatch School", "address": "106 Delete Way"})
+    assert school.status_code in (200, 201)
+
+    driver = client.post(
+        "/drivers/",
+        json={"name": "Delete Mismatch Driver", "email": "delete.mismatch@test.com", "phone": "10106"},
+    )
+    assert driver.status_code in (200, 201)
+
+    route = _create_route_with_assignment_flow(
+        client,
+        "CTX-DELETE-MISMATCH",
+        "BUS-CTX-DELETE-MISMATCH",
+        driver_id=driver.json()["id"],
+        school_ids=[school.json()["id"]],
+    )
+
+    run_one = client.post(f"/routes/{route['id']}/runs", json={"run_type": "AM"})
+    run_two = client.post(f"/routes/{route['id']}/runs", json={"run_type": "PM"})
+    assert run_one.status_code in (200, 201)
+    assert run_two.status_code in (200, 201)
+
+    stop_one = client.post(
+        f"/runs/{run_one.json()['id']}/stops",
+        json={"sequence": 1, "type": "pickup", "name": "Delete Match Stop"},
+    )
+    stop_two = client.post(
+        f"/runs/{run_two.json()['id']}/stops",
+        json={"sequence": 1, "type": "pickup", "name": "Delete Wrong Stop"},
+    )
+    assert stop_one.status_code in (200, 201)
+    assert stop_two.status_code in (200, 201)
+
+    student = client.post(
+        f"/runs/{run_one.json()['id']}/stops/{stop_one.json()['id']}/students",
+        json={"name": "Delete Mismatch Student", "grade": "5", "school_id": school.json()["id"]},
+    )
+    assert student.status_code == 201
+
+    response = client.delete(
+        f"/runs/{run_one.json()['id']}/stops/{stop_two.json()['id']}/students/{student.json()['id']}",
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Stop does not belong to run"
+
+
+# -----------------------------------------------------------
+# - Stop-context delete missing assignment guard
+# - Reject remove when the student is not assigned to the selected run
+# -----------------------------------------------------------
+def test_delete_student_inside_run_stop_context_rejects_missing_assignment(client):
+    school = client.post("/schools/", json={"name": "Delete Missing School", "address": "107 Delete Way"})
+    assert school.status_code in (200, 201)
+
+    driver = client.post(
+        "/drivers/",
+        json={"name": "Delete Missing Driver", "email": "delete.missing@test.com", "phone": "10107"},
+    )
+    assert driver.status_code in (200, 201)
+
+    route = _create_route_with_assignment_flow(
+        client,
+        "CTX-DELETE-MISSING",
+        "BUS-CTX-DELETE-MISSING",
+        driver_id=driver.json()["id"],
+        school_ids=[school.json()["id"]],
+    )
+
+    run = client.post(f"/routes/{route['id']}/runs", json={"run_type": "AM"})
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    stop = client.post(
+        f"/runs/{run_id}/stops",
+        json={"sequence": 1, "type": "pickup", "name": "Delete Missing Stop"},
+    )
+    assert stop.status_code in (200, 201)
+
+    student = client.post(
+        "/students/",
+        json={
+            "name": "Delete Missing Student",
+            "grade": "3",
+            "school_id": school.json()["id"],
+            "route_id": route["id"],
+            "stop_id": stop.json()["id"],
+        },
+    )
+    assert student.status_code in (200, 201)
+
+    response = client.delete(
+        f"/runs/{run_id}/stops/{stop.json()['id']}/students/{student.json()['id']}",
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Student is not assigned to run"
+
+
+# -----------------------------------------------------------
+# - Stop-context delete planned-only guard
+# - Block contextual remove once the run has started
+# -----------------------------------------------------------
+def test_delete_student_inside_run_stop_context_is_blocked_after_start(client):
+    context = _create_started_run_context(
+        client,
+        route_number="LOCK-STUDENT-DELETE",
+        unit_number="BUS-LOCK-STUDENT-DELETE",
+        run_type="AM",
+    )
+
+    response = client.delete(
+        f"/runs/{context['run_id']}/stops/{context['stop_id']}/students/{context['student_id']}",
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Only planned runs can be modified"
+
+
+# -----------------------------------------------------------
+# - Full student delete compatibility
+# - Keep full system-wide delete separate from contextual remove
+# -----------------------------------------------------------
+def test_delete_student_entirely_removes_student_record(client):
+    school = client.post(
+        "/schools/",
+        json={"name": "Full Delete School", "address": "108 Delete Way"},
+    )
+    assert school.status_code in (200, 201)
+
+    student = client.post(
+        "/students/",
+        json={"name": "Full Delete Student", "grade": "6", "school_id": school.json()["id"]},
+    )
+    assert student.status_code in (200, 201)
+    student_id = student.json()["id"]
+
+    deleted = client.delete(f"/students/{student_id}")
+    assert deleted.status_code == 204
+
+    missing = client.get(f"/students/{student_id}")
+    assert missing.status_code == 404
 
 
 # -----------------------------------------------------------
