@@ -460,6 +460,8 @@ def _serialize_run_list_item(run: run_model.Run) -> RunListOut:
     description=(
         "Legacy compatibility endpoint for creating a planned run by sending route_id in the body. "
         "Preferred workflow-first creation is POST /routes/{route_id}/runs so route context is inherited automatically. "
+        "When exactly one active route-driver assignment exists, the planned run inherits that active driver. "
+        "Primary/default assignment does not drive live run resolution by itself. "
         "A driver assignment is optional until the run is started."
     ),                                                           # Swagger description
     response_description="Created run",                          # Swagger response text
@@ -500,9 +502,11 @@ def create_run(run: RunCreateLegacy, db: Session = Depends(get_db)):
     response_model=RunOut,
     summary="Start run",
     description=(
-        "Operational runtime endpoint. Start an existing prepared run through the Route -> Run -> Stop -> Student workflow. "
+        "Operational runtime endpoint. Start an existing prepared run only through the Route -> Run -> Stop -> Student workflow. "
         "A prepared run must already have stops and at least one runtime student assignment before start succeeds. "
-        "This endpoint starts the run only and does not create students, stops, or runtime assignments."
+        "At start time, the run driver is resolved from the single active route-driver assignment only. "
+        "Primary/default assignment does not control runtime ownership by itself. "
+        "This endpoint starts the run only and does not create stops, students, or StudentRunAssignment rows."
     ),
     response_description="Started run",
 )

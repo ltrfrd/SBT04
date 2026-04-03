@@ -402,7 +402,9 @@ def update_route(route_id: int, route_in: RouteCreate, db: Session = Depends(get
     summary="Create run inside route",
     description=(
         "Primary workflow-first run creation path. "
-        "Create a planned run inside the selected route context without sending route_id in the body."
+        "Create a planned run inside the selected route context without sending route_id in the body. "
+        "When exactly one active route-driver assignment exists, the planned run inherits that active driver. "
+        "Primary/default assignment does not control operational run resolution by itself."
     ),
     response_description="Created run",
 )
@@ -605,7 +607,7 @@ def _assign_driver_to_route(
         "Assign a driver to a route using separate primary/default and active/current semantics. "
         "The first route-driver assignment becomes both primary and active. "
         "Later assignments may activate a temporary replacement driver without removing the existing primary assignment. "
-        "Operational run logic continues to follow the single active assignment only. No request body is required."
+        "Operational run logic continues to follow the single active/current assignment only. No request body is required."
     ),
     response_description="The activated route-driver assignment",  # Swagger response text
 )
@@ -649,6 +651,7 @@ def assign_driver_to_route(
     description=(                                                # Explain what the list represents
         "Return all driver assignments for the route, including which assignment is currently active "
         "for operations and which assignment is the primary/default route owner. "
+        "Operational run logic follows the active/current assignment only. "
         "Legacy date fields are not authoritative for live routing."
     ),
     response_description="Route driver assignment list",         # Swagger response text
@@ -691,7 +694,7 @@ def get_route_drivers(route_id: int, db: Session = Depends(get_db)):
         "Deactivate the selected route-driver assignment safely. "
         "If the active assignment being removed is a temporary replacement and the route still has an inactive primary/default assignment, "
         "the primary assignment is reactivated automatically. "
-        "Operational run logic continues to follow the single active assignment only."
+        "Operational run logic continues to follow the single active/current assignment only."
     ),
     response_description="Route-driver assignment deactivated",
 )

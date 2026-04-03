@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 # -----------------------------------------------------------
 # Driver assignment payload
+# - active means current operational assignment
 # -----------------------------------------------------------
 class RouteDriverAssignmentBase(BaseModel):
     active: bool = True
@@ -26,6 +27,7 @@ class RouteDriverAssignmentCreate(RouteDriverAssignmentBase):
 
 # -----------------------------------------------------------
 # Driver assignment output schema
+# - is_primary means default/base route owner
 # -----------------------------------------------------------
 class RouteDriverAssignmentOut(RouteDriverAssignmentBase):
     id: int
@@ -76,10 +78,10 @@ class RouteOut(BaseModel):
     school_ids: Optional[List[int]] = None
     school_names: List[str] = []
     schools_count: int = 0
-    active_driver_id: Optional[int] = None
-    active_driver_name: Optional[str] = None
-    primary_driver_id: Optional[int] = None
-    primary_driver_name: Optional[str] = None
+    active_driver_id: Optional[int] = None  # Current operational driver id
+    active_driver_name: Optional[str] = None  # Current operational driver name
+    primary_driver_id: Optional[int] = None  # Default/base route-owner driver id
+    primary_driver_name: Optional[str] = None  # Default/base route-owner driver name
     runs_count: int = 0
     active_runs_count: int = 0
     total_stops_count: int = 0
@@ -156,10 +158,10 @@ class RouteDetailOut(BaseModel):
     capacity: Optional[int] = None
     bus_id: Optional[int] = None
     schools: List[RouteSchoolOut] = []
-    active_driver_id: int | None = None
-    active_driver_name: str | None = None
-    primary_driver_id: int | None = None
-    primary_driver_name: str | None = None
+    active_driver_id: int | None = None  # Current operational driver id
+    active_driver_name: str | None = None  # Current operational driver name
+    primary_driver_id: int | None = None  # Default/base route-owner driver id
+    primary_driver_name: str | None = None  # Default/base route-owner driver name
     driver_assignments: List[RouteDriverAssignmentOut] = []
     runs: List[RouteDetailRunOut] = []
 

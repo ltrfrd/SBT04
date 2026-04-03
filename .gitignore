@@ -75,3 +75,7 @@ venv/
 pytest_tmp*
 pytest_cache*
 tests/pytest*
+
+# temp / backup files
+*.bak
+*.bak*

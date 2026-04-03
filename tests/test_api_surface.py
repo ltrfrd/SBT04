@@ -1104,7 +1104,7 @@ def test_update_student_assignment_rejects_invalid_route_stop_combination(client
         json={
             "route_id": route_one_id,
             "run_id": source_run.json()["id"],   # correct run
-            "stop_id": other_stop.json()["id"],  # ❗ wrong stop (from other route)
+            "stop_id": other_stop.json()["id"],  # Ã¢Ââ€” wrong stop (from other route)
         },
     )
     assert moved.status_code == 400
@@ -1394,7 +1394,9 @@ def test_start_run_endpoint_has_query_param_only_in_openapi(client):
     assert path_item["summary"] == "Start run"
     assert "Operational runtime endpoint." in path_item["description"]
     assert "existing prepared run" in path_item["description"]
-    assert "does not create students, stops, or runtime assignments" in path_item["description"]
+    assert "single active route-driver assignment only" in path_item["description"]
+    assert "Primary/default assignment" in path_item["description"]
+    assert "does not create stops, students, or StudentRunAssignment rows" in path_item["description"]
     assert "requestBody" not in path_item
 
     parameters = path_item["parameters"]
@@ -1621,7 +1623,7 @@ def test_route_driver_assignment_endpoints_appear_in_openapi(client):
     assert "primary/default and active/current semantics" in assign_operation["description"]
     assert "first route-driver assignment becomes both primary and active" in assign_operation["description"]
     assert "temporary replacement driver" in assign_operation["description"]
-    assert "single active assignment only" in assign_operation["description"]
+    assert "single active/current assignment only" in assign_operation["description"]
 
     list_operation = paths["/routes/{route_id}/drivers"]["get"]
     assert list_operation["summary"] == "List route driver assignments"
@@ -1633,7 +1635,7 @@ def test_route_driver_assignment_endpoints_appear_in_openapi(client):
     assert unassign_operation["summary"] == "Unassign driver from route"
     assert "temporary replacement" in unassign_operation["description"]
     assert "primary assignment is reactivated automatically" in unassign_operation["description"]
-    assert "single active assignment only" in unassign_operation["description"]
+    assert "single active/current assignment only" in unassign_operation["description"]
 
 
 def test_route_driver_assignment_schemas_expose_primary_fields_in_openapi(client):
