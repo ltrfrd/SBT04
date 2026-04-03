@@ -26,7 +26,12 @@ from backend.schemas.route import (
     RouteSchoolOut,
 )
 from backend.schemas.run import RouteRunCreate
-from backend.utils.route_driver_assignment import resolve_route_driver_assignment
+from backend.utils.route_driver_assignment import (
+    get_active_route_driver_assignments,
+    get_primary_route_driver_assignments,
+    resolve_primary_route_driver_assignment,
+    resolve_route_driver_assignment,
+)
 from datetime import datetime, timezone
 
 router = APIRouter(prefix="/routes", tags=["Routes"])
@@ -39,13 +44,22 @@ router = APIRouter(prefix="/routes", tags=["Routes"])
 def _serialize_route(route: Route) -> RouteOut:
     active_driver_id = None  # Default when no active driver resolves
     active_driver_name = None  # Default when no active driver resolves
+    primary_driver_id = None  # Default when no primary driver resolves
+    primary_driver_name = None  # Default when no primary driver resolves
 
     try:
-        active_assignment = resolve_route_driver_assignment(route)  # Resolve current route driver
+        active_assignment = resolve_route_driver_assignment(route)  # Resolve current operational route driver
         active_driver_id = active_assignment.driver_id  # Resolved driver identifier
         active_driver_name = active_assignment.driver.name if active_assignment.driver else None  # Resolved driver name
     except ValueError:
         pass  # Leave unresolved route driver fields empty
+
+    try:
+        primary_assignment = resolve_primary_route_driver_assignment(route)  # Resolve default/base route driver
+        primary_driver_id = primary_assignment.driver_id  # Resolved primary driver identifier
+        primary_driver_name = primary_assignment.driver.name if primary_assignment.driver else None  # Resolved primary driver name
+    except ValueError:
+        pass  # Leave unresolved primary driver fields empty
 
     runs_count = len(route.runs)  # Total runs linked to this route
     active_runs_count = sum(  # Count only active operational runs
@@ -72,6 +86,8 @@ def _serialize_route(route: Route) -> RouteOut:
         schools_count=len(route.schools),
         active_driver_id=active_driver_id,
         active_driver_name=active_driver_name,
+        primary_driver_id=primary_driver_id,
+        primary_driver_name=primary_driver_name,
         runs_count=runs_count,
         active_runs_count=active_runs_count,
         total_stops_count=total_stops_count,
@@ -86,13 +102,22 @@ def _serialize_route(route: Route) -> RouteOut:
 def _serialize_route_detail(route: Route) -> RouteDetailOut:
     active_driver_id = None  # Default when no active driver resolves
     active_driver_name = None  # Default when no active driver resolves
+    primary_driver_id = None  # Default when no primary driver resolves
+    primary_driver_name = None  # Default when no primary driver resolves
 
     try:
-        active_assignment = resolve_route_driver_assignment(route)  # Resolve current route driver
+        active_assignment = resolve_route_driver_assignment(route)  # Resolve current operational route driver
         active_driver_id = active_assignment.driver_id  # Resolved driver identifier
         active_driver_name = active_assignment.driver.name if active_assignment.driver else None  # Resolved driver name
     except ValueError:
         pass  # Leave unresolved route driver fields empty
+
+    try:
+        primary_assignment = resolve_primary_route_driver_assignment(route)  # Resolve default/base route driver
+        primary_driver_id = primary_assignment.driver_id  # Resolved primary driver identifier
+        primary_driver_name = primary_assignment.driver.name if primary_assignment.driver else None  # Resolved primary driver name
+    except ValueError:
+        pass  # Leave unresolved primary driver fields empty
 
     ordered_runs = sorted(  # Keep detail output stable and newest-first
         route.runs,
@@ -189,6 +214,8 @@ def _serialize_route_detail(route: Route) -> RouteDetailOut:
         ],
         active_driver_id=active_driver_id,
         active_driver_name=active_driver_name,
+        primary_driver_id=primary_driver_id,
+        primary_driver_name=primary_driver_name,
         driver_assignments=[
             RouteDriverAssignmentOut(
                 id=assignment.id,
@@ -196,10 +223,11 @@ def _serialize_route_detail(route: Route) -> RouteDetailOut:
                 driver_id=assignment.driver_id,
                 driver_name=assignment.driver.name if assignment.driver else None,
                 active=assignment.active,
+                is_primary=assignment.is_primary,
             )
             for assignment in sorted(
                 route.driver_assignments,
-                key=lambda assignment: (not assignment.active, assignment.id),
+                key=lambda assignment: (not assignment.active, not assignment.is_primary, assignment.id),
             )
         ],
         runs=serialized_runs,
@@ -483,38 +511,81 @@ def unassign_bus_from_route(route_id: int, db: Session = Depends(get_db)):
 
 # -----------------------------------------------------------
 # - Assign driver to route
-# - Enforce one active driver per route
+# - Enforce primary/default and active/current route-driver rules
 # -----------------------------------------------------------
+def _assert_route_driver_assignment_integrity(route: Route) -> None:
+    active_assignments = get_active_route_driver_assignments(route)  # Operational assignments
+    if len(active_assignments) > 1:
+        raise HTTPException(status_code=409, detail="Route has multiple active driver assignments")
+
+    primary_assignments = get_primary_route_driver_assignments(route)  # Default/base assignments
+    if len(primary_assignments) > 1:
+        raise HTTPException(status_code=409, detail="Route has multiple primary driver assignments")
+
+
+def _get_route_assignment_for_driver(
+    route: Route,
+    driver_id: int,
+) -> RouteDriverAssignment | None:
+    for assignment in route.driver_assignments:
+        if assignment.driver_id == driver_id:
+            return assignment
+    return None
+
+
+def _get_primary_route_assignment(route: Route) -> RouteDriverAssignment | None:
+    primary_assignments = get_primary_route_driver_assignments(route)  # Default/base assignments only
+    if not primary_assignments:
+        return None
+    if len(primary_assignments) > 1:
+        raise HTTPException(status_code=409, detail="Route has multiple primary driver assignments")
+    return primary_assignments[0]
+
+
 def _assign_driver_to_route(
     route: Route,
     driver_id: int,
     db: Session,
 ) -> RouteDriverAssignment:
-
     driver = db.get(Driver, driver_id)                           # Validate driver exists
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
 
+    _assert_route_driver_assignment_integrity(route)             # Fail safely on invalid legacy active/primary state
+
+    primary_assignment = _get_primary_route_assignment(route)    # Resolve existing default/base driver when present
+    existing_assignment = _get_route_assignment_for_driver(route, driver_id)  # Reuse existing route history row when safe
+
     # -----------------------------------------------------------
     # Deactivate all current active assignments
+    # Active remains the only operational source of truth
     # -----------------------------------------------------------
-    active_assignments = (
-        db.query(RouteDriverAssignment)
-        .filter(RouteDriverAssignment.route_id == route.id)
-        .filter(RouteDriverAssignment.active.is_(True))
-        .all()
-    )
+    active_assignments = get_active_route_driver_assignments(route)
 
     for assignment in active_assignments:
         assignment.active = False                                # Only one active driver allowed
 
     # -----------------------------------------------------------
-    # Create new active assignment
+    # Reuse existing assignment row when safe
+    # Preserve primary/default meaning separately from active/current
+    # -----------------------------------------------------------
+    if existing_assignment is not None:
+        existing_assignment.active = True                        # Selected existing driver becomes current operator
+        if primary_assignment is None:
+            existing_assignment.is_primary = True                # Establish first safe default/base owner when missing
+        db.flush()
+        return existing_assignment
+
+    # -----------------------------------------------------------
+    # Create new assignment row
+    # First route driver becomes both primary and active
+    # Later replacement drivers become active without replacing primary
     # -----------------------------------------------------------
     new_assignment = RouteDriverAssignment(
         route_id=route.id,
         driver_id=driver_id,
         active=True,
+        is_primary=primary_assignment is None,
     )
 
     db.add(new_assignment)
@@ -529,13 +600,14 @@ def _assign_driver_to_route(
 @router.post(
     "/{route_id}/assign_driver/{driver_id}",                     # Route + driver selected from path
     response_model=RouteDriverAssignmentOut,                     # Return the activated assignment
-    summary="Assign active driver to route",                     # Clear Swagger title
+    summary="Assign driver to route",                            # Clear Swagger title
     description=(                                                # Explain current route-driver workflow
-        "Assign a driver to a route as the single active assignment. "
-        "If another active driver assignment already exists for the route, "
-        "it is automatically deactivated. No request body is required."
+        "Assign a driver to a route using separate primary/default and active/current semantics. "
+        "The first route-driver assignment becomes both primary and active. "
+        "Later assignments may activate a temporary replacement driver without removing the existing primary assignment. "
+        "Operational run logic continues to follow the single active assignment only. No request body is required."
     ),
-    response_description="The newly active route-driver assignment",  # Swagger response text
+    response_description="The activated route-driver assignment",  # Swagger response text
 )
 def assign_driver_to_route(
     route_id: int,
@@ -563,19 +635,21 @@ def assign_driver_to_route(
         driver_id=assignment.driver_id,
         driver_name=assignment.driver.name if assignment.driver else None,
         active=assignment.active,
+        is_primary=assignment.is_primary,
     )
 
 # -----------------------------------------------------------
 # - List driver assignments for one route
-# - Show which assignment is currently active
+# - Show current active and default primary assignment meaning
 # -----------------------------------------------------------
 @router.get(
     "/{route_id}/drivers",                                       # Read assignments for one route
     response_model=List[RouteDriverAssignmentOut],               # Return assignment collection
     summary="List route driver assignments",                     # Clear Swagger title
     description=(                                                # Explain what the list represents
-        "Return all driver assignments for the route, including which one is "
-        "currently active."
+        "Return all driver assignments for the route, including which assignment is currently active "
+        "for operations and which assignment is the primary/default route owner. "
+        "Legacy date fields are not authoritative for live routing."
     ),
     response_description="Route driver assignment list",         # Swagger response text
 )
@@ -596,32 +670,60 @@ def get_route_drivers(route_id: int, db: Session = Depends(get_db)):
             driver_id=assignment.driver_id,
             driver_name=assignment.driver.name if assignment.driver else None,
             active=assignment.active,
+            is_primary=assignment.is_primary,
         )
-        for assignment in route.driver_assignments
+        for assignment in sorted(
+            route.driver_assignments,
+            key=lambda assignment: (not assignment.active, not assignment.is_primary, assignment.id),
+        )
     ]
 
 
 # -----------------------------------------------------------
 # - Unassign driver from route
-# - Deactivate active assignments for one route and driver
+# - Deactivate one route-driver assignment safely
 # -----------------------------------------------------------
-@router.delete("/{route_id}/unassign_driver/{driver_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{route_id}/unassign_driver/{driver_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Unassign driver from route",
+    description=(
+        "Deactivate the selected route-driver assignment safely. "
+        "If the active assignment being removed is a temporary replacement and the route still has an inactive primary/default assignment, "
+        "the primary assignment is reactivated automatically. "
+        "Operational run logic continues to follow the single active assignment only."
+    ),
+    response_description="Route-driver assignment deactivated",
+)
 def unassign_driver_from_route(route_id: int, driver_id: int, db: Session = Depends(get_db)):
-    assignments = (
-        db.query(RouteDriverAssignment)
-        .filter(RouteDriverAssignment.route_id == route_id)
-        .filter(RouteDriverAssignment.driver_id == driver_id)
-        .filter(RouteDriverAssignment.active.is_(True))
-        .all()
+    route = (
+        db.query(Route)
+        .options(joinedload(Route.driver_assignments).joinedload(RouteDriverAssignment.driver))
+        .filter(Route.id == route_id)
+        .first()
     )
-    if not assignments:
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
+
+    _assert_route_driver_assignment_integrity(route)             # Fail safely on invalid legacy active/primary state
+
+    assignment = _get_route_assignment_for_driver(route, driver_id)
+    if assignment is None or assignment.active is not True:
         raise HTTPException(status_code=404, detail="Active route-driver assignment not found")
 
     # -----------------------------------------------------------
     # - Deactivate assignment
-    # - No date tracking needed in current model
+    # - Reactivate primary/default owner only when removing an active replacement
     # -----------------------------------------------------------
-    for assignment in assignments:
-        assignment.active = False
+    assignment.active = False
+
+    primary_assignment = _get_primary_route_assignment(route)    # Default/base owner may be restored after replacement ends
+    if (
+        primary_assignment is not None
+        and primary_assignment.id != assignment.id
+        and primary_assignment.active is not True
+    ):
+        primary_assignment.active = True                         # Restore primary only when a distinct replacement was active
+
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

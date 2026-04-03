@@ -32,6 +32,7 @@ class RouteDriverAssignmentOut(RouteDriverAssignmentBase):
     route_id: int
     driver_id: int
     driver_name: Optional[str] = None
+    is_primary: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -77,6 +78,8 @@ class RouteOut(BaseModel):
     schools_count: int = 0
     active_driver_id: Optional[int] = None
     active_driver_name: Optional[str] = None
+    primary_driver_id: Optional[int] = None
+    primary_driver_name: Optional[str] = None
     runs_count: int = 0
     active_runs_count: int = 0
     total_stops_count: int = 0
@@ -155,6 +158,8 @@ class RouteDetailOut(BaseModel):
     schools: List[RouteSchoolOut] = []
     active_driver_id: int | None = None
     active_driver_name: str | None = None
+    primary_driver_id: int | None = None
+    primary_driver_name: str | None = None
     driver_assignments: List[RouteDriverAssignmentOut] = []
     runs: List[RouteDetailRunOut] = []
 

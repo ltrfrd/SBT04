@@ -255,10 +255,11 @@ def _build_running_board_stops(
 # -----------------------------------------------------------
 # - Route driver resolver
 # - Require one active driver assignment per route
+# - Primary/default ownership does not drive runtime selection
 # -----------------------------------------------------------
 def _resolve_run_driver(route):
     try:
-        assignment = resolve_route_driver_assignment(route)  # Apply route-level driver rules
+        assignment = resolve_route_driver_assignment(route)  # Resolve the single active operational driver only
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -270,7 +271,7 @@ def _resolve_run_driver(route):
 
 def _resolve_planned_run_driver(route) -> int | None:
     try:
-        assignment = resolve_route_driver_assignment(route)  # Use current active route assignment when exactly one exists
+        assignment = resolve_route_driver_assignment(route)  # Planned runs inherit the current active operational driver only
     except ValueError as exc:
         if str(exc) == "Route has no active driver assignment":
             return None  # Planned runs may exist before a driver is assigned

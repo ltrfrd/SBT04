@@ -201,7 +201,10 @@ backend/ architecture note:
 - Route may point to one current bus through route.bus_id.
 - existing route.unit_number, route.capacity, and route.operator remain for compatibility.
 - read surfaces may prefer assigned bus values and fall back to legacy route values.
-- active route-driver assignment is the route-level source used for run start.
+- route-driver assignment supports one primary/default driver and one active/current driver.
+- primary and active may differ during temporary replacement coverage.
+- active route-driver assignment remains the route-level source used for run start.
+- route-driver start_date and end_date are legacy/admin/history fields only and are not authoritative for live routing.
 - /runs/start starts prepared runs only; it does not create students, stops, or runtime assignment rows.
 - stop-context student creation is the preferred path that creates runtime assignment rows.
 - StudentRunAssignment is the internal runtime + planning bridge, not the normal operator planning object.

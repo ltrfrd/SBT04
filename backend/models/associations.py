@@ -39,10 +39,10 @@ class RouteDriverAssignment(Base):
     id = Column(Integer, primary_key=True, index=True)  # Unique assignment ID
     route_id = Column(Integer, ForeignKey("routes.id", ondelete="CASCADE"), nullable=False)  # Parent route
     driver_id = Column(Integer, ForeignKey("drivers.id", ondelete="CASCADE"), nullable=False)  # Assigned driver
-    is_primary = Column(Boolean, default=False, nullable=False)  # Primary driver flag
-    start_date = Column(Date, nullable=True)  # Assignment start date
-    end_date = Column(Date, nullable=True)  # Assignment end date
-    active = Column(Boolean, default=True, nullable=False)  # Soft-active flag
+    is_primary = Column(Boolean, default=False, nullable=False)  # Default/base route owner flag
+    start_date = Column(Date, nullable=True)  # Legacy/admin/history field only; not authoritative for live routing
+    end_date = Column(Date, nullable=True)  # Legacy/admin/history field only; not authoritative for live routing
+    active = Column(Boolean, default=True, nullable=False)  # Current operational driver flag used by live run logic
 
     route = relationship("Route", back_populates="driver_assignments")  # Load parent route
     driver = relationship("Driver", back_populates="route_assignments")  # Load assigned driver

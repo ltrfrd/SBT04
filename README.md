@@ -86,7 +86,11 @@ The active SBT backend surface follows these rules:
 - school stops can store `stop.school_id`
 - stop order is controlled by `sequence`
 - route-driver assignment is route-level and explicit
-- one active route-driver assignment is used for operational run start
+- one route may have one primary/default driver assignment
+- one route may have one active/current driver assignment
+- primary and active may differ during temporary replacement coverage
+- operational run creation/start resolves from the single active route-driver assignment only
+- `RouteDriverAssignment.start_date` and `end_date` remain legacy/admin/history fields and are not authoritative for live routing
 - `StudentRunAssignment` is the explicit runtime mapping between student, run, and stop
 - Bus is now a standalone entity with its own CRUD and detail surface
 - `Route.bus_id` is an optional current bus assignment

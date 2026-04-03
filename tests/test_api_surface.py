@@ -147,6 +147,8 @@ def test_routes_list_returns_summary_fields(client):
     assert route_summary["schools_count"] == 1
     assert route_summary["active_driver_id"] == driver_id
     assert route_summary["active_driver_name"] == "Summary Driver"
+    assert route_summary["primary_driver_id"] == driver_id
+    assert route_summary["primary_driver_name"] == "Summary Driver"
     assert route_summary["runs_count"] == 1
     assert route_summary["active_runs_count"] == 1
     assert route_summary["total_stops_count"] == 1
@@ -208,9 +210,13 @@ def test_route_detail_returns_nested_route_data(client):
     assert data["unit_number"] == "BUS-DET-1"
     assert data["active_driver_id"] == driver_id
     assert data["active_driver_name"] == "Detail Driver"
+    assert data["primary_driver_id"] == driver_id
+    assert data["primary_driver_name"] == "Detail Driver"
     assert data["schools"] == [{"school_id": school_id, "school_name": "Detail School"}]
     assert len(data["driver_assignments"]) == 1
     assert data["driver_assignments"][0]["driver_id"] == driver_id
+    assert data["driver_assignments"][0]["active"] is True
+    assert data["driver_assignments"][0]["is_primary"] is True
     assert len(data["runs"]) == 1
 
     run_detail = data["runs"][0]
@@ -1600,6 +1606,57 @@ def test_driver_routes_endpoint_appears_in_openapi(client):
     assert operation["summary"] == "List driver routes"
     assert "entry point for the real operator workflow" in operation["description"]
     assert "selects an assigned route" in operation["description"]
+    assert "currently active" in operation["description"]
+    assert "not full assignment history" in operation["description"]
+
+
+def test_route_driver_assignment_endpoints_appear_in_openapi(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    paths = response.json()["paths"]
+
+    assign_operation = paths["/routes/{route_id}/assign_driver/{driver_id}"]["post"]
+    assert assign_operation["summary"] == "Assign driver to route"
+    assert "primary/default and active/current semantics" in assign_operation["description"]
+    assert "first route-driver assignment becomes both primary and active" in assign_operation["description"]
+    assert "temporary replacement driver" in assign_operation["description"]
+    assert "single active assignment only" in assign_operation["description"]
+
+    list_operation = paths["/routes/{route_id}/drivers"]["get"]
+    assert list_operation["summary"] == "List route driver assignments"
+    assert "currently active for operations" in list_operation["description"]
+    assert "primary/default route owner" in list_operation["description"]
+    assert "not authoritative for live routing" in list_operation["description"]
+
+    unassign_operation = paths["/routes/{route_id}/unassign_driver/{driver_id}"]["delete"]
+    assert unassign_operation["summary"] == "Unassign driver from route"
+    assert "temporary replacement" in unassign_operation["description"]
+    assert "primary assignment is reactivated automatically" in unassign_operation["description"]
+    assert "single active assignment only" in unassign_operation["description"]
+
+
+def test_route_driver_assignment_schemas_expose_primary_fields_in_openapi(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    schemas = response.json()["components"]["schemas"]
+
+    route_driver_assignment_properties = schemas["RouteDriverAssignmentOut"]["properties"]
+    assert "active" in route_driver_assignment_properties
+    assert "is_primary" in route_driver_assignment_properties
+
+    route_out_properties = schemas["RouteOut"]["properties"]
+    assert "active_driver_id" in route_out_properties
+    assert "active_driver_name" in route_out_properties
+    assert "primary_driver_id" in route_out_properties
+    assert "primary_driver_name" in route_out_properties
+
+    route_detail_properties = schemas["RouteDetailOut"]["properties"]
+    assert "active_driver_id" in route_detail_properties
+    assert "active_driver_name" in route_detail_properties
+    assert "primary_driver_id" in route_detail_properties
+    assert "primary_driver_name" in route_detail_properties
     
 def test_generic_student_update_endpoint_is_not_in_openapi(client):
     response = client.get("/openapi.json")

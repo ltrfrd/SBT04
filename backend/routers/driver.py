@@ -75,16 +75,17 @@ def get_driver(driver_id: int, db: Session = Depends(get_db)):
 
 # -----------------------------------------------------------
 # - List routes for one driver
-# - Return the driver's assigned route contexts for the workspace flow
+# - Return the driver's active route contexts for the workspace flow
 # -----------------------------------------------------------
 @router.get(
     "/{driver_id}/routes",
     response_model=List[RouteOut],
     summary="List driver routes",
     description=(
-        "Return the route contexts assigned to the selected driver. "
+        "Return the route contexts where the selected driver is currently active. "
         "This is the entry point for the real operator workflow: driver selects an assigned route, "
-        "reviews that route's runs, then operates within the chosen run."
+        "reviews that route's runs, then operates within the chosen run. "
+        "This endpoint is not full assignment history and is not a primary/default owner lookup."
     ),
     response_description="Driver route list",
 )
