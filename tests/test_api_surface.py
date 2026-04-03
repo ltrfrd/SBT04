@@ -1465,6 +1465,7 @@ def test_generic_stop_create_endpoint_is_legacy_in_openapi(client):
     path_item = response.json()["paths"]["/stops/"]["post"]
     assert path_item["summary"] == "Create stop (legacy compatibility)"
     assert "Preferred workflow-first creation is POST /runs/{run_id}/stops." in path_item["description"]
+    assert "Only planned runs can be modified." in path_item["description"]
 
     schema_ref = path_item["requestBody"]["content"]["application/json"]["schema"]["$ref"]
     assert schema_ref.endswith("/StopCreate")
@@ -1499,6 +1500,7 @@ def test_generic_student_create_endpoint_is_secondary_in_openapi(client):
     assert path_item["summary"] == "Create student (secondary compatibility)"
     assert "Preferred layered workflow is POST /runs/{run_id}/stops/{stop_id}/students" in path_item["description"]
     assert "Optional route_id and stop_id fields are legacy planning pointers" in path_item["description"]
+    assert "only planned runs can be modified" in path_item["description"].lower()
 
     schema_ref = path_item["requestBody"]["content"]["application/json"]["schema"]["$ref"]
     assert schema_ref.endswith("/StudentCompatibilityCreate")
@@ -1549,6 +1551,7 @@ def test_student_assignment_update_endpoint_appears_in_openapi(client):
     assert "Maintenance endpoint" in operation["description"]
     assert "not the normal creation workflow" in operation["description"]
     assert "POST /runs/{run_id}/stops/{stop_id}/students" in operation["description"]
+    assert "Only planned runs can be modified." in operation["description"]
 
 
 def test_student_run_assignment_direct_create_is_blocked_in_openapi(client):
@@ -1573,6 +1576,7 @@ def test_student_run_assignment_direct_delete_is_blocked_in_openapi(client):
 
     assert operation["summary"] == "Delete student run assignment (disabled)"
     assert "Direct assignment deletion is not allowed" in operation["description"]
+    assert "canonical contextual delete endpoint" in operation["description"]
     assert "DELETE /runs/{run_id}/stops/{stop_id}/students/{student_id}" in operation["description"]
 
 
@@ -1584,6 +1588,7 @@ def test_student_delete_entirely_endpoint_appears_in_openapi(client):
 
     assert operation["summary"] == "Delete student entirely"
     assert "Permanently remove the student record from the system" in operation["description"]
+    assert "full system-wide student deletion" in operation["description"]
     assert "not the normal run-stop workflow removal action" in operation["description"]
 
 

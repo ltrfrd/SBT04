@@ -60,9 +60,13 @@ Workflow context endpoints:
 - StudentRunAssignment is the runtime + planning bridge for the selected run/stop
 - assignment create is stop-context only: POST /runs/{run_id}/stops/{stop_id}/students
 - assignment contextual remove is stop-context only: DELETE /runs/{run_id}/stops/{stop_id}/students/{student_id}
+- removes the student from the selected run-stop planning context without deleting the student record entirely
+- planned run only
 - assignment update is maintenance only: PUT /students/{student_id}/assignment
-- DELETE /students/{student_id} is full student deletion, not normal run-stop workflow removal
+- planned run only
+- DELETE /students/{student_id} is full system-wide student deletion, not normal run-stop workflow removal
 - assignment delete is blocked directly: DELETE /student-run-assignments/{id}
+- blocked direct delete points to canonical contextual delete: DELETE /runs/{run_id}/stops/{stop_id}/students/{student_id}
 - NOT FOR OPERATOR WORKFLOW
 - internal runtime engine
 - still exists in the backend
@@ -215,11 +219,11 @@ Real workflow-related endpoint note:
 - student_run_assignment router still exists for compatibility/internal read visibility
 - direct assignment update intentionally lives in student router maintenance endpoint: PUT /students/{student_id}/assignment
 - direct POST /student-run-assignments/ is blocked and points callers to stop-context student creation
-- direct DELETE /student-run-assignments/{id} is blocked and points callers to the canonical stop-context delete workflow
+- direct DELETE /student-run-assignments/{id} is blocked and points callers to the canonical contextual delete workflow: DELETE /runs/{run_id}/stops/{stop_id}/students/{student_id}
 - legacy direct creates still exist:
 - POST /runs/ for planned-run compatibility
-- POST /stops/ for stop compatibility
-- POST /students/ for student compatibility
+- POST /stops/ for stop compatibility; still planned-run-only when it targets a run
+- POST /students/ for student compatibility; still planned-run-only when it targets a stop's run
 
 ===============================================================================
 frontend/

@@ -36,6 +36,7 @@ from backend.schemas.run import (  # Running board response schemas
 from backend.utils.student_bus_absence import apply_run_absence_filter
 from backend.utils.route_driver_assignment import resolve_route_driver_assignment
 from backend.utils.db_errors import raise_conflict_if_unique
+from backend.utils.run_setup import ensure_run_is_planned_for_setup, get_run_stop_context_or_404
 from backend.schemas.run import (
     PickupStudentRequest,
     PickupStudentResponse,
@@ -103,30 +104,13 @@ def _is_run_active(run: Run) -> bool:
 # - Planned run mutation guard
 # - Allow setup mutations only while the run is still planned
 # -----------------------------------------------------------
-def _ensure_run_is_planned_for_setup(run: run_model.Run) -> run_model.Run:
-    if run.start_time is not None or run.end_time is not None or run.is_completed:
-        raise HTTPException(status_code=400, detail="Only planned runs can be modified")
-    return run
-
-
-# -----------------------------------------------------------
-# - Stop-context student workflow helpers
-# - Keep student-run-assignment internal to route/run/stop UX
-# -----------------------------------------------------------
 def _get_run_stop_or_404(run_id: int, stop_id: int, db: Session) -> tuple[run_model.Run, stop_model.Stop]:
-    run = db.get(run_model.Run, run_id)  # Validate run exists once for stop-context workflows
-    if not run:
-        raise HTTPException(status_code=404, detail="Run not found")
-    _ensure_run_is_planned_for_setup(run)                       # Run-context setup is planned-only
-
-    stop = db.get(stop_model.Stop, stop_id)  # Validate stop exists once for stop-context workflows
-    if not stop:
-        raise HTTPException(status_code=404, detail="Stop not found")
-
-    if stop.run_id != run_id:
-        raise HTTPException(status_code=400, detail="Stop does not belong to run")
-
-    return run, stop
+    return get_run_stop_context_or_404(
+        run_id=run_id,
+        stop_id=stop_id,
+        db=db,
+        require_planned=True,
+    )                                                          # Shared run/stop validation keeps assignment writes aligned
 
 
 def _get_run_stop_student_context_or_404(

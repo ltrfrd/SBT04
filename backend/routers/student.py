@@ -16,6 +16,11 @@ from backend.models import route as route_model  # Route validation
 from backend.models import stop as stop_model  # Stop validation
 from backend.models import associations as assoc_model  # Run assignment mapping
 from backend.models import run as run_model  # Route->run join
+from backend.utils.run_setup import (
+    ensure_run_is_planned_for_setup,
+    get_run_stop_context_or_404,
+    get_stop_or_404,
+)
 
 
 # -----------------------------------------------------------
@@ -49,13 +54,6 @@ def _validate_route_school_membership(route: route_model.Route, school_id: int) 
         raise HTTPException(status_code=400, detail="School is not assigned to the run route")
 
 
-def _get_stop_or_404(stop_id: int, db: Session) -> stop_model.Stop:
-    stop = db.get(stop_model.Stop, stop_id)                      # Load stop once for route/assignment workflows
-    if not stop:
-        raise HTTPException(status_code=404, detail="Stop not found")
-    return stop
-
-
 def _validate_compatibility_student_create_target(
     *,
     school_id: int,
@@ -64,12 +62,13 @@ def _validate_compatibility_student_create_target(
     db: Session,
 ) -> tuple[route_model.Route | None, stop_model.Stop | None]:
     route = _get_route_with_schools(route_id, db) if route_id is not None else None
-    stop = _get_stop_or_404(stop_id, db) if stop_id is not None else None
+    stop = get_stop_or_404(stop_id, db) if stop_id is not None else None
 
     if stop is not None:
         run = stop.run                                           # Resolve stop hierarchy only when stop compatibility pointer is present
         if run is None:
             raise HTTPException(status_code=400, detail="Stop does not belong to route")
+        ensure_run_is_planned_for_setup(run)                     # Legacy stop-targeted create must honor planned-only setup
 
         if route is not None and run.route_id != route.id:
             raise HTTPException(status_code=400, detail="Stop does not belong to route")
@@ -89,20 +88,15 @@ def _validate_student_assignment_target(
     db: Session,
 ) -> tuple[route_model.Route, run_model.Run, stop_model.Stop]:
     route = _get_route_with_schools(route_id, db)                # Validate target route first
-    run = db.get(run_model.Run, run_id)                          # Validate target run exists
-    if not run:
-        raise HTTPException(status_code=404, detail="Run not found")
-
-    stop = _get_stop_or_404(stop_id, db)                         # Validate target stop exists
+    run, stop = get_run_stop_context_or_404(
+        run_id=run_id,
+        stop_id=stop_id,
+        db=db,
+        require_planned=True,
+    )                                                           # Centralized run/stop validation prevents mismatch writes
 
     if run.route_id != route.id:
         raise HTTPException(status_code=400, detail="Run does not belong to route")
-
-    if stop.run_id != run.id:
-        raise HTTPException(status_code=400, detail="Stop does not belong to run")
-
-    if run.end_time is not None or run.is_completed:
-        raise HTTPException(status_code=400, detail="Run is completed")
 
     _validate_route_school_membership(route, student.school_id)  # Keep school-route safety
 
@@ -221,7 +215,8 @@ def _update_student_record(
     description=(
         "Secondary compatibility endpoint for creating a student record directly. "
         "Preferred layered workflow is POST /runs/{run_id}/stops/{stop_id}/students so route and stop context are inherited automatically. "
-        "Optional route_id and stop_id fields are legacy planning pointers for compatibility only."
+        "Optional route_id and stop_id fields are legacy planning pointers for compatibility only. "
+        "When stop context is supplied, only planned runs can be modified."
     ),                                                           # Swagger description
     response_description="Created student",                      # Swagger response text
 )
@@ -291,7 +286,8 @@ def get_student(student_id: int, db: Session = Depends(get_db)):
     description=(
         "Maintenance endpoint for correcting or moving a student to a different route, run, and stop after initial setup. "
         "This is not the normal creation workflow; preferred initial setup is POST /runs/{run_id}/stops/{stop_id}/students. "
-        "Runtime assignment rows are synchronized safely when the move is valid."
+        "Runtime assignment rows are synchronized safely when the move is valid. "
+        "Only planned runs can be modified."
     ),
     response_description="Updated student assignment",
 )
@@ -338,7 +334,7 @@ def update_student_assignment(
     summary="Delete student entirely",                           # Swagger title
     description=(
         "Permanently remove the student record from the system. "
-        "This is full student deletion, not the normal run-stop workflow removal action."
+        "This is full system-wide student deletion, not the normal run-stop workflow removal action."
     ),                                                           # Swagger description
     response_description="Student permanently deleted",          # Swagger response text
 )

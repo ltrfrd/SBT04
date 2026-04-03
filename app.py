@@ -5,42 +5,26 @@
 # ===========================================================
 
 # ---------- SYSTEM ----------
-import os                                # For environment variables and paths
-from dotenv import load_dotenv           # Loads .env file for secrets/config
-load_dotenv()                            # Initialize environment variables
+import os
+from contextlib import asynccontextmanager
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ---------- FASTAPI ----------
-from fastapi import (
-    FastAPI,
-    status
-)                                        # Core FastAPI imports
-from fastapi.middleware.cors import CORSMiddleware  # Allow cross-domain requests
-from fastapi.staticfiles import StaticFiles         # Serve static files (CSS, JS)
-from starlette.middleware.sessions import SessionMiddleware  # Session handling
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
 # ---------- DB & MODELS ----------
-from database import get_db, engine, Base   # Local database setup (SQLAlchemy)
-from backend import schemas                 # Import Pydantic schemas
-from backend.models import (                # Import model modules for ORM binding
-    run as run_model,
-)
+from database import Base, engine, get_db
+import backend.models  # noqa: F401
 
 # ---------- ROUTERS ----------
-# Import each router module (each exposes a .router object)
 from backend.routers import (
     auth, bus, driver, school, student, route, stop, run, dispatch, attendance, student_run_assignment, web_pages, ws
 )  # Import active routers through attendance ownership
-
-
-# -----------------------------------------------------------
-# DATABASE INITIALIZATION
-# -----------------------------------------------------------
-# Import all models for Base metadata
-from database import Base, engine
-from backend.models import *  # noqa: F403, F401
-# -----------------------------------------------------------
-# Lifespan - App startup/shutdown handler
-# -----------------------------------------------------------
-from contextlib import asynccontextmanager  # Lifespan context manager
 
 
 # -----------------------------------------------------------
@@ -104,12 +88,3 @@ app.include_router(ws.router)  # Register websocket endpoints
 def root():
     """Basic API health endpoint."""
     return {"status": "SBT backend is running"}
-
-
-# -----------------------------------------------------------
-# - Startup DB initialization helper
-# - Keep table creation isolated for future startup evolution
-# -----------------------------------------------------------
-def init_database() -> None:
-    Base.metadata.create_all(bind=engine)
-

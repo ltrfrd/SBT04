@@ -1080,6 +1080,40 @@ def test_run_context_stop_update_is_blocked_after_start(client):
     assert response.json()["detail"] == "Only planned runs can be modified"
 
 
+def test_legacy_stop_create_is_blocked_after_start(client):
+    context = _create_started_run_context(
+        client,
+        route_number="LOCK-LEGACY-STOP-CREATE",
+        unit_number="BUS-LOCK-LEGACY-STOP-CREATE",
+        run_type="AM",
+    )
+
+    response = client.post(
+        "/stops/",
+        json={"run_id": context["run_id"], "name": "Blocked Legacy Stop", "type": "pickup", "sequence": 2},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Only planned runs can be modified"
+
+
+def test_legacy_stop_update_is_blocked_after_start(client):
+    context = _create_started_run_context(
+        client,
+        route_number="LOCK-LEGACY-STOP-UPDATE",
+        unit_number="BUS-LOCK-LEGACY-STOP-UPDATE",
+        run_type="AM",
+    )
+
+    response = client.put(
+        f"/stops/{context['stop_id']}",
+        json={"name": "Blocked Legacy Stop Update"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Only planned runs can be modified"
+
+
 def test_run_context_student_create_is_blocked_after_start(client):
     context = _create_started_run_context(
         client,
@@ -1091,6 +1125,28 @@ def test_run_context_student_create_is_blocked_after_start(client):
     response = client.post(
         f"/runs/{context['run_id']}/stops/{context['stop_id']}/students",
         json={"name": "Blocked Student", "grade": "5", "school_id": context["school_id"]},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Only planned runs can be modified"
+
+
+def test_legacy_student_create_is_blocked_when_target_stop_run_is_started(client):
+    context = _create_started_run_context(
+        client,
+        route_number="LOCK-LEGACY-STUDENT-CREATE",
+        unit_number="BUS-LOCK-LEGACY-STUDENT-CREATE",
+        run_type="AM",
+    )
+
+    response = client.post(
+        "/students/",
+        json={
+            "name": "Blocked Legacy Student",
+            "grade": "5",
+            "school_id": context["school_id"],
+            "stop_id": context["stop_id"],
+        },
     )
 
     assert response.status_code == 400
@@ -3846,6 +3902,79 @@ def test_delete_student_entirely_removes_student_record(client):
 # - Dedicated student assignment movement
 # - Keep broader route/stop reassignment separate from in-run context repair
 # -----------------------------------------------------------
+def test_student_assignment_update_endpoint_is_blocked_when_target_run_is_started(client):
+    school = client.post(
+        "/schools/",
+        json={"name": "Assignment Planned Lock School", "address": "109 Lock Way"},
+    )
+    assert school.status_code in (200, 201)
+
+    driver = client.post(
+        "/drivers/",
+        json={"name": "Assignment Planned Lock Driver", "email": "assignment.planned.lock@test.com", "phone": "10109"},
+    )
+    assert driver.status_code in (200, 201)
+
+    route = _create_route_with_assignment_flow(
+        client,
+        "ASSIGN-LOCK-ROUTE",
+        "BUS-ASSIGN-LOCK-ROUTE",
+        driver_id=driver.json()["id"],
+        school_ids=[school.json()["id"]],
+    )
+
+    source_run = client.post(f"/routes/{route['id']}/runs", json={"run_type": "AM"})
+    target_run = client.post(f"/routes/{route['id']}/runs", json={"run_type": "PM"})
+    assert source_run.status_code in (200, 201)
+    assert target_run.status_code in (200, 201)
+
+    source_stop = client.post(
+        "/stops/",
+        json={"run_id": source_run.json()["id"], "sequence": 1, "type": "pickup", "name": "Assignment Lock Source Stop"},
+    )
+    target_stop = client.post(
+        "/stops/",
+        json={"run_id": target_run.json()["id"], "sequence": 1, "type": "pickup", "name": "Assignment Lock Target Stop"},
+    )
+    assert source_stop.status_code in (200, 201)
+    assert target_stop.status_code in (200, 201)
+
+    student = client.post(
+        f"/runs/{source_run.json()['id']}/stops/{source_stop.json()['id']}/students",
+        json={
+            "name": "Assignment Lock Student",
+            "grade": "4",
+            "school_id": school.json()["id"],
+        },
+    )
+    assert student.status_code == 201
+
+    prep_student = client.post(
+        f"/runs/{target_run.json()['id']}/stops/{target_stop.json()['id']}/students",
+        json={
+            "name": "Assignment Lock Prep Student",
+            "grade": "4",
+            "school_id": school.json()["id"],
+        },
+    )
+    assert prep_student.status_code == 201
+
+    started_target_run = client.post(f"/runs/start?run_id={target_run.json()['id']}")
+    assert started_target_run.status_code in (200, 201)
+
+    moved = client.put(
+        f"/students/{student.json()['id']}/assignment",
+        json={
+            "route_id": route["id"],
+            "run_id": target_run.json()["id"],
+            "stop_id": target_stop.json()["id"],
+        },
+    )
+
+    assert moved.status_code == 400
+    assert moved.json()["detail"] == "Only planned runs can be modified"
+
+
 def test_student_assignment_update_endpoint_moves_planning_state_safely(client, db_engine):
     school = client.post(
         "/schools/",

@@ -276,5 +276,5 @@ def test_delete_student_run_assignment_is_blocked(client):
     assert response.status_code == 405
     assert response.json()["detail"] == (
         "Direct assignment deletion is not allowed. "
-        "Use DELETE /runs/{run_id}/stops/{stop_id}/students/{student_id}."
+        "Use the canonical contextual delete endpoint DELETE /runs/{run_id}/stops/{stop_id}/students/{student_id}."
     )

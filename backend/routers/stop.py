@@ -17,6 +17,10 @@ from backend.models import run as run_model
 from backend.models.stop import Stop, StopType
 from backend.schemas.stop import RunStopCreate, RunStopUpdate, StopCreate, StopOut, StopUpdate, StopReorder
 from backend.utils.db_errors import raise_conflict_if_unique
+from backend.utils.run_setup import (
+    ensure_run_is_planned_for_setup,
+    get_run_or_404,
+)
 
 # -----------------------------------------------------------
 # Router setup
@@ -29,12 +33,6 @@ router = APIRouter(prefix="/stops", tags=["Stops"])
 # - Keep run stop sequences contiguous during inserts and moves
 # -----------------------------------------------------------
 SHIFT_OFFSET = 100000  # Temporary sequence offset used to avoid unique collisions during moves
-
-
-def _ensure_run_is_planned_for_setup(run: run_model.Run) -> run_model.Run:
-    if run.start_time is not None or run.end_time is not None or run.is_completed:
-        raise HTTPException(status_code=400, detail="Only planned runs can be modified")
-    return run
 
 
 def shift_block_up(db: Session, run_id: int, start_seq: int, end_seq: int) -> None:
@@ -243,9 +241,10 @@ def _update_stop_record(
     if target_run_id is None:
         target_run_id = updates.get("run_id", stop.run_id)       # Generic compatibility path may still carry run_id
 
-    target_run = db.get(run_model.Run, target_run_id)
-    if not target_run:
-        raise HTTPException(status_code=404, detail="Run not found")
+    ensure_run_is_planned_for_setup(get_run_or_404(current_run_id, db))  # Legacy update must not mutate active/completed source runs
+
+    target_run = get_run_or_404(target_run_id, db)
+    ensure_run_is_planned_for_setup(target_run)         # Legacy update must not mutate active/completed target runs
 
     requested_sequence = updates.get("sequence")
     school_sensitive_update = any(
@@ -389,14 +388,13 @@ def force_normalize_run(
     response_model=StopOut,
     status_code=201,
     summary="Create stop (legacy compatibility)",
-    description="Legacy compatibility endpoint for creating a stop by sending run_id in the body. Preferred workflow-first creation is POST /runs/{run_id}/stops.",
+    description="Legacy compatibility endpoint for creating a stop by sending run_id in the body. Preferred workflow-first creation is POST /runs/{run_id}/stops. Only planned runs can be modified.",
     response_description="Created stop",
 )
 def create_stop(payload: StopCreate, db: Session = Depends(get_db)):
     try:
-        run = db.get(run_model.Run, payload.run_id)
-        if not run:
-            raise HTTPException(status_code=404, detail="Run not found")
+        run = get_run_or_404(payload.run_id, db)
+        ensure_run_is_planned_for_setup(run)                       # Legacy compatibility create still honors planned-only setup
 
         data = _build_stop_payload(                             # Apply shared stop workflow rules
             run_id=payload.run_id,                              # Parent run from generic payload
@@ -435,7 +433,7 @@ def create_run_stop(
         run = db.get(run_model.Run, run_id)
         if not run:
             raise HTTPException(status_code=404, detail="Run not found")
-        _ensure_run_is_planned_for_setup(run)                   # Run-context setup is planned-only
+        ensure_run_is_planned_for_setup(run)                    # Run-context setup is planned-only
 
         data = _build_stop_payload(                             # Apply shared stop workflow rules
             run_id=run_id,                                      # Parent run from path context
@@ -488,7 +486,7 @@ def get_stops(run_id: int | None = None, db: Session = Depends(get_db)):
     "/{stop_id}",
     response_model=StopOut,
     summary="Update stop",
-    description="Update an existing stop record by id.",
+    description="Update an existing stop record by id. Legacy compatibility endpoint; only planned runs can be modified.",
     response_description="Updated stop",
 )
 def update_stop(
@@ -498,6 +496,7 @@ def update_stop(
         stop = db.get(stop_model.Stop, stop_id)
         if not stop:
             raise HTTPException(status_code=404, detail="Stop not found")
+        ensure_run_is_planned_for_setup(get_run_or_404(stop.run_id, db))  # Legacy compatibility update must stay planned-only
 
         stop = _update_stop_record(
             stop=stop,                                         # Existing stop from generic path
@@ -534,7 +533,7 @@ def update_run_stop(
         run = db.get(run_model.Run, run_id)                     # Path run is the authority in context mode
         if not run:
             raise HTTPException(status_code=404, detail="Run not found")
-        _ensure_run_is_planned_for_setup(run)                   # Run-context setup is planned-only
+        ensure_run_is_planned_for_setup(run)                    # Run-context setup is planned-only
 
         stop = db.get(stop_model.Stop, stop_id)
         if not stop:
