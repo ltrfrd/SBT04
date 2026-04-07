@@ -118,7 +118,7 @@ backend/
 |-- models/                        SQLAlchemy models
 |   |-- __init__.py                Model export hub
 |   |-- associations.py            Route-school link, route-driver assignment, StudentRunAssignment
-|   |-- bus.py                     Bus model and current vehicle identity fields
+|   |-- bus.py                     Bus model and authoritative vehicle identity fields
 |   |-- dispatch.py                Dispatch/payroll persistence
 |   |-- driver.py                  Driver model
 |   |-- route.py                   Route planning container with optional current bus assignment
@@ -176,10 +176,10 @@ backend/
 |
 |-- utils/                         Shared application helpers
 |   |-- __init__.py                Utils package marker
-|   |-- attendance_generator.py    Attendance/report aggregation logic with assigned-bus read fallback support
+|   |-- attendance_generator.py    Attendance/report aggregation logic using assigned bus data when present
 |   |-- auth.py                    Session-based auth helpers
 |   |-- db_errors.py               Database error helpers
-|   |-- driver_workspace.py        Route-first driver workspace serialization helpers with assigned-bus read fallback
+|   |-- driver_workspace.py        Route-first driver workspace serialization helpers using assigned bus data when present
 |   |-- gps_tools.py               GPS, ETA, and progress helpers
 |   |-- report_generator.py        Compatibility re-export of attendance generator logic
 |   |-- route_driver_assignment.py Route-driver resolution helpers
@@ -201,9 +201,8 @@ backend/ architecture note:
 - Route may point to one current bus through route.bus_id.
 - route no longer owns vehicle identity in user-facing layers.
 - bus is the only user-facing source of unit_number.
-- existing route.capacity and route.operator remain as legacy compatibility fields.
 - route creation/update does not require vehicle identity data in the preferred workflow.
-- read surfaces expose assigned bus values when present and otherwise return no route unit fallback.
+- if no bus is assigned, no bus unit is shown.
 - route-driver assignment supports one primary/default driver and one active/current driver.
 - primary and active may differ during temporary replacement coverage.
 - active route-driver assignment remains the route-level source used for run start.

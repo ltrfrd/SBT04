@@ -96,11 +96,8 @@ The active SBT backend surface follows these rules:
 - `Route.bus_id` is an optional current bus assignment
 - route no longer owns vehicle identity in user-facing responses
 - bus is the only user-facing source of `unit_number`
-- legacy route compatibility fields still remain in the model where needed:
-  - `route.capacity`
-  - `route.operator`
 - route creation/update does not require vehicle identity data in the preferred workflow
-- user-facing read surfaces return bus unit data when a bus is assigned, otherwise `None`
+- if no bus is assigned, no bus unit is shown
 
 ## Protected Engine
 The internal runtime engine remains authoritative:
@@ -137,7 +134,7 @@ Bus rollout and compatibility layers:
 - `backend/schemas/bus.py`
 - `backend/routers/bus.py`
 - routes can optionally point to a current bus through `Route.bus_id`
-- route-first read surfaces now expose assigned bus values when present
+- bus is the authoritative vehicle entity
 - bus is the only user-facing source of unit numbers
 
 Protected runtime and reporting:
