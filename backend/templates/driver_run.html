@@ -49,7 +49,6 @@
       {% set route_number_display = workspace.route_number if workspace and workspace.route_number else "-" %}
       {% set driver_display = workspace.assigned_driver_name if workspace and workspace.assigned_driver_name else (driver_name if driver_name else "-") %}
       {% set vehicle_display = workspace.unit_number if workspace and workspace.unit_number else "-" %}
-      {% set capacity_display = workspace.capacity if workspace and workspace.capacity is not none else "-" %}
       {% set bus_size_display = workspace.bus_size if workspace and workspace.bus_size else "-" %}
       {% set bus_plate_display = workspace.bus_license_plate if workspace and workspace.bus_license_plate else "-" %}
       {% set schools_display = workspace.schools if workspace and workspace.schools else [] %}
@@ -86,10 +85,6 @@
           <div class="route-info-row">
             <div class="route-info-label">Bus</div>
             <div class="route-info-value">{{ vehicle_display }}</div>
-          </div>
-          <div class="route-info-row">
-            <div class="route-info-label">Bus Capacity</div>
-            <div class="route-info-value">{{ capacity_display }}</div>
           </div>
           <div class="route-info-row">
             <div class="route-info-label">Bus Size</div>

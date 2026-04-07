@@ -287,11 +287,11 @@ def test_driver_run_workspace_uses_assigned_bus_values_without_route_fallback(cl
     assigned_body = assigned_response.text
 
     assert "BUS-WORKSPACE-REAL" in assigned_body
-    assert "53" in assigned_body
     assert "full" in assigned_body
     assert "WS-PLATE-1" in assigned_body
     assert "Legacy Operator" not in assigned_body
     assert "Operator" not in assigned_body
+    assert "Bus Capacity" not in assigned_body
 
     unassigned = client.delete(f"/routes/{route_id}/unassign_bus")
     assert unassigned.status_code == 200
@@ -303,6 +303,7 @@ def test_driver_run_workspace_uses_assigned_bus_values_without_route_fallback(cl
     assert "LEGACY-WORKSPACE-BUS-1" not in fallback_body
     assert "31" not in fallback_body
     assert "Legacy Operator" not in fallback_body
+    assert "Bus Capacity" not in fallback_body
     assert '<div class="route-info-label">Bus</div>' in fallback_body
     assert '<div class="route-info-value">-</div>' in fallback_body
 
@@ -374,9 +375,9 @@ def test_route_report_uses_assigned_bus_values_without_route_fallback(client, db
 
     assert "Route Attendance: REPORT-BUS-1" in assigned_body
     assert "BUS-REPORT-REAL" in assigned_body
-    assert "47" in assigned_body
     assert "mid" in assigned_body
     assert "RP-PLATE-1" in assigned_body
+    assert "Bus Capacity:" not in assigned_body
 
     unassigned = client.delete(f"/routes/{route_id}/unassign_bus")
     assert unassigned.status_code == 200
@@ -387,7 +388,7 @@ def test_route_report_uses_assigned_bus_values_without_route_fallback(client, db
 
     assert "Route Attendance: REPORT-BUS-1" in fallback_body
     assert "Bus:</strong> -" in fallback_body
-    assert "Bus Capacity:</strong> -" in fallback_body
+    assert "Bus Capacity:" not in fallback_body
     assert "Legacy Report Operator" not in fallback_body
     assert "29" not in fallback_body
 
