@@ -176,10 +176,10 @@ backend/
 |
 |-- utils/                         Shared application helpers
 |   |-- __init__.py                Utils package marker
-|   |-- attendance_generator.py    Attendance/report aggregation logic using assigned bus data when present
+|   |-- attendance_generator.py    Attendance/report aggregation logic using assigned bus data only
 |   |-- auth.py                    Session-based auth helpers
 |   |-- db_errors.py               Database error helpers
-|   |-- driver_workspace.py        Route-first driver workspace serialization helpers using assigned bus data when present
+|   |-- driver_workspace.py        Route-first driver workspace serialization helpers using assigned bus data only
 |   |-- gps_tools.py               GPS, ETA, and progress helpers
 |   |-- report_generator.py        Compatibility re-export of attendance generator logic
 |   |-- route_driver_assignment.py Route-driver resolution helpers
@@ -199,10 +199,11 @@ backend/ architecture note:
 - route-first driver workspace helpers live in backend/utils/driver_workspace.py.
 - Bus is now a standalone entity.
 - Route may point to one current bus through route.bus_id.
-- route no longer owns vehicle identity in user-facing layers.
+- route no longer owns vehicle identity or route-level vehicle fallback in user-facing layers.
 - bus is the only user-facing source of unit_number.
+- bus is the only displayed source of capacity, size, and plate data.
 - route creation/update does not require vehicle identity data in the preferred workflow.
-- if no bus is assigned, no bus unit is shown.
+- if no bus is assigned, no vehicle details are shown.
 - route-driver assignment supports one primary/default driver and one active/current driver.
 - primary and active may differ during temporary replacement coverage.
 - active route-driver assignment remains the route-level source used for run start.

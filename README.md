@@ -94,10 +94,11 @@ The active SBT backend surface follows these rules:
 - `StudentRunAssignment` is the explicit runtime mapping between student, run, and stop
 - Bus is now a standalone entity with its own CRUD and detail surface
 - `Route.bus_id` is an optional current bus assignment
-- route no longer owns vehicle identity in user-facing responses
+- route no longer owns vehicle identity or route-level vehicle fallback in user-facing responses
 - bus is the only user-facing source of `unit_number`
+- bus is the only displayed source of capacity, size, and plate data
 - route creation/update does not require vehicle identity data in the preferred workflow
-- if no bus is assigned, no bus unit is shown
+- if no bus is assigned, no vehicle details are shown
 
 ## Protected Engine
 The internal runtime engine remains authoritative:
@@ -135,7 +136,7 @@ Bus rollout and compatibility layers:
 - `backend/routers/bus.py`
 - routes can optionally point to a current bus through `Route.bus_id`
 - bus is the authoritative vehicle entity
-- bus is the only user-facing source of unit numbers
+- bus is the only user-facing source of displayed vehicle details
 
 Protected runtime and reporting:
 

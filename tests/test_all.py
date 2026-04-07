@@ -234,7 +234,7 @@ def test_driver_run_workspace_shows_route_run_stop_student_hierarchy(client):
     assert "Workspace Student" in body
 
 
-def test_driver_run_workspace_prefers_assigned_bus_values_with_route_fallback(client, db_engine):
+def test_driver_run_workspace_uses_assigned_bus_values_without_route_fallback(client, db_engine):
     driver = client.post(
         "/drivers/",
         json={"name": "Workspace Bus Driver", "email": "workspace.bus.driver@test.com", "phone": "11123"},
@@ -290,7 +290,8 @@ def test_driver_run_workspace_prefers_assigned_bus_values_with_route_fallback(cl
     assert "53" in assigned_body
     assert "full" in assigned_body
     assert "WS-PLATE-1" in assigned_body
-    assert "Legacy Operator" in assigned_body
+    assert "Legacy Operator" not in assigned_body
+    assert "Operator" not in assigned_body
 
     unassigned = client.delete(f"/routes/{route_id}/unassign_bus")
     assert unassigned.status_code == 200
@@ -300,11 +301,13 @@ def test_driver_run_workspace_prefers_assigned_bus_values_with_route_fallback(cl
     fallback_body = fallback_response.text
 
     assert "LEGACY-WORKSPACE-BUS-1" not in fallback_body
-    assert "31" in fallback_body
-    assert "Legacy Operator" in fallback_body
+    assert "31" not in fallback_body
+    assert "Legacy Operator" not in fallback_body
+    assert '<div class="route-info-label">Bus</div>' in fallback_body
+    assert '<div class="route-info-value">-</div>' in fallback_body
 
 
-def test_route_report_prefers_assigned_bus_values_with_route_fallback(client, db_engine):
+def test_route_report_uses_assigned_bus_values_without_route_fallback(client, db_engine):
     driver = client.post(
         "/drivers/",
         json={"name": "Report Bus Driver", "email": "report.bus.driver@test.com", "phone": "11124"},
@@ -383,8 +386,10 @@ def test_route_report_prefers_assigned_bus_values_with_route_fallback(client, db
     fallback_body = fallback_response.text
 
     assert "Route Attendance: REPORT-BUS-1" in fallback_body
-    assert "Vehicle:</strong> -" in fallback_body
-    assert "Capacity:</strong> 29" in fallback_body
+    assert "Bus:</strong> -" in fallback_body
+    assert "Bus Capacity:</strong> -" in fallback_body
+    assert "Legacy Report Operator" not in fallback_body
+    assert "29" not in fallback_body
 
 
 def test_websocket_gps(client):

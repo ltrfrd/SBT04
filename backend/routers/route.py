@@ -470,13 +470,13 @@ def get_route_schools(route_id: int, db: Session = Depends(get_db)):
 
 # -----------------------------------------------------------
 # - Assign bus to route
-# - Set the current bus pointer without changing legacy fields
+# - Set the current bus pointer for route context
 # -----------------------------------------------------------
 @router.post(
     "/{route_id}/assign_bus/{bus_id}",
     response_model=RouteOut,
     summary="Assign bus to route",
-    description="Assign one current bus to the route without changing other legacy route compatibility fields.",
+    description="Assign one current bus to the route without changing route setup or runtime workflow behavior.",
     response_description="Updated route with assigned bus",
 )
 def assign_bus_to_route(route_id: int, bus_id: int, db: Session = Depends(get_db)):
@@ -496,13 +496,13 @@ def assign_bus_to_route(route_id: int, bus_id: int, db: Session = Depends(get_db
 
 # -----------------------------------------------------------
 # - Unassign bus from route
-# - Clear the current bus pointer without changing legacy fields
+# - Clear the current bus pointer for route context
 # -----------------------------------------------------------
 @router.delete(
     "/{route_id}/unassign_bus",
     response_model=RouteOut,
     summary="Unassign bus from route",
-    description="Clear the current bus assignment from the route without changing other legacy route compatibility fields.",
+    description="Clear the current bus assignment from the route without changing route setup or runtime workflow behavior.",
     response_description="Updated route without assigned bus",
 )
 def unassign_bus_from_route(route_id: int, db: Session = Depends(get_db)):
