@@ -121,7 +121,6 @@ def route_summary(db: Session, route_id: int) -> dict:
     return {
         "route_id": route_id,
         "route_number": r.route_number,
-        "unit_number": assigned_bus.unit_number if assigned_bus else None,
         "bus_id": assigned_bus.id if assigned_bus else None,
         "bus_unit_number": assigned_bus.unit_number if assigned_bus else None,
         "bus_license_plate": assigned_bus.license_plate if assigned_bus else None,
