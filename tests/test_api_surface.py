@@ -1441,6 +1441,25 @@ def test_start_run_endpoint_has_query_param_only_in_openapi(client):
     assert parameters[0]["required"] is True
 
 
+def test_runtime_stop_execution_endpoints_describe_flexible_behavior_in_openapi(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    paths = response.json()["paths"]
+
+    arrive_operation = paths["/runs/{run_id}/arrive_stop"]["post"]
+    assert arrive_operation["summary"] == "Arrive at stop"
+    assert "Flexible stop execution is allowed" in arrive_operation["description"]
+    assert "revisit earlier stops" in arrive_operation["description"]
+    assert "optional stop_id may be used" in arrive_operation["description"]
+
+    next_operation = paths["/runs/{run_id}/next_stop"]["post"]
+    assert next_operation["summary"] == "Advance to next configured stop (compatibility helper)"
+    assert "Compatibility convenience helper" in next_operation["description"]
+    assert "does not enforce the overall execution model" in next_operation["description"]
+    assert "revisit earlier stops" in next_operation["description"]
+
+
 def test_stop_context_student_create_rejects_school_not_on_route(client):
     valid_school = client.post("/schools/", json={"name": "Assigned School", "address": "1 Assigned Way"})
     other_school = client.post("/schools/", json={"name": "Other School", "address": "2 Other Way"})

@@ -101,6 +101,157 @@ def _is_run_active(run: Run) -> bool:
 
 
 # -----------------------------------------------------------
+# - Runtime action helpers
+# - Keep flexible stop execution and rider validation consistent
+# -----------------------------------------------------------
+def _get_runtime_run_or_404(run_id: int, db: Session) -> Run:
+    run = db.get(run_model.Run, run_id)                        # Load run once for runtime actions
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run
+
+
+def _require_active_runtime_run(run: Run) -> Run:
+    if run.is_completed:                                       # Completed runs are read-only
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Run is already completed",
+        )
+
+    if run.start_time is None:                                 # Planned runs cannot accept live actions
+        raise HTTPException(status_code=400, detail="Run is not active")
+
+    if run.end_time is not None:                               # Ended runs are no longer live
+        raise HTTPException(status_code=400, detail="Run has already ended")
+
+    return run
+
+
+def _get_ordered_run_stops(run_id: int, db: Session) -> list[stop_model.Stop]:
+    return (
+        db.query(stop_model.Stop)
+        .filter(stop_model.Stop.run_id == run_id)              # Keep only this run's stops
+        .order_by(stop_model.Stop.sequence.asc(), stop_model.Stop.id.asc())
+        .all()
+    )                                                          # Stable stop order supports convenience navigation
+
+
+def _resolve_runtime_stop_target_or_404(
+    *,
+    run_id: int,
+    stop_id: int | None,
+    stop_sequence: int | None,
+    db: Session,
+) -> stop_model.Stop:
+    if stop_id is None and stop_sequence is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="stop_id or stop_sequence is required",
+        )
+
+    stop = None
+
+    if stop_id is not None:
+        stop = (
+            db.query(stop_model.Stop)
+            .filter(stop_model.Stop.run_id == run_id)
+            .filter(stop_model.Stop.id == stop_id)
+            .first()
+        )                                                      # Resolve target by explicit stop id when provided
+        if not stop:
+            raise HTTPException(status_code=404, detail="Stop not found for this run")
+
+    if stop_sequence is not None:
+        sequence_stop = (
+            db.query(stop_model.Stop)
+            .filter(stop_model.Stop.run_id == run_id)
+            .filter(stop_model.Stop.sequence == stop_sequence)
+            .first()
+        )                                                      # Preserve compatibility with stop_sequence callers
+        if not sequence_stop:
+            raise HTTPException(status_code=404, detail="Stop sequence not found for this run")
+
+        if stop is not None and stop.id != sequence_stop.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="stop_id and stop_sequence do not match",
+            )
+
+        stop = sequence_stop
+
+    return stop
+
+
+def _set_run_current_stop(
+    *,
+    run: Run,
+    stop: stop_model.Stop,
+    db: Session,
+) -> Run:
+    run.current_stop_id = stop.id                              # Actual runtime location source of truth
+    run.current_stop_sequence = stop.sequence                  # Preserve current stop sequence for read surfaces
+
+    db.add(
+        RunEvent(
+            run_id=run.id,
+            stop_id=stop.id,
+            event_type="ARRIVE",
+        )
+    )                                                          # Repeated ARRIVE events are valid for revisits and jumps
+
+    db.commit()
+    db.refresh(run)
+    return run
+
+
+def _require_current_runtime_stop(run: Run, db: Session) -> stop_model.Stop:
+    if run.current_stop_sequence is None or run.current_stop_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Run is not currently at a stop",
+        )
+
+    current_stop = (
+        db.query(stop_model.Stop)
+        .filter(stop_model.Stop.run_id == run.id)
+        .filter(stop_model.Stop.id == run.current_stop_id)
+        .first()
+    )                                                          # Validate the stored live stop still belongs to this run
+    if not current_stop:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Run is not currently at a valid stop",
+        )
+
+    return current_stop
+
+
+def _get_runtime_assignment_or_404(
+    *,
+    run_id: int,
+    student_id: int,
+    db: Session,
+) -> StudentRunAssignment:
+    assignment = (
+        db.query(StudentRunAssignment)
+        .options(joinedload(StudentRunAssignment.stop))
+        .filter(
+            StudentRunAssignment.run_id == run_id,
+            StudentRunAssignment.student_id == student_id,
+        )
+        .first()
+    )                                                          # Load run-scoped student assignment once
+
+    if not assignment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Student is not assigned to this run",
+        )
+
+    return assignment
+
+
+# -----------------------------------------------------------
 # - Planned run mutation guard
 # - Allow setup mutations only while the run is still planned
 # -----------------------------------------------------------
@@ -1055,154 +1206,90 @@ def bulk_create_run_stop_students(
 # -----------------------------------------------------------
 # -----------------------------------------------------------
 # - Arrive at stop
-# - Mark the driver as arrived at a specific stop in the run
+# - Mark actual runtime position with flexible stop movement
 # -----------------------------------------------------------
 @router.post(
     "/{run_id}/arrive_stop",
     response_model=schemas.RunOut,
     summary="Arrive at stop",
-    description="Mark the run as arrived at the requested stop sequence and log an ARRIVE event.",
+    description=(
+        "Mark the run as arrived at an actual stop and update the live runtime location. "
+        "Flexible stop execution is allowed: drivers may revisit earlier stops, jump ahead, or skip planned stops. "
+        "Compatibility stop_sequence input remains supported, and optional stop_id may be used when available."
+    ),
     response_description="Updated run state",
 )
 def arrive_at_stop(
     run_id: int,
-    stop_sequence: int = Query(..., ge=1),          # Stop sequence reached by driver
+    stop_sequence: int | None = Query(None, ge=1),  # Compatibility stop-sequence target
+    stop_id: int | None = Query(None, ge=1),        # Optional explicit stop target for flexible movement
     db: Session = Depends(get_db),                  # Database session dependency
 ):
-    # -------------------------------------------------------------------------
-    # Load run
-    # -------------------------------------------------------------------------
-    run = db.get(run_model.Run, run_id)             # Load run by ID
+    run = _require_active_runtime_run(_get_runtime_run_or_404(run_id, db))
+    stop = _resolve_runtime_stop_target_or_404(
+        run_id=run_id,
+        stop_id=stop_id,
+        stop_sequence=stop_sequence,
+        db=db,
+    )                                                          # Allow explicit jumps, revisits, and backward movement
 
-    if not run:                                     # If run does not exist
-        raise HTTPException(status_code=404, detail="Run not found")
-    # -------------------------------------------------------------------------
-    # Prevent changes after run completion
-    # -------------------------------------------------------------------------
-    if run.is_completed:  # Completed runs are read-only
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Run is already completed",
-        )
-
-    if run.start_time is None:  # Planned runs cannot accept live stop updates
-        raise HTTPException(status_code=400, detail="Run is not active")
-
-    if run.end_time is not None:                    # If run already ended
-        raise HTTPException(status_code=400, detail="Run has already ended")
-
-    # -------------------------------------------------------------------------
-    # Validate stop exists in this run
-    # -------------------------------------------------------------------------
-    stop = (
-        db.query(stop_model.Stop)
-        .filter(stop_model.Stop.run_id == run_id)   # Only stops in this run
-        .filter(stop_model.Stop.sequence == stop_sequence)
-        .first()
-    )
-
-    if not stop:                                    # If stop sequence not found
-        raise HTTPException(
-            status_code=404,
-            detail="Stop sequence not found for this run",
-        )
-
-    # -------------------------------------------------------------------------
-    # Update live run location
-    # -------------------------------------------------------------------------
-    run.current_stop_id = stop.id                   # Save the actual current stop ID
-    run.current_stop_sequence = stop.sequence       # Save the actual current stop sequence
-    # -----------------------------------------------------------
-    # Log ARRIVE event
-    # - Records the bus's latest stop visit
-    # -----------------------------------------------------------
-    event = RunEvent(                                                        # Build arrive event
-        run_id=run.id,                                                       # Parent run
-        stop_id=stop.id,                                                     # Current stop
-        event_type="ARRIVE",                                                 # Event type
-    )
-    db.add(event)                                                            # Add event to current transaction
-    
-    db.commit()                                     # Save updated run
-    db.refresh(run)                                 # Reload updated run
-
-    return run                                      # Return updated run
+    return _set_run_current_stop(run=run, stop=stop, db=db)
 
 # =============================================================================
 # POST /runs/{run_id}/next_stop
 # -----------------------------------------------------------------------------
 # Purpose:
-#   Advance the run to the next stop without requiring the driver to know the
-#   stop sequence number.
+#   Convenience helper for moving to the next configured stop in stable order.
+#   Flexible execution still uses arrive_stop as the authoritative location
+#   setter, including revisits, backward movement, and jumps.
 # =============================================================================
 @router.post(
     "/{run_id}/next_stop",
     response_model=schemas.RunOut,
-    summary="Advance to next stop",
-    description="Advance the run to the next configured stop without providing a stop sequence.",
+    summary="Advance to next configured stop (compatibility helper)",
+    description=(
+        "Compatibility convenience helper that moves the active run to the next configured stop in ordered stop-list order. "
+        "This endpoint does not enforce the overall execution model; drivers may still use POST /runs/{run_id}/arrive_stop "
+        "to revisit earlier stops, jump ahead, skip stops, or otherwise reflect actual runtime location."
+    ),
     response_description="Updated run state",
 )
 def advance_to_next_stop(
     run_id: int,
     db: Session = Depends(get_db),                  # Database session dependency
 ):
-    # -------------------------------------------------------------------------
-    # Load run
-    # -------------------------------------------------------------------------
-    run = db.get(run_model.Run, run_id)             # Load run by ID
+    run = _require_active_runtime_run(_get_runtime_run_or_404(run_id, db))
+    stops = _get_ordered_run_stops(run_id, db)      # Stable ordered list for convenience-only navigation
 
-    if not run:                                     # If run does not exist
-        raise HTTPException(status_code=404, detail="Run not found")
-
-    if run.start_time is None:                      # Planned runs cannot advance stop progress
-        raise HTTPException(status_code=400, detail="Run is not active")
-
-    if run.end_time is not None:                    # If run already ended
-        raise HTTPException(status_code=400, detail="Run has already ended")
-
-    # -------------------------------------------------------------------------
-    # Load ordered stops for this run
-    # -------------------------------------------------------------------------
-    stops = (
-        db.query(stop_model.Stop)
-        .filter(stop_model.Stop.run_id == run_id)   # Only stops in this run
-        .order_by(stop_model.Stop.sequence.asc(), stop_model.Stop.id.asc())
-        .all()
-    )
-
-    if not stops:                                   # If run has no stops
+    if not stops:
         raise HTTPException(status_code=404, detail="No stops found for this run")
 
-    # -------------------------------------------------------------------------
-    # Resolve next stop sequence
-    # -------------------------------------------------------------------------
-    if run.current_stop_sequence is None:           # No progress stored yet
-        next_sequence = 1                           # Start at first stop
+    if run.current_stop_id is None:
+        next_stop = stops[0]                        # First convenience move starts at the first configured stop
     else:
-        next_sequence = run.current_stop_sequence + 1  # Advance to next stop
+        current_index = next(
+            (index for index, stop in enumerate(stops) if stop.id == run.current_stop_id),
+            None,
+        )                                           # Resolve ordered position from the current actual stop id
 
-    # -------------------------------------------------------------------------
-    # Validate next stop exists in this run
-    # -------------------------------------------------------------------------
-    next_stop = (
-        db.query(stop_model.Stop)
-        .filter(stop_model.Stop.run_id == run_id)   # Only stops in this run
-        .filter(stop_model.Stop.sequence == next_sequence)
-        .first()
-    )
+        if current_index is None:
+            next_stop = next(
+                (
+                    stop
+                    for stop in stops
+                    if run.current_stop_sequence is None or stop.sequence > run.current_stop_sequence
+                ),
+                None,
+            )                                       # Conservative fallback if stored stop id is stale
+        elif current_index + 1 < len(stops):
+            next_stop = stops[current_index + 1]    # Move to the next configured stop in stable order
+        else:
+            next_stop = None                        # No later configured stop remains
 
-    if not next_stop:                               # No further stop available
+    if not next_stop:
         raise HTTPException(status_code=404, detail="No next stop found for this run")
 
-    # -------------------------------------------------------------------------
-    # Persist progress
-    # -------------------------------------------------------------------------
-    run.current_stop_id = next_stop.id              # Save the resolved next stop ID
-    run.current_stop_sequence = next_stop.sequence  # Save the resolved next stop sequence
-    db.commit()                                     # Persist update
-    db.refresh(run)                                 # Reload updated run
-
-    return run                                      # Return updated run
+    return _set_run_current_stop(run=run, stop=next_stop, db=db)
 
 # -----------------------------------------------------------
 # - Pick up student
@@ -1220,65 +1307,23 @@ def pickup_student(
     payload: PickupStudentRequest,
     db: Session = Depends(get_db),
 ):
-    # -------------------------------------------------------------------------
-    # Load the target run
-    # -------------------------------------------------------------------------
-    run = db.query(run_model.Run).filter(run_model.Run.id == run_id).first()
-
-    if not run:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Run not found",
-        )
-    # -------------------------------------------------------------------------
-    # Prevent changes after run completion
-    # -------------------------------------------------------------------------
-    if run.is_completed:  # Completed runs are read-only
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Run is already completed",
-        )
-
-    # -------------------------------------------------------------------------
-    # Ensure the run is active
-    # -------------------------------------------------------------------------
-    if run.start_time is None or run.end_time is not None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Run is not active",
-        )
-
-    # -------------------------------------------------------------------------
-    # Ensure the driver is currently positioned at a stop
-    # -------------------------------------------------------------------------
-    if run.current_stop_sequence is None or run.current_stop_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Run is not currently at a stop",
-        )
-
-    # -------------------------------------------------------------------------
-    # Load the student assignment for this run
-    # -------------------------------------------------------------------------
-    assignment = (
-        db.query(StudentRunAssignment)
-        .options(joinedload(StudentRunAssignment.stop))  # Load assigned stop context for runtime views
-        .filter(
-            StudentRunAssignment.run_id == run_id,
-            StudentRunAssignment.student_id == payload.student_id,
-        )
-        .first()
+    run = _require_active_runtime_run(_get_runtime_run_or_404(run_id, db))
+    current_stop = _require_current_runtime_stop(run, db)  # Pickup must happen at the actual current stop
+    assignment = _get_runtime_assignment_or_404(
+        run_id=run_id,
+        student_id=payload.student_id,
+        db=db,
     )
-
-    if not assignment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Student is not assigned to this run",
-        )
 
     # -------------------------------------------------------------------------
     # Prevent duplicate pickup
     # -------------------------------------------------------------------------
+    if assignment.dropped_off is True:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Student has already been dropped off",
+        )
+
     if assignment.picked_up is True:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1293,7 +1338,7 @@ def pickup_student(
     assignment.picked_up = True  # Student has boarded
     assignment.picked_up_at = now  # Store pickup time
     assignment.is_onboard = True  # Student is now physically on the bus
-    assignment.actual_pickup_stop_id = run.current_stop_id  # Record the actual boarding stop
+    assignment.actual_pickup_stop_id = current_stop.id  # Record the actual boarding stop
 
     # -----------------------------------------------------------
     # Log pickup event
@@ -1301,7 +1346,7 @@ def pickup_student(
     # -----------------------------------------------------------
     event = RunEvent(
         run_id=run.id,
-        stop_id=run.current_stop_id,
+        stop_id=current_stop.id,
         student_id=assignment.student_id,
         event_type="PICKUP",
     )
@@ -1341,82 +1386,33 @@ def dropoff_student(
     payload: DropoffStudentRequest,
     db: Session = Depends(get_db),
 ):
-    # -------------------------------------------------------------------------
-    # Load the target run
-    # -------------------------------------------------------------------------
-    run = (
-        db.query(run_model.Run)
-        .filter(run_model.Run.id == run_id)
-        .first()
-    )  # Find run by ID
-
-    if not run:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Run not found",
-        )
-
-    # -------------------------------------------------------------------------
-    # Ensure the run has started and is still active
-    # -------------------------------------------------------------------------
-    if run.start_time is None or run.end_time is not None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Run is not active",
-        )
-    # -------------------------------------------------------------------------
-    # Prevent changes after run completion
-    # -------------------------------------------------------------------------
-    if run.is_completed:  # Completed runs are read-only
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Run is already completed",
-        )
-
-    # -------------------------------------------------------------------------
-    # Ensure the run is currently positioned at a stop
-    # -------------------------------------------------------------------------
-    if run.current_stop_sequence is None or run.current_stop_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Run is not currently at a stop",
-        )
-
-    # -------------------------------------------------------------------------
-    # Load the student's runtime assignment
-    # -------------------------------------------------------------------------
-    assignment = (
-        db.query(StudentRunAssignment)
-        .options(joinedload(StudentRunAssignment.stop))  # Load assigned stop context for runtime views
-        .filter(
-            StudentRunAssignment.run_id == run_id,
-            StudentRunAssignment.student_id == payload.student_id,
-        )
-        .first()
+    run = _require_active_runtime_run(_get_runtime_run_or_404(run_id, db))
+    current_stop = _require_current_runtime_stop(run, db)  # Dropoff must happen at the actual current stop
+    assignment = _get_runtime_assignment_or_404(
+        run_id=run_id,
+        student_id=payload.student_id,
+        db=db,
     )
 
-    if not assignment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Student is not assigned to this run",
-        )
-
     # -------------------------------------------------------------------------
-    # Ensure the student is currently onboard before drop-off
-    # -------------------------------------------------------------------------
-    if assignment.picked_up is not True or assignment.is_onboard is not True:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Student is not currently onboard",
-        )
-
-    # -------------------------------------------------------------------------
-    # Prevent duplicate drop-off
+    # Block impossible or duplicate drop-off transitions
     # -------------------------------------------------------------------------
     if assignment.dropped_off is True:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Student has already been dropped off",
+        )
+
+    if assignment.picked_up is not True:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Student has not been picked up yet",
+        )
+
+    if assignment.is_onboard is not True:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Student is not currently onboard",
         )
 
     # -------------------------------------------------------------------------
@@ -1427,7 +1423,7 @@ def dropoff_student(
     assignment.dropped_off = True  # Student has been dropped off
     assignment.dropped_off_at = now  # Store drop-off time
     assignment.is_onboard = False  # Student is no longer on the bus
-    assignment.actual_dropoff_stop_id = run.current_stop_id  # Record the actual drop-off stop
+    assignment.actual_dropoff_stop_id = current_stop.id  # Record the actual drop-off stop
 
     # -----------------------------------------------------------
     # Log DROPOFF event
@@ -1435,7 +1431,7 @@ def dropoff_student(
     # -----------------------------------------------------------
     event = RunEvent(                                                        # Build dropoff event
         run_id=run.id,                                                       # Parent run
-        stop_id=run.current_stop_id,                                         # Actual dropoff stop
+        stop_id=current_stop.id,                                             # Actual dropoff stop
         student_id=assignment.student_id,                                    # Dropped-off student
         event_type="DROPOFF",                                                # Event type
     )

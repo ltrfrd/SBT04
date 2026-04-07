@@ -1962,7 +1962,7 @@ def test_dropoff_student_not_onboard(client):
     )
 
     assert dropoff.status_code == 400
-    assert dropoff.json()["detail"] == "Student is not currently onboard"
+    assert dropoff.json()["detail"] == "Student has not been picked up yet"
 
 
 # =============================================================================
@@ -2086,7 +2086,7 @@ def test_dropoff_student_already_dropped_off(client):
     )
 
     assert second_dropoff.status_code == 400
-    assert second_dropoff.json()["detail"] == "Student is not currently onboard"
+    assert second_dropoff.json()["detail"] == "Student has already been dropped off"
 
 
 

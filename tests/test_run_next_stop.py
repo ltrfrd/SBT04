@@ -101,3 +101,82 @@ def test_next_stop_advances_progress(client):
 
     data2 = res2.json()
     assert data2["current_stop_sequence"] == 2
+
+
+def test_next_stop_uses_actual_current_stop_after_manual_jump(client):
+
+    # -------------------------------------------------------------------------
+    # Create driver
+    # -------------------------------------------------------------------------
+    driver_res = client.post(
+        "/drivers/",
+        json={
+            "name": "Driver Next Stop Jump",
+            "email": "driver_next_stop_jump@example.com",
+            "phone": "555-000-2222",
+        },
+    )
+    assert driver_res.status_code in (200, 201)
+    driver_id = driver_res.json()["id"]
+
+    # -------------------------------------------------------------------------
+    # Create route
+    # -------------------------------------------------------------------------
+    route_res = client.post(
+        "/routes/",
+        json={
+            "route_number": "NEXT-STOP-02",
+        },
+    )
+    assert route_res.status_code in (200, 201)
+    route_id = route_res.json()["id"]
+
+    assign_res = client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
+    assert assign_res.status_code in (200, 201)
+
+    # -------------------------------------------------------------------------
+    # Create planned run
+    # -------------------------------------------------------------------------
+    run_res = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
+    assert run_res.status_code in (200, 201)
+    run_id = run_res.json()["id"]
+
+    # -------------------------------------------------------------------------
+    # Add three ordered stops
+    # -------------------------------------------------------------------------
+    for sequence in (1, 2, 3):
+        stop_res = client.post(
+            "/stops/",
+            json={
+                "run_id": run_id,
+                "sequence": sequence,
+                "type": "pickup",
+                "name": f"Stop {sequence}",
+                "address": f"{sequence} Main St",
+                "planned_time": f"07:0{sequence}:00",
+                "latitude": sequence,
+                "longitude": sequence,
+            },
+        )
+        assert stop_res.status_code in (200, 201)
+
+    # -------------------------------------------------------------------------
+    # Start prepared run
+    # -------------------------------------------------------------------------
+    ensure_prepared_run_student(client, run_id)
+    start_res = client.post(f"/runs/start?run_id={run_id}")
+    assert start_res.status_code in (200, 201)
+
+    # -------------------------------------------------------------------------
+    # Jump directly to stop 2 using flexible arrival
+    # -------------------------------------------------------------------------
+    arrive_res = client.post(f"/runs/{run_id}/arrive_stop?stop_sequence=2")
+    assert arrive_res.status_code == 200
+    assert arrive_res.json()["current_stop_sequence"] == 2
+
+    # -------------------------------------------------------------------------
+    # next_stop should continue from the actual current stop
+    # -------------------------------------------------------------------------
+    next_res = client.post(f"/runs/{run_id}/next_stop")
+    assert next_res.status_code in (200, 201)
+    assert next_res.json()["current_stop_sequence"] == 3
