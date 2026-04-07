@@ -85,13 +85,16 @@ def test_routes_crud(client):
     data = r.json()
     assert data["id"] == route_id
     assert "unit_number" not in data
+    assert "operator" not in data
+    assert "capacity" not in data
 
     r = client.put(
         f"/routes/{route_id}",
-        json={"route_number": "R100", "operator": "Updated Operator"},
+        json={"route_number": "R100"},
     )
     assert r.status_code == 200
-    assert r.json()["operator"] == "Updated Operator"
+    assert "operator" not in r.json()
+    assert "capacity" not in r.json()
 
     r = client.delete(f"/routes/{route_id}")
     assert r.status_code in (200, 204)
@@ -1192,9 +1195,9 @@ def test_route_update_rejects_duplicate_route_number(client):
 
 # -----------------------------------------------------------
 # - Route create OpenAPI contract
-# - Keep route_number required without exposing route unit_number
+# - Keep route_number required without exposing route vehicle fields
 # -----------------------------------------------------------
-def test_route_create_openapi_removes_unit_number(client):
+def test_route_create_openapi_removes_legacy_vehicle_fields(client):
     response = client.get("/openapi.json")
     assert response.status_code == 200
 
@@ -1206,19 +1209,24 @@ def test_route_create_openapi_removes_unit_number(client):
 
     assert route_create_schema["required"] == ["route_number"]
     assert "unit_number" not in route_create_schema["properties"]
+    assert "operator" not in route_create_schema["properties"]
+    assert "capacity" not in route_create_schema["properties"]
     assert "unit_number" not in route_out_schema["properties"]
+    assert "operator" not in route_out_schema["properties"]
+    assert "capacity" not in route_out_schema["properties"]
     assert "unit_number" not in route_detail_schema["properties"]
+    assert "operator" not in route_detail_schema["properties"]
+    assert "capacity" not in route_detail_schema["properties"]
     assert "unit_number" not in run_detail_route_schema["properties"]
 
     create_operation = response.json()["paths"]["/routes/"]["post"]
     assert create_operation["summary"] == "Create route"
-    assert "without vehicle identity data" in create_operation["description"]
+    assert "with route_number and optional school_ids only" in create_operation["description"]
     assert "Bus assignment is handled separately" in create_operation["description"]
-    assert "no longer owns the unit number" in create_operation["description"]
 
     update_operation = response.json()["paths"]["/routes/{route_id}"]["put"]
     assert update_operation["summary"] == "Update route"
-    assert "without vehicle identity data" in update_operation["description"]
+    assert "with route_number and optional school_ids only" in update_operation["description"]
     assert "Bus assignment is handled separately" in update_operation["description"]
 
 
@@ -1676,12 +1684,16 @@ def test_route_driver_assignment_schemas_expose_primary_fields_in_openapi(client
     assert "is_primary" in route_driver_assignment_properties
 
     route_out_properties = schemas["RouteOut"]["properties"]
+    assert "operator" not in route_out_properties
+    assert "capacity" not in route_out_properties
     assert "active_driver_id" in route_out_properties
     assert "active_driver_name" in route_out_properties
     assert "primary_driver_id" in route_out_properties
     assert "primary_driver_name" in route_out_properties
 
     route_detail_properties = schemas["RouteDetailOut"]["properties"]
+    assert "operator" not in route_detail_properties
+    assert "capacity" not in route_detail_properties
     assert "active_driver_id" in route_detail_properties
     assert "active_driver_name" in route_detail_properties
     assert "primary_driver_id" in route_detail_properties

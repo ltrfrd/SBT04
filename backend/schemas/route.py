@@ -43,20 +43,11 @@ class RouteDriverAssignmentOut(RouteDriverAssignmentBase):
 # Schema for creating a new route (POST request)
 # - Route creation is vehicle-agnostic in the user-facing workflow
 # - Bus assignment happens later through the separate route-bus flow
-# - Legacy route compatibility fields remain optional where still needed
 # -----------------------------------------------------------
 class RouteCreate(BaseModel):
     route_number: str = Field(
         ...,
         description="Required public route identifier used during normal route creation.",
-    )
-    operator: Optional[str] = Field(
-        default=None,
-        description="Optional legacy compatibility field. Bus assignment is handled separately.",
-    )
-    capacity: Optional[int] = Field(
-        default=None,
-        description="Optional legacy compatibility field. Bus assignment is handled separately.",
     )
     school_ids: Optional[List[int]] = []
 
@@ -82,8 +73,6 @@ class RouteCreate(BaseModel):
 class RouteOut(BaseModel):
     id: int
     route_number: str
-    operator: Optional[str] = None
-    capacity: Optional[int] = None
     bus_id: Optional[int] = None
     school_ids: Optional[List[int]] = None
     school_names: List[str] = []
@@ -163,8 +152,6 @@ class RouteDetailRunOut(BaseModel):
 class RouteDetailOut(BaseModel):
     id: int
     route_number: str
-    operator: Optional[str] = None
-    capacity: Optional[int] = None
     bus_id: Optional[int] = None
     schools: List[RouteSchoolOut] = []
     active_driver_id: int | None = None  # Current operational driver id

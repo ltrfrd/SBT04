@@ -17,6 +17,7 @@ from datetime import datetime, timezone                            # Time utilit
 from sqlalchemy.orm import Session, sessionmaker                   # DB session tools
 from backend.models.associations import StudentRunAssignment       # Runtime assignment model
 from backend.models import run as run_model                        # Direct run verification model
+from backend.models.route import Route                             # Direct route verification model
 from backend.models.student import Student                         # Direct student verification model
 from database import engine                                        # DB engine
 import uuid
@@ -233,7 +234,7 @@ def test_driver_run_workspace_shows_route_run_stop_student_hierarchy(client):
     assert "Workspace Student" in body
 
 
-def test_driver_run_workspace_prefers_assigned_bus_values_with_route_fallback(client):
+def test_driver_run_workspace_prefers_assigned_bus_values_with_route_fallback(client, db_engine):
     driver = client.post(
         "/drivers/",
         json={"name": "Workspace Bus Driver", "email": "workspace.bus.driver@test.com", "phone": "11123"},
@@ -257,16 +258,12 @@ def test_driver_run_workspace_prefers_assigned_bus_values_with_route_fallback(cl
     )
     route_id = route["id"]
 
-    updated_route = client.put(
-        f"/routes/{route_id}",
-        json={
-            "route_number": "WORKSPACE-BUS-1",
-            "operator": "Legacy Operator",
-            "capacity": 31,
-            "school_ids": [school_id],
-        },
-    )
-    assert updated_route.status_code == 200
+    with Session(db_engine) as db:
+        stored_route = db.get(Route, route_id)
+        assert stored_route is not None
+        stored_route.operator = "Legacy Operator"
+        stored_route.capacity = 31
+        db.commit()
 
     bus = client.post(
         "/buses/",
@@ -307,7 +304,7 @@ def test_driver_run_workspace_prefers_assigned_bus_values_with_route_fallback(cl
     assert "Legacy Operator" in fallback_body
 
 
-def test_route_report_prefers_assigned_bus_values_with_route_fallback(client):
+def test_route_report_prefers_assigned_bus_values_with_route_fallback(client, db_engine):
     driver = client.post(
         "/drivers/",
         json={"name": "Report Bus Driver", "email": "report.bus.driver@test.com", "phone": "11124"},
@@ -331,16 +328,12 @@ def test_route_report_prefers_assigned_bus_values_with_route_fallback(client):
     )
     route_id = route["id"]
 
-    updated_route = client.put(
-        f"/routes/{route_id}",
-        json={
-            "route_number": "REPORT-BUS-1",
-            "operator": "Legacy Report Operator",
-            "capacity": 29,
-            "school_ids": [school_id],
-        },
-    )
-    assert updated_route.status_code == 200
+    with Session(db_engine) as db:
+        stored_route = db.get(Route, route_id)
+        assert stored_route is not None
+        stored_route.operator = "Legacy Report Operator"
+        stored_route.capacity = 29
+        db.commit()
 
     run = _create_planned_run(client, route_id, "AM")
 

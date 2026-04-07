@@ -77,8 +77,6 @@ def _serialize_route(route: Route) -> RouteOut:
     return RouteOut(
         id=route.id,
         route_number=route.route_number,
-        operator=route.operator,
-        capacity=route.capacity,
         bus_id=route.bus_id,
         school_ids=[school.id for school in sorted(route.schools, key=lambda school: (school.name, school.id))],
         school_names=[school.name for school in sorted(route.schools, key=lambda school: (school.name, school.id))],
@@ -200,8 +198,6 @@ def _serialize_route_detail(route: Route) -> RouteDetailOut:
     return RouteDetailOut(
         id=route.id,
         route_number=route.route_number,
-        operator=route.operator,
-        capacity=route.capacity,
         bus_id=route.bus_id,
         schools=[
             RouteSchoolOut(
@@ -240,9 +236,8 @@ def _serialize_route_detail(route: Route) -> RouteDetailOut:
     response_model=RouteOut,                                     # Successful response model
     summary="Create route",                                      # Clear Swagger title
     description=(                                                # Explain real route creation flow
-        "Create a route without vehicle identity data. "
+        "Create a route with route_number and optional school_ids only. "
         "Bus assignment is handled separately. "
-        "Route no longer owns the unit number in the user-facing workflow. "
         "Driver assignment is also handled separately. "
         "Route numbers must be unique."
     ),
@@ -350,9 +345,9 @@ def get_route(route_id: int, db: Session = Depends(get_db)):
     response_model=RouteOut,
     summary="Update route",
     description=(
-        "Update one route without vehicle identity data. "
+        "Update one route with route_number and optional school_ids only. "
         "Bus assignment is handled separately. "
-        "Route no longer owns the unit number in the user-facing workflow."
+        "Driver assignment remains separate."
     ),
     response_description="Updated route",
 )
