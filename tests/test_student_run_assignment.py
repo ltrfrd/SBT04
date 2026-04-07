@@ -43,7 +43,6 @@ def _build_assignment_context(client, route_number: str, run_types: list[str]):
         "/routes/",
         json={
             "route_number": route_number,
-            "unit_number": f"BUS-{route_number}",
             "school_ids": [school["id"]],
         },
     ).json()

@@ -41,29 +41,22 @@ class RouteDriverAssignmentOut(RouteDriverAssignmentBase):
 
 # -----------------------------------------------------------
 # Schema for creating a new route (POST request)
-# - Route creation does not require bus assignment data
+# - Route creation is vehicle-agnostic in the user-facing workflow
 # - Bus assignment happens later through the separate route-bus flow
-# - Legacy bus-like route fields remain optional for compatibility/fallback
+# - Legacy route compatibility fields remain optional where still needed
 # -----------------------------------------------------------
 class RouteCreate(BaseModel):
     route_number: str = Field(
         ...,
         description="Required public route identifier used during normal route creation.",
     )
-    unit_number: Optional[str] = Field(
-        default=None,
-        description=(
-            "Optional legacy bus-like field kept for compatibility and fallback reads. "
-            "Normal route creation does not require bus assignment data."
-        ),
-    )
     operator: Optional[str] = Field(
         default=None,
-        description="Optional legacy bus-like compatibility field. Bus assignment is handled separately.",
+        description="Optional legacy compatibility field. Bus assignment is handled separately.",
     )
     capacity: Optional[int] = Field(
         default=None,
-        description="Optional legacy bus-like compatibility field. Bus assignment is handled separately.",
+        description="Optional legacy compatibility field. Bus assignment is handled separately.",
     )
     school_ids: Optional[List[int]] = []
 
@@ -81,19 +74,6 @@ class RouteCreate(BaseModel):
             raise ValueError("route_number is required")
         return normalized
 
-    # -----------------------------------------------------------
-    # Legacy unit normalization
-    # Allow omission entirely while keeping compatibility values tidy
-    # -----------------------------------------------------------
-    @field_validator("unit_number")
-    @classmethod
-    def normalize_unit_number(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-
-        normalized = value.strip()
-        return normalized or None
-
 
 # -----------------------------------------------------------
 # Route summary response
@@ -102,7 +82,6 @@ class RouteCreate(BaseModel):
 class RouteOut(BaseModel):
     id: int
     route_number: str
-    unit_number: Optional[str] = None
     operator: Optional[str] = None
     capacity: Optional[int] = None
     bus_id: Optional[int] = None
@@ -184,7 +163,6 @@ class RouteDetailRunOut(BaseModel):
 class RouteDetailOut(BaseModel):
     id: int
     route_number: str
-    unit_number: str | None = None
     operator: Optional[str] = None
     capacity: Optional[int] = None
     bus_id: Optional[int] = None

@@ -42,7 +42,6 @@ def _create_route_with_assignment_flow(
         "/routes/",
         json={
             "route_number": route_number,
-            "unit_number": unit_number,
             "school_ids": school_ids or [],
         },
     )
@@ -262,7 +261,6 @@ def test_driver_run_workspace_prefers_assigned_bus_values_with_route_fallback(cl
         f"/routes/{route_id}",
         json={
             "route_number": "WORKSPACE-BUS-1",
-            "unit_number": "LEGACY-WORKSPACE-BUS-1",
             "operator": "Legacy Operator",
             "capacity": 31,
             "school_ids": [school_id],
@@ -304,7 +302,7 @@ def test_driver_run_workspace_prefers_assigned_bus_values_with_route_fallback(cl
     assert fallback_response.status_code == 200
     fallback_body = fallback_response.text
 
-    assert "LEGACY-WORKSPACE-BUS-1" in fallback_body
+    assert "LEGACY-WORKSPACE-BUS-1" not in fallback_body
     assert "31" in fallback_body
     assert "Legacy Operator" in fallback_body
 
@@ -337,7 +335,6 @@ def test_route_report_prefers_assigned_bus_values_with_route_fallback(client):
         f"/routes/{route_id}",
         json={
             "route_number": "REPORT-BUS-1",
-            "unit_number": "LEGACY-REPORT-BUS-1",
             "operator": "Legacy Report Operator",
             "capacity": 29,
             "school_ids": [school_id],
@@ -379,7 +376,7 @@ def test_route_report_prefers_assigned_bus_values_with_route_fallback(client):
     assert assigned_response.status_code == 200
     assigned_body = assigned_response.text
 
-    assert "Route Attendance: LEGACY-REPORT-BUS-1" in assigned_body
+    assert "Route Attendance: REPORT-BUS-1" in assigned_body
     assert "BUS-REPORT-REAL" in assigned_body
     assert "47" in assigned_body
     assert "mid" in assigned_body
@@ -392,8 +389,8 @@ def test_route_report_prefers_assigned_bus_values_with_route_fallback(client):
     assert fallback_response.status_code == 200
     fallback_body = fallback_response.text
 
-    assert "Route Attendance: LEGACY-REPORT-BUS-1" in fallback_body
-    assert "Vehicle:</strong> LEGACY-REPORT-BUS-1" in fallback_body
+    assert "Route Attendance: REPORT-BUS-1" in fallback_body
+    assert "Vehicle:</strong> -" in fallback_body
     assert "Capacity:</strong> 29" in fallback_body
 
 
@@ -491,7 +488,7 @@ def test_route_driver_assignment_flow(client):
 
     route = client.post(
         "/routes/",
-        json={"route_number": "ASSIGN-1", "unit_number": "BUS-ASSIGN-1", "school_ids": [school_id]},
+        json={"route_number": "ASSIGN-1", "school_ids": [school_id]},
     )
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
@@ -540,12 +537,12 @@ def test_route_create_allows_missing_unit_number(client):
 
     body = route.json()
     assert body["route_number"] == "NO-UNIT-1"
-    assert body["unit_number"] is None
+    assert "unit_number" not in body
     assert body["school_ids"] == [school_id]
 
     detail = client.get(f"/routes/{body['id']}")
     assert detail.status_code == 200
-    assert detail.json()["unit_number"] is None
+    assert "unit_number" not in detail.json()
 
 
 def test_create_run_uses_single_active_route_assignment(client):
@@ -562,7 +559,7 @@ def test_create_run_uses_single_active_route_assignment(client):
 
     route = client.post(
         "/routes/",
-        json={"route_number": "RUN-PRIMARY", "unit_number": "BUS-RUN-PRIMARY"},
+        json={"route_number": "RUN-PRIMARY"},
     )
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
@@ -614,11 +611,11 @@ def test_driver_routes_lists_only_active_route_assignments(client):
 
     retained_route = client.post(
         "/routes/",
-        json={"route_number": "ACTIVE-KEEP", "unit_number": "BUS-ACTIVE-KEEP"},
+        json={"route_number": "ACTIVE-KEEP"},
     )
     replaced_route = client.post(
         "/routes/",
-        json={"route_number": "ACTIVE-REPLACE", "unit_number": "BUS-ACTIVE-REPLACE"},
+        json={"route_number": "ACTIVE-REPLACE"},
     )
     assert retained_route.status_code in (200, 201)
     assert replaced_route.status_code in (200, 201)
@@ -656,7 +653,7 @@ def test_unassign_active_replacement_reactivates_primary_driver(client):
 
     route = client.post(
         "/routes/",
-        json={"route_number": "RESTORE-PRIMARY", "unit_number": "BUS-RESTORE-PRIMARY"},
+        json={"route_number": "RESTORE-PRIMARY"},
     )
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
@@ -696,7 +693,7 @@ def test_reassigning_primary_driver_back_into_service_reuses_existing_primary_as
 
     route = client.post(
         "/routes/",
-        json={"route_number": "REUSE-PRIMARY", "unit_number": "BUS-REUSE-PRIMARY"},
+        json={"route_number": "REUSE-PRIMARY"},
     )
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
@@ -746,7 +743,7 @@ def test_assign_driver_fails_safely_when_route_has_multiple_primary_assignments(
 
     route = client.post(
         "/routes/",
-        json={"route_number": "PRIMARY-CONFLICT", "unit_number": "BUS-PRIMARY-CONFLICT"},
+        json={"route_number": "PRIMARY-CONFLICT"},
     )
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
@@ -784,7 +781,7 @@ def test_assign_driver_fails_safely_when_route_has_multiple_primary_assignments(
 def test_create_run_allows_planned_run_without_active_route_driver_assignment(client):
     route = client.post(
         "/routes/",
-        json={"route_number": "NO-DRIVER", "unit_number": "BUS-NO-DRIVER"},
+        json={"route_number": "NO-DRIVER"},
     )
     assert route.status_code in (200, 201)
 
@@ -807,7 +804,7 @@ def test_create_run_allows_multiple_planned_runs_for_same_driver(client):
 
     route = client.post(
         "/routes/",
-        json={"route_number": "PLAN-ROUTE", "unit_number": "BUS-PLAN"},
+        json={"route_number": "PLAN-ROUTE"},
     )
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
@@ -835,7 +832,7 @@ def test_start_run_blocks_second_active_run_for_same_driver(client):
 
     route = client.post(
         "/routes/",
-        json={"route_number": "ACTIVE-ROUTE", "unit_number": "BUS-ACTIVE"},
+        json={"route_number": "ACTIVE-ROUTE"},
     )
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
@@ -875,7 +872,7 @@ def test_create_run_accepts_custom_run_type_string(client):
 
     route = client.post(
         "/routes/",
-        json={"route_number": "CUSTOM-LABEL", "unit_number": "BUS-CUSTOM"},
+        json={"route_number": "CUSTOM-LABEL"},
     )
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
@@ -891,7 +888,7 @@ def test_create_run_accepts_custom_run_type_string(client):
 def test_start_run_starts_existing_planned_run_by_id(client):
     route = client.post(
         "/routes/",
-        json={"route_number": "START-EXISTING", "unit_number": "BUS-START-EXISTING"},
+        json={"route_number": "START-EXISTING"},
     )
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
@@ -940,7 +937,7 @@ def test_update_planned_run_succeeds(client):
 
     route = client.post(
         "/routes/",
-        json={"route_number": "EDIT-PLAN", "unit_number": "BUS-EDIT-PLAN"},
+        json={"route_number": "EDIT-PLAN"},
     )
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
@@ -970,7 +967,7 @@ def test_delete_planned_run_succeeds(client):
 
     route = client.post(
         "/routes/",
-        json={"route_number": "DELETE-PLAN", "unit_number": "BUS-DELETE-PLAN"},
+        json={"route_number": "DELETE-PLAN"},
     )
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
@@ -1000,7 +997,7 @@ def test_update_started_run_fails(client):
 
     route = client.post(
         "/routes/",
-        json={"route_number": "LOCK-UPDATE", "unit_number": "BUS-LOCK-UPDATE"},
+        json={"route_number": "LOCK-UPDATE"},
     )
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
@@ -1033,7 +1030,7 @@ def test_delete_started_run_fails(client):
 
     route = client.post(
         "/routes/",
-        json={"route_number": "LOCK-DELETE", "unit_number": "BUS-LOCK-DELETE"},
+        json={"route_number": "LOCK-DELETE"},
     )
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
@@ -1066,7 +1063,7 @@ def test_start_run_accepts_legacy_enum_value_as_plain_string(client):
 
     route = client.post(
         "/routes/",
-        json={"route_number": "LEGACY-LABEL", "unit_number": "BUS-LEGACY"},
+        json={"route_number": "LEGACY-LABEL"},
     )
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
@@ -1107,7 +1104,6 @@ def test_create_run_fails_when_route_has_multiple_active_assignments(client, db_
         "/routes/",
         json={
             "route_number": "MULTI-ROUTE",
-            "unit_number": "BUS-MULTI",
             "school_ids": [school.json()["id"]],
         },
     )
@@ -1185,7 +1181,7 @@ def test_unassign_driver_blocks_future_run_start(client):
 def test_start_run_fails_without_active_route_driver_assignment(client):
     route = client.post(
         "/routes/",
-        json={"route_number": "START-NO-DRIVER", "unit_number": "BUS-START-NO-DRIVER"},
+        json={"route_number": "START-NO-DRIVER"},
     )
     assert route.status_code in (200, 201)
 
@@ -1202,7 +1198,6 @@ def test_start_run_fails_without_active_route_driver_assignment(client):
         f"/routes/{route.json()['id']}",
         json={
             "route_number": "START-NO-DRIVER",
-            "unit_number": "BUS-START-NO-DRIVER",
             "school_ids": [school.json()["id"]],
         },
     )
@@ -1427,7 +1422,6 @@ def test_pickup_student_success(client):
         "/routes/",
         json={
             "route_number": "R1",
-            "unit_number": "Bus-01",
             "driver_id": driver_id,
             "school_ids": [school_id],
         },
@@ -1546,7 +1540,6 @@ def test_pickup_student_not_assigned(client):
         "/routes/",
         json={
             "route_number": "R1",
-            "unit_number": "Bus-01",
             "driver_id": driver_id,
             "school_ids": [school_id],
         },
@@ -1659,7 +1652,6 @@ def test_pickup_student_already_picked_up(client):
         "/routes/",
         json={
             "route_number": "R1",
-            "unit_number": "Bus-01",
             "driver_id": driver_id,
             "school_ids": [school_id],
         },
@@ -1790,7 +1782,6 @@ def test_dropoff_student_success(client):
         "/routes/",
         json={
             "route_number": "R1",
-            "unit_number": "Bus-01",
             "driver_id": driver_id,
             "school_ids": [school_id],
         },
@@ -1914,7 +1905,6 @@ def test_dropoff_student_not_onboard(client):
         "/routes/",
         json={
             "route_number": "R1",
-            "unit_number": "Bus-01",
             "driver_id": driver_id,
             "school_ids": [school_id],
         },
@@ -2028,7 +2018,6 @@ def test_dropoff_student_already_dropped_off(client):
         "/routes/",
         json={
             "route_number": "R1",
-            "unit_number": "Bus-01",
             "driver_id": driver_id,
             "school_ids": [school_id],
         },
@@ -2144,7 +2133,6 @@ def test_get_onboard_students_empty(client):
         "/routes/",
         json={
             "route_number": "R1",
-            "unit_number": "Bus-01",
             "driver_id": driver_id,
         },
     )
@@ -2223,7 +2211,6 @@ def test_get_occupancy_summary_success(client, db_engine):
         "/routes/",
         json={
             "route_number": "R1",
-            "unit_number": "Bus-01",
             "driver_id": driver_id,
         },
     )
@@ -2398,7 +2385,6 @@ def test_get_occupancy_summary_empty_assignments(client):
         "/routes/",
         json={
             "route_number": "R2",
-            "unit_number": "Bus-02",
             "driver_id": driver_id,
         },
     )
@@ -2482,7 +2468,6 @@ def test_get_run_state_snapshot(client):
         "/routes/",
         json={
             "route_number": "STATE-1",
-            "unit_number": "Bus-State",
             "driver_id": driver_id,
             "school_ids": [school_id],
         },
@@ -2633,7 +2618,7 @@ def test_get_run_state_snapshot(client):
 def test_arrive_stop_allows_backward_movement(client):
     driver = client.post("/drivers/", json={"name": "Driver Move", "email": "move@test.com", "phone": "33333"})  # Create driver
     driver_id = driver.json()["id"]  # Extract driver ID from API response
-    route = client.post("/routes/", json={"route_number": "R3", "unit_number": "Bus-03", "driver_id": driver_id})  # Create route
+    route = client.post("/routes/", json={"route_number": "R3", "driver_id": driver_id})  # Create route
     route_id = route.json()["id"]  # Extract route ID from API response
     run = _create_planned_run(client, route_id, "AM")  # Create planned run
     run_id = run.json()["id"]  # Extract run ID from API response
@@ -2661,7 +2646,7 @@ def test_flexible_pickup_dropoff_records_actual_stops_and_keeps_occupancy_correc
     driver_id = driver.json()["id"]  # Extract driver ID from API response
     school = client.post("/schools/", json={"name": "Flex School", "address": "456 Flex Ave"})  # Create school
     school_id = school.json()["id"]  # Extract school ID from API response
-    route = client.post("/routes/", json={"route_number": "R4", "unit_number": "Bus-04", "driver_id": driver_id, "school_ids": [school_id]})  # Create route
+    route = client.post("/routes/", json={"route_number": "R4", "driver_id": driver_id, "school_ids": [school_id]})  # Create route
     route_id = route.json()["id"]  # Extract route ID from API response
     run = _create_planned_run(client, route_id, "AM")  # Create planned run
     run_id = run.json()["id"]  # Extract run ID from API response
@@ -2747,7 +2732,6 @@ def test_run_timeline(client):
         "/routes/",
         json={
             "route_number": "TL-1",
-            "unit_number": "Bus-TL",
             "driver_id": driver_id,
             "school_ids": [school_id],
         },
@@ -2895,7 +2879,6 @@ def test_run_replay(client):
         "/routes/",
         json={
             "route_number": "RP-1",
-            "unit_number": "Bus-RP",
             "driver_id": driver_id,
             "school_ids": [school_id],
         },
@@ -3057,7 +3040,6 @@ def test_run_complete(client):
         "/routes/",
         json={
             "route_number": "COMP-1",
-            "unit_number": "Bus-COMP",
             "driver_id": driver_id,
         },
     )
@@ -3517,7 +3499,6 @@ def _build_school_attendance_fixture(client):
         "/routes/",
         json={
             "route_number": "R1-",                                  # Route number
-            "unit_number": "Bus-01",                               # Bus/unit number
             "driver_id": driver_id,                                # Assigned driver
         },
     )
@@ -4269,3 +4250,4 @@ def test_student_assignment_update_endpoint_moves_planning_state_safely(client, 
         assert assignments_by_run[target_run.json()["id"]].stop_id == target_stop.json()["id"]
         assert assignments_by_run[completed_run.json()["id"]].stop_id == completed_stop.json()["id"]
      
+

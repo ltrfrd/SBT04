@@ -72,7 +72,6 @@ def ensure_prepared_run_student(client, run_id: int):
 
         update_payload = {
             "route_number": route_data["route_number"],
-            "unit_number": route_data["unit_number"],
             "school_ids": [school_id],
         }
         if route_data.get("operator") is not None:

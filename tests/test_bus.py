@@ -196,7 +196,7 @@ def test_create_bus_rejects_duplicate_license_plate(client):
 def test_assign_bus_to_route(client):
     route = client.post(
         "/routes/",
-        json={"route_number": "BUS-LINK-1", "unit_number": "LEGACY-BUS-LINK-1"},
+        json={"route_number": "BUS-LINK-1"},
     )
     bus = client.post(
         "/buses/",
@@ -214,13 +214,13 @@ def test_assign_bus_to_route(client):
     assigned = client.post(f"/routes/{route.json()['id']}/assign_bus/{bus.json()['id']}")
     assert assigned.status_code == 200
     assert assigned.json()["bus_id"] == bus.json()["id"]
-    assert assigned.json()["unit_number"] == "LEGACY-BUS-LINK-1"
+    assert "unit_number" not in assigned.json()
 
 
 def test_unassign_bus_from_route(client):
     route = client.post(
         "/routes/",
-        json={"route_number": "BUS-LINK-2", "unit_number": "LEGACY-BUS-LINK-2"},
+        json={"route_number": "BUS-LINK-2"},
     )
     bus = client.post(
         "/buses/",
@@ -241,13 +241,13 @@ def test_unassign_bus_from_route(client):
     unassigned = client.delete(f"/routes/{route.json()['id']}/unassign_bus")
     assert unassigned.status_code == 200
     assert unassigned.json()["bus_id"] is None
-    assert unassigned.json()["unit_number"] == "LEGACY-BUS-LINK-2"
+    assert "unit_number" not in unassigned.json()
 
 
 def test_route_detail_and_list_show_bus_id_when_assigned(client):
     route = client.post(
         "/routes/",
-        json={"route_number": "BUS-LINK-3", "unit_number": "LEGACY-BUS-LINK-3"},
+        json={"route_number": "BUS-LINK-3"},
     )
     bus = client.post(
         "/buses/",
@@ -288,7 +288,7 @@ def test_assign_bus_to_route_rejects_missing_route_or_bus(client):
     )
     route = client.post(
         "/routes/",
-        json={"route_number": "BUS-LINK-4", "unit_number": "LEGACY-BUS-LINK-4"},
+        json={"route_number": "BUS-LINK-4"},
     )
 
     assert bus.status_code in (200, 201)
@@ -338,7 +338,7 @@ def test_bus_detail_returns_assigned_route_with_nested_context(client):
     )
     route = client.post(
         "/routes/",
-        json={"route_number": "BUS-DETAIL-ROUTE", "unit_number": "LEGACY-BUS-DETAIL", "school_ids": [school.json()["id"]]},
+        json={"route_number": "BUS-DETAIL-ROUTE", "school_ids": [school.json()["id"]]},
     )
     bus = client.post(
         "/buses/",

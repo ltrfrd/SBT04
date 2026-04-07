@@ -6,7 +6,7 @@ from backend.models.student import Student
 
 
 def _create_route_with_assignment(client, route_number: str, unit_number: str, driver_id: int):
-    r = client.post("/routes/", json={"route_number": route_number, "unit_number": unit_number})
+    r = client.post("/routes/", json={"route_number": route_number})
     assert r.status_code in (200, 201)
     route_id = r.json()["id"]
 
@@ -84,14 +84,14 @@ def test_routes_crud(client):
     assert r.status_code == 200
     data = r.json()
     assert data["id"] == route_id
-    assert "unit_number" in data
+    assert "unit_number" not in data
 
     r = client.put(
         f"/routes/{route_id}",
-        json={"route_number": "R100", "unit_number": "Bus-101"},
+        json={"route_number": "R100", "operator": "Updated Operator"},
     )
     assert r.status_code == 200
-    assert r.json()["unit_number"] == "Bus-101"
+    assert r.json()["operator"] == "Updated Operator"
 
     r = client.delete(f"/routes/{route_id}")
     assert r.status_code in (200, 204)
@@ -117,7 +117,7 @@ def test_routes_list_returns_summary_fields(client):
 
     route = client.post(
         "/routes/",
-        json={"route_number": "RSUM-1", "unit_number": "BUS-SUM-1", "school_ids": [school_id]},
+        json={"route_number": "RSUM-1", "school_ids": [school_id]},
     )
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
@@ -141,7 +141,6 @@ def test_routes_list_returns_summary_fields(client):
     route_summary = next(item for item in response.json() if item["id"] == route_id)
 
     assert route_summary["route_number"] == "RSUM-1"
-    assert route_summary["unit_number"] == "BUS-SUM-1"
     assert route_summary["school_ids"] == [school_id]
     assert route_summary["school_names"] == ["Summary School"]
     assert route_summary["schools_count"] == 1
@@ -173,7 +172,7 @@ def test_route_detail_returns_nested_route_data(client):
 
     route = client.post(
         "/routes/",
-        json={"route_number": "RDET-1", "unit_number": "BUS-DET-1", "school_ids": [school_id]},
+        json={"route_number": "RDET-1", "school_ids": [school_id]},
     )
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
@@ -207,7 +206,6 @@ def test_route_detail_returns_nested_route_data(client):
 
     assert data["id"] == route_id
     assert data["route_number"] == "RDET-1"
-    assert data["unit_number"] == "BUS-DET-1"
     assert data["active_driver_id"] == driver_id
     assert data["active_driver_name"] == "Detail Driver"
     assert data["primary_driver_id"] == driver_id
@@ -256,7 +254,7 @@ def test_route_detail_returns_nested_route_data(client):
 # - Return clean empty arrays when related data is missing
 # -----------------------------------------------------------
 def test_route_detail_returns_empty_arrays_for_empty_route(client):
-    route = client.post("/routes/", json={"route_number": "REMPTY-1", "unit_number": "BUS-EMPTY-1"})
+    route = client.post("/routes/", json={"route_number": "REMPTY-1"})
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
 
@@ -322,7 +320,7 @@ def test_create_student_inside_run_stop_context_creates_assignment(client):
     route_id = _create_route_with_assignment(client, "CTX-1", "BUS-CTX-1", driver_id)
     route_update = client.put(
         f"/routes/{route_id}",
-        json={"route_number": "CTX-1", "unit_number": "BUS-CTX-1", "school_ids": [school_id]},
+        json={"route_number": "CTX-1", "school_ids": [school_id]},
     )
     assert route_update.status_code == 200
 
@@ -383,7 +381,6 @@ def test_update_student_inside_run_stop_context_updates_fields_and_repairs_same_
         f"/routes/{route_id}",
         json={
             "route_number": "CTX-UP-1",
-            "unit_number": "BUS-CTX-UP-1",
             "school_ids": [primary_school.json()["id"], secondary_school.json()["id"]],
         },
     )
@@ -469,7 +466,7 @@ def test_bulk_create_students_inside_run_stop_context_creates_assignments(client
     route_id = _create_route_with_assignment(client, "BULK-1", "BUS-BULK-1", driver_id)
     route_update = client.put(
         f"/routes/{route_id}",
-        json={"route_number": "BULK-1", "unit_number": "BUS-BULK-1", "school_ids": [school_id]},
+        json={"route_number": "BULK-1", "school_ids": [school_id]},
     )
     assert route_update.status_code == 200
 
@@ -564,7 +561,7 @@ def test_update_student_inside_run_stop_context_rejects_wrong_run_or_stop_pairin
     route_id = _create_route_with_assignment(client, "MM-UP-1", "BUS-MM-UP-1", driver.json()["id"])
     route_update = client.put(
         f"/routes/{route_id}",
-        json={"route_number": "MM-UP-1", "unit_number": "BUS-MM-UP-1", "school_ids": [school.json()["id"]]},
+        json={"route_number": "MM-UP-1", "school_ids": [school.json()["id"]]},
     )
     assert route_update.status_code == 200
 
@@ -609,7 +606,7 @@ def test_update_student_inside_run_stop_context_rejects_missing_assignment_for_r
     route_id = _create_route_with_assignment(client, "MISS-ASN-1", "BUS-MISS-ASN-1", driver.json()["id"])
     route_update = client.put(
         f"/routes/{route_id}",
-        json={"route_number": "MISS-ASN-1", "unit_number": "BUS-MISS-ASN-1", "school_ids": [school.json()["id"]]},
+        json={"route_number": "MISS-ASN-1", "school_ids": [school.json()["id"]]},
     )
     assert route_update.status_code == 200
 
@@ -652,11 +649,11 @@ def test_update_student_inside_run_stop_context_rejects_student_from_different_r
 
     route_one_update = client.put(
         f"/routes/{route_one_id}",
-        json={"route_number": "DIFF-ROUTE-1", "unit_number": "BUS-DIFF-1", "school_ids": [school.json()["id"]]},
+        json={"route_number": "DIFF-ROUTE-1", "school_ids": [school.json()["id"]]},
     )
     route_two_update = client.put(
         f"/routes/{route_two_id}",
-        json={"route_number": "DIFF-ROUTE-2", "unit_number": "BUS-DIFF-2", "school_ids": [school.json()["id"]]},
+        json={"route_number": "DIFF-ROUTE-2", "school_ids": [school.json()["id"]]},
     )
     assert route_one_update.status_code == 200
     assert route_two_update.status_code == 200
@@ -714,11 +711,11 @@ def test_create_student_compatibility_rejects_route_stop_mismatch(client):
 
     route_one_update = client.put(
         f"/routes/{route_one_id}",
-        json={"route_number": "COMP-STU-1", "unit_number": "BUS-COMP-STU-1", "school_ids": [school_id]},
+        json={"route_number": "COMP-STU-1", "school_ids": [school_id]},
     )
     route_two_update = client.put(
         f"/routes/{route_two_id}",
-        json={"route_number": "COMP-STU-2", "unit_number": "BUS-COMP-STU-2", "school_ids": [school_id]},
+        json={"route_number": "COMP-STU-2", "school_ids": [school_id]},
     )
     assert route_one_update.status_code == 200
     assert route_two_update.status_code == 200
@@ -777,7 +774,7 @@ def test_create_student_compatibility_allows_school_not_assigned_to_provided_rou
     route_id = _create_route_with_assignment(client, "COMP-SCH-1", "BUS-COMP-SCH-1", driver.json()["id"])
     route_update = client.put(
         f"/routes/{route_id}",
-        json={"route_number": "COMP-SCH-1", "unit_number": "BUS-COMP-SCH-1", "school_ids": [assigned_school.json()["id"]]},
+        json={"route_number": "COMP-SCH-1", "school_ids": [assigned_school.json()["id"]]},
     )
     assert route_update.status_code == 200
 
@@ -807,7 +804,7 @@ def test_create_student_compatibility_allows_school_not_assigned_to_stop_route(c
     route_id = _create_route_with_assignment(client, "COMP-STOP-1", "BUS-COMP-STOP-1", driver.json()["id"])
     route_update = client.put(
         f"/routes/{route_id}",
-        json={"route_number": "COMP-STOP-1", "unit_number": "BUS-COMP-STOP-1", "school_ids": [assigned_school.json()["id"]]},
+        json={"route_number": "COMP-STOP-1", "school_ids": [assigned_school.json()["id"]]},
     )
     assert route_update.status_code == 200
 
@@ -846,7 +843,7 @@ def test_create_student_compatibility_allows_safe_combinations(client):
     route_id = _create_route_with_assignment(client, "COMP-SAFE-1", "BUS-COMP-SAFE-1", driver.json()["id"])
     route_update = client.put(
         f"/routes/{route_id}",
-        json={"route_number": "COMP-SAFE-1", "unit_number": "BUS-COMP-SAFE-1", "school_ids": [route_school.json()["id"]]},
+        json={"route_number": "COMP-SAFE-1", "school_ids": [route_school.json()["id"]]},
     )
     assert route_update.status_code == 200
 
@@ -923,7 +920,6 @@ def test_update_student_inside_run_stop_context_validates_route_school_membershi
         f"/routes/{route_id}",
         json={
             "route_number": "SCH-UP-1",
-            "unit_number": "BUS-SCH-UP-1",
             "school_ids": [assigned_school.json()["id"], also_assigned_school.json()["id"]],
         },
     )
@@ -975,11 +971,11 @@ def test_update_student_assignment_moves_student_and_synchronizes_runtime_rows(c
 
     source_route_update = client.put(
         f"/routes/{source_route_id}",
-        json={"route_number": "ASN-SRC-1", "unit_number": "BUS-ASN-SRC-1", "school_ids": [school_id]},
+        json={"route_number": "ASN-SRC-1", "school_ids": [school_id]},
     )
     target_route_update = client.put(
         f"/routes/{target_route_id}",
-        json={"route_number": "ASN-TGT-1", "unit_number": "BUS-ASN-TGT-1", "school_ids": [school_id]},
+        json={"route_number": "ASN-TGT-1", "school_ids": [school_id]},
     )
     assert source_route_update.status_code == 200
     assert target_route_update.status_code == 200
@@ -1068,11 +1064,11 @@ def test_update_student_assignment_rejects_invalid_route_stop_combination(client
 
     route_one_update = client.put(
         f"/routes/{route_one_id}",
-        json={"route_number": "ASN-COMB-1", "unit_number": "BUS-ASN-COMB-1", "school_ids": [school.json()["id"]]},
+        json={"route_number": "ASN-COMB-1", "school_ids": [school.json()["id"]]},
     )
     route_two_update = client.put(
         f"/routes/{route_two_id}",
-        json={"route_number": "ASN-COMB-2", "unit_number": "BUS-ASN-COMB-2", "school_ids": [school.json()["id"]]},
+        json={"route_number": "ASN-COMB-2", "school_ids": [school.json()["id"]]},
     )
     assert route_one_update.status_code == 200
     assert route_two_update.status_code == 200
@@ -1125,11 +1121,11 @@ def test_update_student_assignment_validates_target_route_school_membership(clie
 
     source_route_update = client.put(
         f"/routes/{source_route_id}",
-        json={"route_number": "ASN-SCH-1", "unit_number": "BUS-ASN-SCH-1", "school_ids": [school.json()["id"]]},
+        json={"route_number": "ASN-SCH-1", "school_ids": [school.json()["id"]]},
     )
     target_route_update = client.put(
         f"/routes/{target_route_id}",
-        json={"route_number": "ASN-SCH-2", "unit_number": "BUS-ASN-SCH-2", "school_ids": [other_school.json()["id"]]},
+        json={"route_number": "ASN-SCH-2", "school_ids": [other_school.json()["id"]]},
     )
     assert source_route_update.status_code == 200
     assert target_route_update.status_code == 200
@@ -1173,13 +1169,13 @@ def test_update_student_assignment_validates_target_route_school_membership(clie
 def test_route_update_rejects_duplicate_route_number(client):
     first_route = client.post(                                                       # Create first route
         "/routes/",
-        json={"route_number": "R200", "unit_number": "Bus-200"},
+        json={"route_number": "R200"},
     )
     assert first_route.status_code in (200, 201)
 
     second_route = client.post(                                                      # Create second route
         "/routes/",
-        json={"route_number": "R201", "unit_number": "Bus-201"},
+        json={"route_number": "R201"},
     )
     assert second_route.status_code in (200, 201)
 
@@ -1187,7 +1183,7 @@ def test_route_update_rejects_duplicate_route_number(client):
 
     response = client.put(                                                           # Try changing to duplicate number
         f"/routes/{second_route_id}",
-        json={"route_number": "R200", "unit_number": "Bus-201"},
+        json={"route_number": "R200"},
     )
 
     assert response.status_code == 409                                               # Duplicate route number blocked
@@ -1196,28 +1192,33 @@ def test_route_update_rejects_duplicate_route_number(client):
 
 # -----------------------------------------------------------
 # - Route create OpenAPI contract
-# - Keep route_number required while legacy bus-like fields stay optional
+# - Keep route_number required without exposing route unit_number
 # -----------------------------------------------------------
-def test_route_create_openapi_marks_unit_number_optional(client):
+def test_route_create_openapi_removes_unit_number(client):
     response = client.get("/openapi.json")
     assert response.status_code == 200
 
     schemas = response.json()["components"]["schemas"]
     route_create_schema = schemas["RouteCreate"]
+    route_out_schema = schemas["RouteOut"]
+    route_detail_schema = schemas["RouteDetailOut"]
+    run_detail_route_schema = schemas["RunDetailRouteOut"]
 
     assert route_create_schema["required"] == ["route_number"]
-    assert "unit_number" in route_create_schema["properties"]
-    assert "Normal route creation does not require bus assignment data." in route_create_schema["properties"]["unit_number"]["description"]
+    assert "unit_number" not in route_create_schema["properties"]
+    assert "unit_number" not in route_out_schema["properties"]
+    assert "unit_number" not in route_detail_schema["properties"]
+    assert "unit_number" not in run_detail_route_schema["properties"]
 
     create_operation = response.json()["paths"]["/routes/"]["post"]
     assert create_operation["summary"] == "Create route"
-    assert "without requiring bus-like route fields" in create_operation["description"]
+    assert "without vehicle identity data" in create_operation["description"]
     assert "Bus assignment is handled separately" in create_operation["description"]
-    assert "remain optional for compatibility and fallback reads" in create_operation["description"]
+    assert "no longer owns the unit number" in create_operation["description"]
 
     update_operation = response.json()["paths"]["/routes/{route_id}"]["put"]
     assert update_operation["summary"] == "Update route"
-    assert "without requiring bus-like route fields" in update_operation["description"]
+    assert "without vehicle identity data" in update_operation["description"]
     assert "Bus assignment is handled separately" in update_operation["description"]
 
 
@@ -1239,7 +1240,7 @@ def test_run_detail_returns_nested_run_data(client):
 
     route = client.post(
         "/routes/",
-        json={"route_number": "RUN-DETAIL-1", "unit_number": "BUS-RUN-DETAIL-1", "school_ids": [school_id]},
+        json={"route_number": "RUN-DETAIL-1", "school_ids": [school_id]},
     )
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
@@ -1266,7 +1267,6 @@ def test_run_detail_returns_nested_run_data(client):
     assert data["id"] == run_id
     assert data["route"]["route_id"] == route_id
     assert data["route"]["route_number"] == "RUN-DETAIL-1"
-    assert data["route"]["unit_number"] == "BUS-RUN-DETAIL-1"
     assert data["driver"]["driver_id"] == driver_id
     assert data["driver"]["driver_name"] == "Run Detail Driver"
     assert data["stops"] == [
@@ -1443,7 +1443,7 @@ def test_stop_context_student_create_rejects_school_not_on_route(client):
     assert driver.status_code in (200, 201)
     route = client.post(
         "/routes/",
-        json={"route_number": "ROUTE-SCHOOL-1", "unit_number": "BUS-RS-1", "school_ids": [valid_school.json()["id"]]},
+        json={"route_number": "ROUTE-SCHOOL-1", "school_ids": [valid_school.json()["id"]]},
     )
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]

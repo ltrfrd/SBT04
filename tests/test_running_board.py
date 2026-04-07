@@ -39,7 +39,6 @@ def test_running_board_basic(client):  # Test the running board endpoint
     # -------------------------------------------------------------------------
     route = client.post("/routes/", json={  # Create route
         "route_number": "99",
-        "unit_number": "BUS99",
         "school_ids": [school["id"]]
     }).json()
 

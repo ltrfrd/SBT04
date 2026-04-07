@@ -50,7 +50,6 @@ def test_start_run_requires_prepared_stops(client):
         "/routes/",
         json={
             "route_number": "12",
-            "unit_number": "BUS-12",
             "school_ids": [school_id],
         },
     )
@@ -111,7 +110,6 @@ def test_start_run_requires_prepared_students(client):
         "/routes/",
         json={
             "route_number": "13",
-            "unit_number": "BUS-13",
             "school_ids": [school_id],
         },
     )
@@ -173,7 +171,6 @@ def test_run_state_uses_stored_current_stop_sequence(client):
         "/routes/",
         json={
             "route_number": "R-STATE-STORED",
-            "unit_number": "BUS-STATE-01",
         },
     )
     assert route_res.status_code in (200, 201)

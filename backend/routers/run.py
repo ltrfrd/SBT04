@@ -393,7 +393,6 @@ def _serialize_run_detail(run: run_model.Run) -> RunDetailOut:
         route=RunDetailRouteOut(
             route_id=run.route_id,
             route_number=run.route.route_number if run.route else None,
-            unit_number=run.route.unit_number if run.route else None,
         ),
         driver=RunDetailDriverOut(
             driver_id=run.driver_id,

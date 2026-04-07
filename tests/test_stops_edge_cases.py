@@ -6,7 +6,7 @@ def _setup_run(client):
     assert r.status_code in (200, 201)
     driver_id = r.json()["id"]
 
-    r = client.post("/routes/", json={"route_number": "R1", "unit_number": "Bus-01"})
+    r = client.post("/routes/", json={"route_number": "R1"})
     assert r.status_code in (200, 201)
     route_id = r.json()["id"]
 

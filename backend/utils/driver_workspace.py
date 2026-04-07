@@ -141,7 +141,7 @@ def _build_route_workspace(route: route_model.Route, selected_run_id: int | None
     return {
         "id": route.id,
         "route_number": route.route_number,
-        "unit_number": assigned_bus.unit_number if assigned_bus else route.unit_number,
+        "unit_number": assigned_bus.unit_number if assigned_bus else None,
         "operator": route.operator,
         "capacity": assigned_bus.capacity if assigned_bus else route.capacity,
         "bus_id": assigned_bus.id if assigned_bus else None,

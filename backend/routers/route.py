@@ -77,7 +77,6 @@ def _serialize_route(route: Route) -> RouteOut:
     return RouteOut(
         id=route.id,
         route_number=route.route_number,
-        unit_number=route.unit_number,
         operator=route.operator,
         capacity=route.capacity,
         bus_id=route.bus_id,
@@ -201,7 +200,6 @@ def _serialize_route_detail(route: Route) -> RouteDetailOut:
     return RouteDetailOut(
         id=route.id,
         route_number=route.route_number,
-        unit_number=route.unit_number,
         operator=route.operator,
         capacity=route.capacity,
         bus_id=route.bus_id,
@@ -242,9 +240,9 @@ def _serialize_route_detail(route: Route) -> RouteDetailOut:
     response_model=RouteOut,                                     # Successful response model
     summary="Create route",                                      # Clear Swagger title
     description=(                                                # Explain real route creation flow
-        "Create a route without requiring bus-like route fields. "
+        "Create a route without vehicle identity data. "
         "Bus assignment is handled separately. "
-        "Legacy route unit_number, operator, and capacity fields remain optional for compatibility and fallback reads. "
+        "Route no longer owns the unit number in the user-facing workflow. "
         "Driver assignment is also handled separately. "
         "Route numbers must be unique."
     ),
@@ -352,9 +350,9 @@ def get_route(route_id: int, db: Session = Depends(get_db)):
     response_model=RouteOut,
     summary="Update route",
     description=(
-        "Update one route without requiring bus-like route fields. "
+        "Update one route without vehicle identity data. "
         "Bus assignment is handled separately. "
-        "Legacy route unit_number, operator, and capacity fields remain optional for compatibility and fallback reads."
+        "Route no longer owns the unit number in the user-facing workflow."
     ),
     response_description="Updated route",
 )
@@ -483,7 +481,7 @@ def get_route_schools(route_id: int, db: Session = Depends(get_db)):
     "/{route_id}/assign_bus/{bus_id}",
     response_model=RouteOut,
     summary="Assign bus to route",
-    description="Assign one current bus to the route without changing legacy route bus-like fields.",
+    description="Assign one current bus to the route without changing other legacy route compatibility fields.",
     response_description="Updated route with assigned bus",
 )
 def assign_bus_to_route(route_id: int, bus_id: int, db: Session = Depends(get_db)):
@@ -509,7 +507,7 @@ def assign_bus_to_route(route_id: int, bus_id: int, db: Session = Depends(get_db
     "/{route_id}/unassign_bus",
     response_model=RouteOut,
     summary="Unassign bus from route",
-    description="Clear the current bus assignment from the route without changing legacy route bus-like fields.",
+    description="Clear the current bus assignment from the route without changing other legacy route compatibility fields.",
     response_description="Updated route without assigned bus",
 )
 def unassign_bus_from_route(route_id: int, db: Session = Depends(get_db)):

@@ -97,7 +97,6 @@ class RunListOut(BaseModel):
 class RunDetailRouteOut(BaseModel):
     route_id: int
     route_number: str | None = None
-    unit_number: str | None = None
 
 
 class RunDetailDriverOut(BaseModel):

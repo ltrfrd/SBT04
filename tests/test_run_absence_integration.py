@@ -8,7 +8,7 @@ from datetime import date, timedelta  # Date helpers for matching and mismatch c
 def _build_run_with_students(client):
     driver = client.post("/drivers/", json={"name": "Absence Driver", "email": "absence_driver@test.com", "phone": "7805557001"}).json()  # Create driver dependency
     school = client.post("/schools/", json={"name": "Absence School", "address": "700 School Street", "phone": "7805557002"}).json()  # Create school dependency
-    route = client.post("/routes/", json={"route_number": "700", "unit_number": "BUS-700", "school_ids": [school["id"]]}).json()  # Create route dependency
+    route = client.post("/routes/", json={"route_number": "700", "school_ids": [school["id"]]}).json()  # Create route dependency
     client.post(f"/routes/{route['id']}/assign_driver/{driver['id']}")  # Assign driver separately
     run = client.post(f"/routes/{route['id']}/runs", json={"run_type": "AM"}).json()  # Create planned target run
     stop = client.post("/stops/", json={"run_id": run["id"], "type": "pickup", "sequence": 1, "name": "Absence Stop", "address": "700 Stop Street", "planned_time": "07:10:00", "latitude": 53.7, "longitude": -113.7}).json()  # Create shared stop

@@ -35,7 +35,6 @@ def test_next_stop_advances_progress(client):
         "/routes/",
         json={
             "route_number": "NEXT-STOP-01",
-            "unit_number": "BUS-NEXT-01",
         },
     )
     assert route_res.status_code in (200, 201)

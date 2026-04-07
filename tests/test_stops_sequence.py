@@ -7,7 +7,7 @@ def _create_driver(client):
 def _create_route(client, driver_id: int):
     r = client.post(
         "/routes/",
-        json={"route_number": "R1", "unit_number": "Bus-01"},
+        json={"route_number": "R1"},
     )
     assert r.status_code in (200, 201)
     route_id = r.json()["id"]
@@ -139,7 +139,7 @@ def test_run_context_stop_creation_supports_school_stops(client):
     school = client.post("/schools/", json={"name": "Central School", "address": "9 School Way"})
     assert school.status_code in (200, 201)
     school_id = school.json()["id"]
-    assign = client.put(f"/routes/{route_id}", json={"route_number": "R1", "unit_number": "Bus-01", "school_ids": [school_id]})
+    assign = client.put(f"/routes/{route_id}", json={"route_number": "R1", "school_ids": [school_id]})
     assert assign.status_code == 200
     run_id = _create_run(client, driver_id, route_id)
 
