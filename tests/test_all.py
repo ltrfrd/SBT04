@@ -258,13 +258,6 @@ def test_driver_run_workspace_uses_assigned_bus_values_without_route_fallback(cl
     )
     route_id = route["id"]
 
-    with Session(db_engine) as db:
-        stored_route = db.get(Route, route_id)
-        assert stored_route is not None
-        stored_route.operator = "Legacy Operator"
-        stored_route.capacity = 31
-        db.commit()
-
     bus = client.post(
         "/buses/",
         json={
@@ -301,7 +294,6 @@ def test_driver_run_workspace_uses_assigned_bus_values_without_route_fallback(cl
     fallback_body = fallback_response.text
 
     assert "LEGACY-WORKSPACE-BUS-1" not in fallback_body
-    assert "31" not in fallback_body
     assert "Legacy Operator" not in fallback_body
     assert "Bus Capacity" not in fallback_body
     assert '<div class="route-info-label">Bus</div>' in fallback_body
@@ -331,13 +323,6 @@ def test_route_report_uses_assigned_bus_values_without_route_fallback(client, db
         school_ids=[school_id],
     )
     route_id = route["id"]
-
-    with Session(db_engine) as db:
-        stored_route = db.get(Route, route_id)
-        assert stored_route is not None
-        stored_route.operator = "Legacy Report Operator"
-        stored_route.capacity = 29
-        db.commit()
 
     run = _create_planned_run(client, route_id, "AM")
 
@@ -390,7 +375,6 @@ def test_route_report_uses_assigned_bus_values_without_route_fallback(client, db
     assert "Bus:</strong> -" in fallback_body
     assert "Bus Capacity:" not in fallback_body
     assert "Legacy Report Operator" not in fallback_body
-    assert "29" not in fallback_body
 
 
 def test_websocket_gps(client):

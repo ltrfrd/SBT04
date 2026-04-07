@@ -34,8 +34,6 @@ class Route(Base):
 
     id = Column(Integer, primary_key=True, index=True)     # Unique route identifier
     route_number = Column(String(50), nullable=False)      # Public route number (ex: "102A")
-    operator = Column(String(100), nullable=True)          # Bus operator/company name
-    capacity = Column(Integer, nullable=True)              # Bus capacity (number of seats)
     bus_id = Column(Integer, ForeignKey("buses.id", ondelete="SET NULL"), nullable=True)  # Current assigned bus
     num_runs = Column(Integer, nullable=True)              # Number of runs assigned to route
 

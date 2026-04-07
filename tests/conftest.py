@@ -74,10 +74,6 @@ def ensure_prepared_run_student(client, run_id: int):
             "route_number": route_data["route_number"],
             "school_ids": [school_id],
         }
-        if route_data.get("operator") is not None:
-            update_payload["operator"] = route_data["operator"]
-        if route_data.get("capacity") is not None:
-            update_payload["capacity"] = route_data["capacity"]
 
         route_update = client.put(f"/routes/{route_id}", json=update_payload)
         assert route_update.status_code == 200
