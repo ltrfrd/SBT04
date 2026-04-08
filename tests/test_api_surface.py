@@ -223,6 +223,8 @@ def test_route_detail_returns_nested_route_data(client):
     run_detail = data["runs"][0]
     assert run_detail["run_id"] == run_id
     assert run_detail["run_type"] == "AFTERNOON"
+    assert run_detail["scheduled_start_time"] == "07:00:00"
+    assert run_detail["scheduled_end_time"] == "08:00:00"
     assert run_detail["driver_id"] == driver_id
     assert run_detail["driver_name"] == "Detail Driver"
     assert run_detail["is_planned"] is False

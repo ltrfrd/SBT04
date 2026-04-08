@@ -405,6 +405,8 @@ def test_bus_detail_returns_assigned_route_with_nested_context(client):
     run_detail = assigned_route["runs"][0]
     assert run_detail["run_id"] == run.json()["id"]
     assert run_detail["run_type"] == "MORNING"
+    assert run_detail["scheduled_start_time"] == "07:00:00"
+    assert run_detail["scheduled_end_time"] == "08:00:00"
     assert run_detail["driver_id"] == driver.json()["id"]
     assert run_detail["driver_name"] == "Bus Detail Driver"
     assert run_detail["stops"] == [

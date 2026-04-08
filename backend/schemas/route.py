@@ -137,6 +137,8 @@ class RouteDetailStudentOut(BaseModel):
 class RouteDetailRunOut(BaseModel):
     run_id: int
     run_type: str
+    scheduled_start_time: time | None = None
+    scheduled_end_time: time | None = None
     start_time: datetime | None = None
     end_time: datetime | None = None
     driver_id: int | None = None

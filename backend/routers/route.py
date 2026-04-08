@@ -187,6 +187,8 @@ def _serialize_route_detail(route: Route) -> RouteDetailOut:
             RouteDetailRunOut(
                 run_id=run.id,
                 run_type=run.run_type,
+                scheduled_start_time=run.scheduled_start_time,
+                scheduled_end_time=run.scheduled_end_time,
                 start_time=run.start_time,
                 end_time=run.end_time,
                 driver_id=run.driver_id,
