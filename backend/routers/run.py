@@ -252,6 +252,50 @@ def _get_runtime_assignment_or_404(
 
 
 # -----------------------------------------------------------
+# - Runtime rider state helpers
+# - Block impossible pickup/dropoff transitions before writes
+# -----------------------------------------------------------
+def _assert_pickup_transition_allowed(assignment: StudentRunAssignment) -> None:
+    if assignment.dropped_off is True:                        # Dropped-off riders cannot board again
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Student has already been dropped off",
+        )
+
+    if assignment.picked_up is True:                          # Prevent duplicate pickup events
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Student has already been picked up",
+        )
+
+    if assignment.is_onboard is True:                         # Guard impossible duplicate onboard state
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Student is already onboard",
+        )
+
+
+def _assert_dropoff_transition_allowed(assignment: StudentRunAssignment) -> None:
+    if assignment.dropped_off is True:                        # Prevent duplicate dropoff events
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Student has already been dropped off",
+        )
+
+    if assignment.picked_up is not True:                      # Cannot exit before boarding
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Student has not been picked up yet",
+        )
+
+    if assignment.is_onboard is not True:                     # Must still be onboard to drop off now
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Student is not currently onboard",
+        )
+
+
+# -----------------------------------------------------------
 # - Planned run mutation guard
 # - Allow setup mutations only while the run is still planned
 # -----------------------------------------------------------
@@ -1299,7 +1343,10 @@ def advance_to_next_stop(
     "/{run_id}/pickup_student",
     response_model=PickupStudentResponse,
     summary="Pick up student",
-    description="Mark a student as picked up at the run's current actual stop and log a PICKUP event.",
+    description=(
+        "Mark a student as picked up at the run's current actual stop and log a PICKUP event. "
+        "Rider actions follow the actual runtime location source of truth, not forward-only planned progression."
+    ),
     response_description="Pickup confirmation",
 )
 def pickup_student(
@@ -1316,19 +1363,9 @@ def pickup_student(
     )
 
     # -------------------------------------------------------------------------
-    # Prevent duplicate pickup
+    # Validate pickup transition from current runtime rider state
     # -------------------------------------------------------------------------
-    if assignment.dropped_off is True:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Student has already been dropped off",
-        )
-
-    if assignment.picked_up is True:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Student has already been picked up",
-        )
+    _assert_pickup_transition_allowed(assignment)
 
     # -------------------------------------------------------------------------
     # Mark pickup fields using the current actual stop
@@ -1378,7 +1415,10 @@ def pickup_student(
     "/{run_id}/dropoff_student",
     response_model=DropoffStudentResponse,
     summary="Drop off student",
-    description="Mark a student as dropped off at the run's current actual stop and log a DROPOFF event.",
+    description=(
+        "Mark a student as dropped off at the run's current actual stop and log a DROPOFF event. "
+        "Rider actions follow the actual runtime location source of truth, not forward-only planned progression."
+    ),
     response_description="Drop-off confirmation",
 )
 def dropoff_student(
@@ -1395,25 +1435,9 @@ def dropoff_student(
     )
 
     # -------------------------------------------------------------------------
-    # Block impossible or duplicate drop-off transitions
+    # Validate dropoff transition from current runtime rider state
     # -------------------------------------------------------------------------
-    if assignment.dropped_off is True:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Student has already been dropped off",
-        )
-
-    if assignment.picked_up is not True:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Student has not been picked up yet",
-        )
-
-    if assignment.is_onboard is not True:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Student is not currently onboard",
-        )
+    _assert_dropoff_transition_allowed(assignment)
 
     # -------------------------------------------------------------------------
     # Mark drop-off fields using the current actual stop
@@ -1463,7 +1487,10 @@ def dropoff_student(
     "/{run_id}/complete",
     response_model=RunCompleteOut,
     summary="Complete run",
-    description="Mark a run as completed, close it, and create no-show events for riders not picked up.",
+    description=(
+        "Mark an active run as completed, close it, and create no-show events for riders not picked up. "
+        "This preserves flexible runtime stop history while locking further live rider actions."
+    ),
     response_description="Run completion status",
 )
 def complete_run(run_id: int, db: Session = Depends(get_db)):
@@ -1564,7 +1591,10 @@ def complete_run(run_id: int, db: Session = Depends(get_db)):
     "/{run_id}/state",
     response_model=RunStateOut,
     summary="Get run state",
-    description="Return the current operational snapshot for a run, including stop progress and rider counts.",
+    description=(
+        "Return the current operational snapshot for a run, including the actual current runtime stop, "
+        "flexible stop-progress interpretation, and rider counts."
+    ),
     response_description="Current run state",
 )
 def get_run_state(
@@ -1813,7 +1843,10 @@ def get_run_occupancy_summary(
     "/{run_id}/timeline",
     response_model=RunTimelineOut,
     summary="Get run timeline",
-    description="Return the raw ordered ARRIVE, PICKUP, and DROPOFF event history for a run.",
+    description=(
+        "Return the raw ordered ARRIVE, PICKUP, and DROPOFF event history for a run. "
+        "Repeated ARRIVE events are preserved when the driver revisits stops during flexible execution."
+    ),
     response_description="Run timeline",
 )
 def get_run_timeline(run_id: int, db: Session = Depends(get_db)):
@@ -1853,7 +1886,10 @@ def get_run_timeline(run_id: int, db: Session = Depends(get_db)):
     "/{run_id}/replay",
     response_model=RunReplayOut,
     summary="Get run replay",
-    description="Return an interpreted event history for a run with readable messages and occupancy context.",
+    description=(
+        "Return an interpreted event history for a run with readable messages and occupancy context. "
+        "Flexible stop revisits and jumps are reflected from the underlying runtime event log."
+    ),
     response_description="Run replay",
 )
 def get_run_replay(run_id: int, db: Session = Depends(get_db)):

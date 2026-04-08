@@ -1717,6 +1717,91 @@ def test_pickup_student_already_picked_up(client):
     assert second_pickup.status_code == 400
     assert second_pickup.json()["detail"] == "Student has already been picked up"
 
+
+def test_pickup_student_blocks_impossible_already_onboard_state(client, db_engine):
+    driver = client.post(
+        "/drivers/",
+        json={
+            "name": "Driver Onboard Guard",
+            "email": "driver.onboard.guard@test.com",
+            "phone": "11112",
+        },
+    )
+    driver_id = driver.json()["id"]
+
+    school = client.post(
+        "/schools/",
+        json={
+            "name": "Onboard Guard School",
+            "address": "124 Test St",
+        },
+    )
+    school_id = school.json()["id"]
+
+    route = client.post(
+        "/routes/",
+        json={
+            "route_number": "R1-ONBOARD-GUARD",
+            "driver_id": driver_id,
+            "school_ids": [school_id],
+        },
+    )
+    route_id = route.json()["id"]
+
+    run = _create_planned_run(client, route_id, "AM")
+    run_id = run.json()["id"]
+
+    stop = client.post(
+        "/stops/",
+        json={
+            "name": "Stop 1",
+            "latitude": 53.5461,
+            "longitude": -113.4938,
+            "type": "pickup",
+            "run_id": run_id,
+            "sequence": 1,
+        },
+    )
+    stop_id = stop.json()["id"]
+
+    student = client.post(
+        f"/runs/{run_id}/stops/{stop_id}/students",
+        json={
+            "name": "Student Onboard Guard",
+            "grade": "5",
+            "school_id": school_id,
+        },
+    )
+    student_id = student.json()["id"]
+
+    started_run = _start_run_by_id(client, run_id)
+    run_id = started_run.json()["id"]
+
+    arrive = client.post(f"/runs/{run_id}/arrive_stop?stop_sequence=1")
+    assert arrive.status_code == 200
+
+    with Session(db_engine) as db:
+        assignment = (
+            db.query(StudentRunAssignment)
+            .filter(StudentRunAssignment.run_id == run_id)
+            .filter(StudentRunAssignment.student_id == student_id)
+            .first()
+        )
+        assert assignment is not None
+        assignment.picked_up = False
+        assignment.dropped_off = False
+        assignment.is_onboard = True
+        assignment.picked_up_at = None
+        db.commit()
+
+    pickup = client.post(
+        f"/runs/{run_id}/pickup_student",
+        json={"student_id": student_id},
+    )
+
+    assert pickup.status_code == 400
+    assert pickup.json()["detail"] == "Student is already onboard"
+
 # =============================================================================
 # Dropoff Student Tests
 # -----------------------------------------------------------------------------
