@@ -26,6 +26,22 @@ active_connections: Dict[int, List[WebSocket]] = {}
 
 
 # -----------------------------------------------------------
+# - WebSocket cleanup helper
+# - Remove sockets quietly when a client disconnects or send fails
+# -----------------------------------------------------------
+def _remove_connection(run_id: int, websocket: WebSocket) -> None:
+    clients = active_connections.get(run_id)
+    if not clients:
+        return
+
+    if websocket in clients:
+        clients.remove(websocket)
+
+    if not clients:
+        active_connections.pop(run_id, None)
+
+
+# -----------------------------------------------------------
 # WEBSOCKET: GPS + ALERTS
 # -----------------------------------------------------------
 @router.websocket("/ws/gps/{run_id}")
@@ -64,14 +80,12 @@ async def websocket_gps_endpoint(websocket: WebSocket, run_id: int, db: Session 
             for client in list(active_connections.get(run_id, [])):
                 try:
                     await client.send_json(broadcast_data)
-                except:
-                    # Remove disconnected clients
-                    if client in active_connections[run_id]:
-                        active_connections[run_id].remove(client)
+                except WebSocketDisconnect:
+                    _remove_connection(run_id, client)         # Remove cleanly disconnected clients
+                except Exception:
+                    _remove_connection(run_id, client)         # Remove failed/dead clients quietly
 
     except WebSocketDisconnect:
-        # Clean disconnect: remove socket safely
-        if run_id in active_connections and websocket in active_connections[run_id]:
-            active_connections[run_id].remove(websocket)
-    except Exception as e:
-        print(f"WebSocket error: {e}")
+        _remove_connection(run_id, websocket)                  # Remove cleanly disconnected socket
+    except Exception:
+        _remove_connection(run_id, websocket)                  # Remove failed socket quietly
