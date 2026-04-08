@@ -23,7 +23,7 @@ import backend.models  # noqa: F401
 
 # ---------- ROUTERS ----------
 from backend.routers import (
-    auth, bus, driver, school, student, route, stop, run, dispatch, attendance, student_run_assignment, web_pages, ws
+    auth, bus, driver, school, student, route, stop, run, dispatch, attendance, student_run_assignment, web_pages, ws, pretrip
 )  # Import active routers through attendance ownership
 
 
@@ -76,6 +76,7 @@ app.include_router(dispatch.router)  # Register dispatch endpoints
 app.include_router(attendance.router)  # Register attendance layer endpoints
 app.include_router(student_run_assignment.router)  # Register student run assignment endpoints
 app.include_router(attendance.student_bus_absence_router)  # Register absence endpoints through attendance ownership
+app.include_router(pretrip.router)  # Register pre-trip inspection endpoints
 app.include_router(web_pages.router)  # Register HTML page endpoints
 app.include_router(auth.router)  # Register auth/session endpoints
 app.include_router(ws.router)  # Register websocket endpoints

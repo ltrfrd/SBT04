@@ -42,6 +42,7 @@ from .route import (
     RouteOut,
     RouteDriverAssignmentCreate,
     RouteDriverAssignmentOut,
+    RouteRestorePrimaryBus,
 )  # Route creation and response schemas
 
 
@@ -80,6 +81,14 @@ from .run import (
     RouteRunCreate,
     RunOut,          # Standard run response schema
     RunSummaryOut,   # Operational run summary schema
+)
+from .pretrip import (
+    PreTripCreate,
+    PreTripCorrect,
+    PreTripDefectBase,
+    PreTripDefectCreate,
+    PreTripDefectOut,
+    PreTripOut,
 )
 
 
@@ -142,6 +151,7 @@ __all__ = [
     "RouteSchoolOut",
     "RouteDriverAssignmentCreate",
     "RouteDriverAssignmentOut",
+    "RouteRestorePrimaryBus",
 
     "StopCreate",
     "RunStopCreate",
@@ -157,6 +167,12 @@ __all__ = [
     "RunDetailStudentOut",
     "RouteRunCreate",
     "RunSummaryOut",
+    "PreTripDefectBase",
+    "PreTripDefectCreate",
+    "PreTripCreate",
+    "PreTripCorrect",
+    "PreTripDefectOut",
+    "PreTripOut",
 
     "DispatchCreate",
     "DispatchOut",

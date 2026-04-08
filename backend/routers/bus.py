@@ -26,7 +26,7 @@ router = APIRouter(prefix="/buses", tags=["Buses"])
 
 # -----------------------------------------------------------
 # - Unique bus field guard
-# - Keep unit number and license plate conflicts explicit
+# - Keep stored bus number and license plate conflicts explicit
 # -----------------------------------------------------------
 def _validate_bus_uniqueness(
     *,
@@ -41,7 +41,7 @@ def _validate_bus_uniqueness(
             query = query.filter(bus_model.Bus.id != exclude_bus_id)
 
         if query.first():
-            raise HTTPException(status_code=409, detail="Bus unit number already exists")
+            raise HTTPException(status_code=409, detail="Bus number already exists")
 
     if license_plate is not None:
         query = db.query(bus_model.Bus).filter(bus_model.Bus.license_plate == license_plate)
@@ -61,18 +61,23 @@ def _validate_bus_uniqueness(
     response_model=schemas.BusOut,
     status_code=status.HTTP_201_CREATED,
     summary="Create bus",
-    description="Create a standalone bus record. Unit number and license plate must be unique.",
+    description="Create a standalone bus record. Bus Number and license plate must be unique.",
     response_description="Created bus",
 )
 def create_bus(bus: schemas.BusCreate, db: Session = Depends(get_db)):
     payload = bus.model_dump()
     _validate_bus_uniqueness(
         db=db,
-        unit_number=payload["unit_number"],
+        unit_number=payload["bus_number"],
         license_plate=payload["license_plate"],
     )
 
-    new_bus = bus_model.Bus(**payload)
+    new_bus = bus_model.Bus(
+        unit_number=payload["bus_number"],
+        license_plate=payload["license_plate"],
+        capacity=payload["capacity"],
+        size=payload["size"],
+    )
     db.add(new_bus)
     db.commit()
     db.refresh(new_bus)
@@ -128,7 +133,7 @@ def get_bus(bus_id: int, db: Session = Depends(get_db)):
 
     return schemas.BusDetailOut(
         id=bus.id,
-        unit_number=bus.unit_number,
+        bus_number=bus.unit_number,
         license_plate=bus.license_plate,
         capacity=bus.capacity,
         size=bus.size,
@@ -158,13 +163,17 @@ def update_bus(bus_id: int, bus_in: BusUpdate, db: Session = Depends(get_db)):
     update_data = bus_in.model_dump(exclude_unset=True)
     _validate_bus_uniqueness(
         db=db,
-        unit_number=update_data.get("unit_number"),
+        unit_number=update_data.get("bus_number"),
         license_plate=update_data.get("license_plate"),
         exclude_bus_id=bus_id,
     )
 
-    for key, value in update_data.items():
-        setattr(bus, key, value)
+    if "bus_number" in update_data:
+        bus.unit_number = update_data["bus_number"]
+
+    for key in ("license_plate", "capacity", "size"):
+        if key in update_data:
+            setattr(bus, key, update_data[key])
 
     db.commit()
     db.refresh(bus)

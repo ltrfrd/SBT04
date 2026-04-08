@@ -5,7 +5,7 @@
 # -----------------------------
 # Imports
 # -----------------------------
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String  # SQLAlchemy column types
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Time  # SQLAlchemy column types
 from sqlalchemy.orm import relationship  # ORM relationship mapping
 
 from database import Base  # Declarative base class
@@ -20,6 +20,8 @@ class Run(Base):
     driver_id = Column(Integer, ForeignKey("drivers.id", ondelete="RESTRICT"), nullable=True)  # Store assigned driver ID when the run is started or preassigned
     route_id = Column(Integer, ForeignKey("routes.id", ondelete="CASCADE"), nullable=False)  # Store assigned route ID
     run_type = Column(String, nullable=False)  # Store flexible operational run label
+    scheduled_start_time = Column(Time, nullable=False)  # Store fixed planned start time
+    scheduled_end_time = Column(Time, nullable=False)  # Store fixed planned end time
     start_time = Column(DateTime, nullable=True)  # Store when the run started
     end_time = Column(DateTime)  # Store when the run ended
     current_stop_id = Column(Integer, nullable=True)  # Store current actual stop ID without enforcing a cyclic FK

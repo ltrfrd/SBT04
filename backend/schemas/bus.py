@@ -15,7 +15,7 @@ from backend.schemas.route import RouteDetailOut
 # Shared base schema
 # -----------------------------------------------------------
 class BusBase(BaseModel):
-    unit_number: str
+    bus_number: str
     license_plate: str
     capacity: int
     size: str
@@ -24,7 +24,7 @@ class BusBase(BaseModel):
     # Shared string normalization
     # Keep visible bus identifiers trimmed and predictable
     # -----------------------------------------------------------
-    @field_validator("unit_number", "license_plate", "size")
+    @field_validator("bus_number", "license_plate", "size")
     @classmethod
     def normalize_required_strings(cls, value: str) -> str:
         normalized = value.strip()
@@ -55,14 +55,14 @@ class BusCreate(BusBase):
 # Schema for bus updates (PUT request)
 # -----------------------------------------------------------
 class BusUpdate(BaseModel):
-    unit_number: Optional[str] = None
+    bus_number: Optional[str] = None
     license_plate: Optional[str] = None
     capacity: Optional[int] = None
     size: Optional[str] = None
 
     model_config = ConfigDict(extra="forbid")
 
-    @field_validator("unit_number", "license_plate", "size")
+    @field_validator("bus_number", "license_plate", "size")
     @classmethod
     def normalize_optional_strings(cls, value: Optional[str]) -> Optional[str]:
         if value is None:

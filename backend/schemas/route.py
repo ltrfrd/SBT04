@@ -74,6 +74,9 @@ class RouteOut(BaseModel):
     id: int
     route_number: str
     bus_id: Optional[int] = None
+    primary_bus_id: Optional[int] = None
+    active_bus_id: Optional[int] = None
+    clearance_note: Optional[str] = None
     school_ids: Optional[List[int]] = None
     school_names: List[str] = []
     schools_count: int = 0
@@ -153,6 +156,9 @@ class RouteDetailOut(BaseModel):
     id: int
     route_number: str
     bus_id: Optional[int] = None
+    primary_bus_id: Optional[int] = None
+    active_bus_id: Optional[int] = None
+    clearance_note: Optional[str] = None
     schools: List[RouteSchoolOut] = []
     active_driver_id: int | None = None  # Current operational driver id
     active_driver_name: str | None = None  # Current operational driver name
@@ -162,3 +168,22 @@ class RouteDetailOut(BaseModel):
     runs: List[RouteDetailRunOut] = []
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# -----------------------------------------------------------
+# Route bus restore payload
+# - Carry an optional dispatch clearance note on restore
+# -----------------------------------------------------------
+class RouteRestorePrimaryBus(BaseModel):
+    clearance_note: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("clearance_note")
+    @classmethod
+    def normalize_clearance_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+
+        normalized = value.strip()
+        return normalized or None

@@ -261,7 +261,7 @@ def test_driver_run_workspace_uses_assigned_bus_values_without_route_fallback(cl
     bus = client.post(
         "/buses/",
         json={
-            "unit_number": "BUS-WORKSPACE-REAL",
+            "bus_number": "BUS-WORKSPACE-REAL",
             "license_plate": "WS-PLATE-1",
             "capacity": 53,
             "size": "full",
@@ -343,7 +343,7 @@ def test_route_report_uses_assigned_bus_values_without_route_fallback(client, db
     bus = client.post(
         "/buses/",
         json={
-            "unit_number": "BUS-REPORT-REAL",
+            "bus_number": "BUS-REPORT-REAL",
             "license_plate": "RP-PLATE-1",
             "capacity": 47,
             "size": "mid",

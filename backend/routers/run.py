@@ -3,7 +3,7 @@
 # Manage run lifecycle, live stop progress, and rider actions.
 # ===========================================================
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -17,6 +17,7 @@ from backend.models import driver as driver_model
 from backend.models import route as route_model
 from backend.models import school as school_model
 from backend.models import stop as stop_model
+from backend.models import pretrip as pretrip_model
 from backend.models.run import Run                            # Run model
 from backend.models.student import Student                      # Student model
 from backend.models.stop import Stop                            # Stop model
@@ -36,6 +37,7 @@ from backend.schemas.run import (  # Running board response schemas
 from backend.utils.student_bus_absence import apply_run_absence_filter
 from backend.utils.route_driver_assignment import resolve_route_driver_assignment
 from backend.utils.db_errors import raise_conflict_if_unique
+from backend.utils.pretrip_alerts import create_missing_pretrip_alert_if_needed
 from backend.utils.run_setup import ensure_run_is_planned_for_setup, get_run_stop_context_or_404
 from backend.schemas.run import (
     PickupStudentRequest,
@@ -510,6 +512,8 @@ def _create_planned_run(
     *,
     route: route_model.Route,
     run_type: str,
+    scheduled_start_time,
+    scheduled_end_time,
     db: Session,
 ) -> run_model.Run:
     normalized_run_type = normalize_run_type(run_type)          # Store normalized flexible label
@@ -524,6 +528,8 @@ def _create_planned_run(
         driver_id=resolved_driver_id,                           # Inherit current route driver when available
         route_id=route.id,                                      # Inherit route automatically
         run_type=normalized_run_type,                           # Store normalized flexible run label
+        scheduled_start_time=scheduled_start_time,              # Store fixed planned start time
+        scheduled_end_time=scheduled_end_time,                  # Store fixed planned end time
         start_time=None,                                        # Planned only until explicitly started
         end_time=None,                                          # Not completed
         current_stop_id=None,                                   # No live stop yet
@@ -543,6 +549,8 @@ def _serialize_run(run: run_model.Run) -> RunOut:
         driver_id=run.driver_id,
         route_id=run.route_id,
         run_type=run.run_type,
+        scheduled_start_time=run.scheduled_start_time,
+        scheduled_end_time=run.scheduled_end_time,
         start_time=run.start_time,
         end_time=run.end_time,
         current_stop_id=run.current_stop_id,
@@ -579,6 +587,8 @@ def _serialize_run_detail(run: run_model.Run) -> RunDetailOut:
         driver_id=run.driver_id,
         route_id=run.route_id,
         run_type=run.run_type,
+        scheduled_start_time=run.scheduled_start_time,
+        scheduled_end_time=run.scheduled_end_time,
         start_time=run.start_time,
         end_time=run.end_time,
         current_stop_id=run.current_stop_id,
@@ -629,6 +639,8 @@ def _serialize_run_list_item(run: run_model.Run) -> RunListOut:
     return RunListOut(
         run_id=run.id,
         run_type=run.run_type,
+        scheduled_start_time=run.scheduled_start_time,
+        scheduled_end_time=run.scheduled_end_time,
         start_time=run.start_time,
         end_time=run.end_time,
         driver_id=run.driver_id,
@@ -681,6 +693,8 @@ def create_run(run: RunCreateLegacy, db: Session = Depends(get_db)):
     new_run = _create_planned_run(                               # Reuse normalized planned run workflow
         route=route,                                             # Selected route context
         run_type=run.run_type,                                   # Flexible run label
+        scheduled_start_time=run.scheduled_start_time,           # Fixed planned start time
+        scheduled_end_time=run.scheduled_end_time,               # Fixed planned end time
         db=db,                                                   # Shared DB session
     )
     db.commit()                                                  # Persist to DB
@@ -734,6 +748,35 @@ def start_run(
     )  # Load route context for runtime start
     if not route:
         raise HTTPException(status_code=404, detail="Route not found")
+
+    active_bus_id = route.active_bus_id or route.bus_id         # Active bus is authoritative; compatibility bus_id is fallback
+    if active_bus_id is None:
+        raise HTTPException(status_code=400, detail="Route has no active bus assigned")
+
+    today_pretrip = (
+        db.query(pretrip_model.PreTripInspection)
+        .options(selectinload(pretrip_model.PreTripInspection.defects))
+        .filter(pretrip_model.PreTripInspection.bus_id == active_bus_id)
+        .filter(pretrip_model.PreTripInspection.inspection_date == date.today())
+        .first()
+    )  # Today's pre-trip for the resolved active bus only
+
+    if not today_pretrip:
+        create_missing_pretrip_alert_if_needed(
+            db=db,
+            bus_id=active_bus_id,
+            route_id=route.id,
+            run_id=target_run.id,
+            scheduled_start_time=target_run.scheduled_start_time,
+        )
+        db.commit()                                             # Persist any missing-pretrip alert before returning the block response
+        raise HTTPException(status_code=400, detail="No pre-trip found for active bus for today")
+
+    if today_pretrip.fit_for_duty == "no":
+        raise HTTPException(status_code=400, detail="Run blocked: driver marked not fit for duty")
+
+    if any(defect.severity == "major" for defect in today_pretrip.defects):
+        raise HTTPException(status_code=400, detail="Run blocked: major defect reported on pre-trip")
 
     resolved_driver_id = _resolve_run_driver(route)  # Resolve active driver at actual start time
     target_run.driver_id = resolved_driver_id        # Persist the current start-time driver on the run
@@ -2097,6 +2140,10 @@ def update_run(
         exclude_run_id=run.id,
     )
     run.run_type = payload.run_type  # Allow correction of the planned run label only
+    if payload.scheduled_start_time is not None:
+        run.scheduled_start_time = payload.scheduled_start_time  # Allow correction of planned start time before start
+    if payload.scheduled_end_time is not None:
+        run.scheduled_end_time = payload.scheduled_end_time  # Allow correction of planned end time before start
 
     db.commit()
     db.refresh(run)
@@ -2327,6 +2374,8 @@ def get_run_summary(run_id: int, db: Session = Depends(get_db)):
         route_id=run.route_id,
         route_number=run.route.route_number if run.route else None,
         run_type=run.run_type,
+        scheduled_start_time=run.scheduled_start_time,
+        scheduled_end_time=run.scheduled_end_time,
         start_time=run.start_time,
         end_time=run.end_time,
         status=status,

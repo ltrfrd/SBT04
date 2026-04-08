@@ -16,6 +16,7 @@ from .dispatch import router as dispatch_router                  # Dispatch/busi
 from .attendance import router as attendance_router              # Attendance reporting endpoints
 from .attendance import student_bus_absence_router               # Attendance-owned planned absence compatibility router
 from .student_run_assignment import router as student_run_assignment_router  # Run assignment endpoints
+from .pretrip import router as pretrip_router                    # Pre-trip inspection endpoints
 
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     "attendance_router",                 # Export attendance router
     "student_bus_absence_router",        # Export attendance-owned planned absence router
     "student_run_assignment_router",     # Export run assignment router
+    "pretrip_router",                    # Export pre-trip router
 ]

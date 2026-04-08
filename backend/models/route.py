@@ -18,7 +18,7 @@
 #   - Students are assigned to runs dynamically using StudentRunAssignment.
 # =============================================================================
 
-from sqlalchemy import Column, ForeignKey, Integer, String  # Table column types
+from sqlalchemy import Column, ForeignKey, Integer, String, Text  # Table column types
 from sqlalchemy.orm import relationship                    # ORM relationship mapping
 
 from database import Base                                  # Declarative base for models
@@ -35,6 +35,9 @@ class Route(Base):
     id = Column(Integer, primary_key=True, index=True)     # Unique route identifier
     route_number = Column(String(50), nullable=False)      # Public route number (ex: "102A")
     bus_id = Column(Integer, ForeignKey("buses.id", ondelete="SET NULL"), nullable=True)  # Current assigned bus
+    primary_bus_id = Column(Integer, ForeignKey("buses.id", ondelete="SET NULL"), nullable=True)  # Default/base route bus
+    active_bus_id = Column(Integer, ForeignKey("buses.id", ondelete="SET NULL"), nullable=True)  # Current operational route bus
+    clearance_note = Column(Text, nullable=True)            # Optional dispatch note when restoring the primary bus
     num_runs = Column(Integer, nullable=True)              # Number of runs assigned to route
 
     driver_assignments = relationship(
@@ -60,6 +63,17 @@ class Route(Base):
     bus = relationship(
         "Bus",
         back_populates="routes",                           # Linked from Bus.routes
+        foreign_keys=[bus_id],                             # Compatibility-facing active bus pointer
+    )
+
+    primary_bus = relationship(
+        "Bus",
+        foreign_keys=[primary_bus_id],                     # Default/base bus pointer
+    )
+
+    active_bus = relationship(
+        "Bus",
+        foreign_keys=[active_bus_id],                      # Current operational bus pointer
     )
 
     students = relationship(

@@ -25,4 +25,9 @@ class Bus(Base):
     routes = relationship(
         "Route",
         back_populates="bus",  # Current routes pointing at this bus
+        foreign_keys="Route.bus_id",  # Keep compatibility route-bus relationship explicit
     )
+
+    @property
+    def bus_number(self) -> str:
+        return self.unit_number  # User-facing bus label remains mapped to stored unit_number

@@ -14,6 +14,8 @@
 import os  # Path utilities
 import sys  # Python import path control
 import tempfile
+from datetime import date
+from urllib.parse import parse_qs, urlparse
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))  # Repo root
 if PROJECT_ROOT not in sys.path:
@@ -177,6 +179,12 @@ def client(db_engine):
         def post(self, url, *args, **kwargs):
             payload = kwargs.get("json")
 
+            def _with_default_run_schedule(run_payload: dict) -> dict:
+                enriched = dict(run_payload)
+                enriched.setdefault("scheduled_start_time", "07:00:00")
+                enriched.setdefault("scheduled_end_time", "08:00:00")
+                return enriched
+
             if url == "/routes/" and isinstance(payload, dict) and "driver_id" in payload:
                 route_payload = dict(payload)
                 driver_id = route_payload.pop("driver_id")
@@ -190,9 +198,67 @@ def client(db_engine):
                 return response
 
             if url == "/runs/" and isinstance(payload, dict) and "driver_id" in payload:
-                run_payload = dict(payload)
+                run_payload = _with_default_run_schedule(payload)
                 run_payload.pop("driver_id", None)
                 return self._wrapped_client.post(url, *args, json=run_payload, **{k: v for k, v in kwargs.items() if k != "json"})
+
+            if url == "/runs/" and isinstance(payload, dict):
+                return self._wrapped_client.post(url, *args, json=_with_default_run_schedule(payload), **{k: v for k, v in kwargs.items() if k != "json"})
+
+            if url.startswith("/routes/") and url.endswith("/runs") and isinstance(payload, dict):
+                return self._wrapped_client.post(url, *args, json=_with_default_run_schedule(payload), **{k: v for k, v in kwargs.items() if k != "json"})
+
+            if url.startswith("/runs/start"):
+                parsed = urlparse(url)
+                run_id_values = parse_qs(parsed.query).get("run_id", [])
+                if run_id_values:
+                    run_id = int(run_id_values[0])
+                    run_response = self._wrapped_client.get(f"/runs/{run_id}")
+                    if run_response.status_code == 200:
+                        run_data = run_response.json()
+                        route_response = self._wrapped_client.get(f"/routes/{run_data['route_id']}")
+                        if route_response.status_code == 200:
+                            route_data = route_response.json()
+                            active_bus_id = route_data.get("active_bus_id") or route_data.get("bus_id")
+
+                            if active_bus_id is None:
+                                bus_response = self._wrapped_client.post(
+                                    "/buses/",
+                                    json={
+                                        "bus_number": f"AUTO-BUS-{run_id}",
+                                        "license_plate": f"AUTO-{run_id}",
+                                        "capacity": 48,
+                                        "size": "full",
+                                    },
+                                )
+                                assert bus_response.status_code in (200, 201)
+                                active_bus_id = bus_response.json()["id"]
+                                assign_response = self._wrapped_client.post(f"/routes/{run_data['route_id']}/assign_bus/{active_bus_id}")
+                                assert assign_response.status_code == 200
+
+                            pretrip_response = self._wrapped_client.get(f"/pretrips/bus/{active_bus_id}/today")
+                            if pretrip_response.status_code == 404:
+                                bus_detail = self._wrapped_client.get(f"/buses/{active_bus_id}")
+                                assert bus_detail.status_code == 200
+                                bus_data = bus_detail.json()
+                                create_pretrip = self._wrapped_client.post(
+                                    "/pretrips/",
+                                    json={
+                                        "bus_number": bus_data["bus_number"],
+                                        "license_plate": bus_data["license_plate"],
+                                        "driver_name": run_data.get("driver_name") or "Prepared Driver",
+                                        "inspection_date": date.today().isoformat(),
+                                        "inspection_time": "06:30:00",
+                                        "odometer": 1000 + run_id,
+                                        "inspection_place": "Test Yard",
+                                        "use_type": "school_bus",
+                                        "fit_for_duty": "yes",
+                                        "no_defects": True,
+                                        "signature": "test-signature",
+                                        "defects": [],
+                                    },
+                                )
+                                assert create_pretrip.status_code in (200, 201)
 
             return self._wrapped_client.post(url, *args, **kwargs)
 

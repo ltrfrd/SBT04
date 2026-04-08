@@ -5,7 +5,7 @@
 # -----------------------------
 # Imports
 # -----------------------------
-from datetime import datetime  # Datetime types used in API schemas
+from datetime import datetime, time  # Datetime types used in API schemas
 from typing import List, Optional  # Optional and collection typing
 
 import re
@@ -35,6 +35,8 @@ def normalize_run_type(value: str) -> str:
 class RunCreateLegacy(BaseModel):
     route_id: int  # Route being run
     run_type: str = Field(min_length=1)  # Flexible run label
+    scheduled_start_time: time  # Fixed planned start time
+    scheduled_end_time: time  # Fixed planned end time
 
     model_config = ConfigDict(extra="forbid")
 
@@ -46,6 +48,8 @@ class RunCreateLegacy(BaseModel):
 
 class RouteRunCreate(BaseModel):
     run_type: str = Field(min_length=1)  # Flexible run label within selected route
+    scheduled_start_time: time  # Fixed planned start time
+    scheduled_end_time: time  # Fixed planned end time
 
     model_config = ConfigDict(extra="forbid")
 
@@ -57,6 +61,8 @@ class RouteRunCreate(BaseModel):
 
 class RunUpdate(BaseModel):
     run_type: str = Field(min_length=1)  # Updated flexible run label
+    scheduled_start_time: time | None = None  # Updated planned start time while still planned
+    scheduled_end_time: time | None = None  # Updated planned end time while still planned
 
     model_config = ConfigDict(extra="forbid")
 
@@ -71,6 +77,8 @@ class RunOut(BaseModel):
     driver_id: Optional[int] = None  # Assigned driver ID when resolved
     route_id: int  # Assigned route ID
     run_type: str  # Operational run label
+    scheduled_start_time: time  # Fixed planned start time
+    scheduled_end_time: time  # Fixed planned end time
     start_time: Optional[datetime] = None  # Run start timestamp when the run has started
     end_time: Optional[datetime] = None  # Run end timestamp if completed
     current_stop_id: Optional[int] = None  # Current actual stop ID for the bus
@@ -83,6 +91,8 @@ class RunOut(BaseModel):
 class RunListOut(BaseModel):
     run_id: int
     run_type: str
+    scheduled_start_time: time
+    scheduled_end_time: time
     start_time: datetime | None = None
     end_time: datetime | None = None
     driver_id: int | None = None
@@ -129,6 +139,8 @@ class RunDetailOut(BaseModel):
     driver_id: int | None = None
     route_id: int
     run_type: str
+    scheduled_start_time: time
+    scheduled_end_time: time
     start_time: datetime | None = None
     end_time: datetime | None = None
     current_stop_id: int | None = None
@@ -177,6 +189,8 @@ class RunSummaryOut(BaseModel):
     route_id: int  # Route ID
     route_number: str | None  # Route number
     run_type: str  # Run label
+    scheduled_start_time: time  # Fixed planned start time
+    scheduled_end_time: time  # Fixed planned end time
     start_time: datetime | None  # Run start timestamp when started
     end_time: datetime | None  # Run end timestamp
     status: str  # planned / active / ended

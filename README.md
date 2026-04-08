@@ -1,180 +1,169 @@
 # SBT
 
-## Overview
-SBT is a workflow-first school bus operations backend built on FastAPI, SQLAlchemy, Alembic, and Jinja templates. The repository is organized around a simple layered operator flow:
+## Project Overview
+SBT is a school bus operations backend built on FastAPI, SQLAlchemy, Alembic, and Jinja templates.
 
-Route -> Run -> Stop -> Student
+The current implemented system includes:
 
-This is not a rewrite. The protected runtime and attendance engine stays in place while the setup flow becomes more explicit and context-driven.
+- route and run management
+- flexible runtime stop execution
+- pre-trip safety enforcement
+- route bus control
+- dispatch alerting
 
-## Preferred Workflow
-The intended operator path is:
+## Core Features
 
-1. Create a route without requiring bus/unit data
-2. Assign schools to the route
-3. Assign a driver to the route
-4. Assign a bus to the route
-5. Create runs inside the route
-6. Create stops inside the run
-7. Add students from stop context
+### Flexible Run Execution
+- The existing runtime stop model remains flexible
+- `POST /runs/{run_id}/arrive_stop` updates the actual runtime location
+- `POST /runs/{run_id}/next_stop` remains a compatibility helper
+- pickup and dropoff actions still depend on the current actual stop
 
-Preferred context-first endpoints:
+### Pre-Trip Inspection System
+- One pre-trip is allowed per bus per day
+- Models: `PreTripInspection`, `PreTripDefect`
+- User-facing pre-trip input includes:
+  - `bus_number`
+  - `license_plate`
+  - `driver_name`
+  - `inspection_date`
+  - `inspection_time`
+  - `odometer`
+  - `inspection_place`
+  - `use_type` (`school_bus` or `charter`)
+  - `fit_for_duty` (`yes` or `no`)
+  - `no_defects`
+  - `defects`
+  - `signature`
+- `no_defects` and defect rows are mutually exclusive
+- Corrections overwrite the final values
+- Corrections preserve `original_payload`
 
+### Route Bus Management
+- `Route.bus_id` remains the compatibility-facing active bus pointer
+- `Route.primary_bus_id` stores the default/base bus
+- `Route.active_bus_id` stores the current operational bus
+- `Route.clearance_note` stores the optional restore note
+- Only one active bus exists at a time because `active_bus_id` is a single FK field
+- `assign_bus` sets the active bus and seeds the primary bus when it is empty
+- The active bus is authoritative for run-start validation
+- `restore_primary_bus` switches the active bus back to the primary bus
+
+### Run Scheduling
+- Planned fields:
+  - `scheduled_start_time`
+  - `scheduled_end_time`
+- Actual runtime fields remain:
+  - `start_time`
+  - `end_time`
+- Both run creation paths require planned schedule fields:
+  - `POST /runs/`
+  - `POST /routes/{route_id}/runs`
+
+### Run Start Safety Enforcement
+- `POST /runs/start` blocks when:
+  - no pre-trip exists for the route's active bus for today
+  - `fit_for_duty = no`
+  - any pre-trip defect has severity `major`
+- `POST /runs/start` allows start when:
+  - today's pre-trip exists for the active bus
+  - `fit_for_duty = yes`
+  - defects are none or minor only
+
+### Dispatch Alerts
+- Model: `DispatchAlert`
+- Utility: `backend/utils/pretrip_alerts.py`
+- Alerts are triggered for:
+  - major defect
+  - `fit_for_duty = no`
+  - missing pre-trip near scheduled run start
+- Duplicate unresolved alerts are deduped
+- Open alerts are resolved when the triggering condition clears
+
+## Workflow
+The implemented flow is:
+
+1. Create and manage buses, routes, runs, stops, and students.
+2. Assign or switch the route's active bus.
+3. Driver submits a pre-trip using `bus_number` and `license_plate`.
+4. Dispatch may correct the pre-trip if needed.
+5. Create the run with `scheduled_start_time` and `scheduled_end_time`.
+6. Start the run.
+7. The system blocks unsafe starts if pre-trip rules fail.
+8. The run continues with the existing flexible runtime stop behavior.
+
+Important runtime meaning:
+
+- `POST /runs/start` starts an existing prepared run only
+- the run must already have stops and runtime student assignments
+- `POST /runs/start` does not create stops
+- `POST /runs/start` does not create students
+- `POST /runs/start` does not create `StudentRunAssignment` rows
+
+## API Highlights
+
+### Pre-Trips
+- `POST /pretrips/`
+- `GET /pretrips/{id}`
+- `GET /pretrips/bus/{bus_id}`
+- `GET /pretrips/bus/{bus_id}/today`
+- `PUT /pretrips/{id}/correct`
+
+### Route Bus Control
+- `POST /routes/{route_id}/assign_bus/{bus_id}`
+- `POST /routes/{route_id}/set_primary_bus/{bus_id}`
+- `POST /routes/{route_id}/set_active_bus/{bus_id}`
+- `POST /routes/{route_id}/restore_primary_bus`
+- `DELETE /routes/{route_id}/unassign_bus`
+
+### Run Creation And Start
+- `POST /runs/`
 - `POST /routes/{route_id}/runs`
-- `POST /runs/{run_id}/stops`
-- `POST /runs/{run_id}/stops/{stop_id}/students`
-- `POST /runs/{run_id}/stops/{stop_id}/students/bulk`
+- `POST /runs/start`
 
-These endpoints reduce repeated manual IDs in the normal workflow:
+## Data Model Summary
+- `Bus`
+  Standalone bus record stored with internal `unit_number` and exposed to users as `bus_number`
+- `Route`
+  Planning container with compatibility `bus_id`, `primary_bus_id`, `active_bus_id`, and `clearance_note`
+- `Run`
+  Planned schedule fields `scheduled_start_time` and `scheduled_end_time`, plus actual runtime `start_time` and `end_time`
+- `PreTripInspection`
+  Bus/day inspection header with correction metadata and `original_payload`
+- `PreTripDefect`
+  Nested defect rows under one inspection
+- `DispatchAlert`
+  Persistent backend alert record for pre-trip enforcement conditions
 
-- route context creates runs
-- run context creates stops
-- stop context creates students in explicit stop context
-- stop-context student creation creates the internal `StudentRunAssignment`
+## Naming Notes
+- Users see `bus_number`
+- The internal database column remains `Bus.unit_number`
+- Internal relationships and route compatibility fields still use `bus_id`
+- `unit_number` is not the user-facing API field name
+- `bus_id` is not a driver-entered pre-trip input field
 
-Core workflow rule:
-
-- runtime assignment truth is explicit and stop-based
-- no runtime assignment exists without stop context
-- assignment creation is stop-context only through `POST /runs/{run_id}/stops/{stop_id}/students`
-- `/runs/start` does not create students
-- `/runs/start` does not create stops
-- `/runs/start` does not auto-create `StudentRunAssignment` rows
-
-## Runtime And Maintenance Flow
-After the setup hierarchy exists, real usage should continue from route and run context:
-
-1. Driver selects an assigned route
-2. Driver reviews the route's prepared runs
-3. Driver starts and operates the selected run through `/runs/start`
-4. Runtime views read the already prepared stop and student structure from that run
-
-Current `/runs/start` meaning:
-
-- operational runtime endpoint only
-- starts an existing prepared run by `run_id`
-- prepared run required before start succeeds
-- prepared run means stops already exist on the run
-- prepared run means at least one runtime student assignment already exists on the run
-- does not create students
-- does not create stops
-- does not create `StudentRunAssignment` rows
-
-Maintenance and compatibility remain separate from the normal setup path:
-
-- assignment creation is stop-context only through `POST /runs/{run_id}/stops/{stop_id}/students`
-- contextual remove is stop-context only through `DELETE /runs/{run_id}/stops/{stop_id}/students/{student_id}` and removes the student from the selected run-stop planning context without deleting the student record entirely; planned run only
-- `PUT /students/{student_id}/assignment` is an intentional maintenance endpoint for corrections and controlled moves; planned run only
-- `DELETE /students/{student_id}` is full system-wide student deletion and is not the normal run-stop workflow remove action
-- `StudentRunAssignment` acts as the runtime + planning bridge between the student record and the selected run/stop context
-- `POST /student-run-assignments/` is blocked and returns guidance to use stop-context student creation
-- `DELETE /student-run-assignments/{id}` is blocked and returns guidance to use the canonical contextual delete endpoint `DELETE /runs/{run_id}/stops/{stop_id}/students/{student_id}`
-- `GET /student-run-assignments/{run_id}` and `GET /student-run-assignments/?student_id=...` remain compatibility read views
-- `POST /runs/` is legacy compatibility
-- `POST /stops/` is legacy compatibility and still planned-run-only when it targets a run
-- `POST /students/` is secondary compatibility and still planned-run-only when it targets a stop's run
-
-## Current Backend Rules
-The active SBT backend surface follows these rules:
-
-- `school_code` is removed from the working model and API surface
-- `school_id` remains the internal and visible school reference
-- school `address` is optional
-- `run_type` remains named `run_type` for compatibility
-- run labels are normalized on write
-- stop types support `PICKUP`, `DROPOFF`, `SCHOOL_ARRIVE`, and `SCHOOL_DEPART`
-- school stops can store `stop.school_id`
-- stop order is controlled by `sequence`
-- route-driver assignment is route-level and explicit
-- one route may have one primary/default driver assignment
-- one route may have one active/current driver assignment
-- primary and active may differ during temporary replacement coverage
-- operational run creation/start resolves from the single active route-driver assignment only
-- `RouteDriverAssignment.start_date` and `end_date` remain legacy/admin/history fields and are not authoritative for live routing
-- `StudentRunAssignment` is the explicit runtime mapping between student, run, and stop
-- Bus is now a standalone entity with its own CRUD and detail surface
-- `Route.bus_id` is an optional current bus assignment
-- route no longer owns vehicle identity or route-level vehicle fallback in user-facing responses
-- bus is the only user-facing source of `unit_number`
-- bus is the only displayed source of capacity, size, and plate data
-- route creation/update does not require vehicle identity data in the preferred workflow
-- if no bus is assigned, no vehicle details are shown
-
-## Protected Engine
-The internal runtime engine remains authoritative:
-
-- `StudentRunAssignment` stays
-- dispatch behavior stays
-- attendance behavior stays
-- reporting behavior stays
-- compatibility endpoints stay where intentionally supported
-
-Operators should not need to work directly with `StudentRunAssignment` during normal planning, but the compatibility router still exists for advanced or internal use.
-
-## Main Backend Areas
-Configuration and workflow:
-
-- `backend/routers/route.py`
-- `backend/routers/run.py`
-- `backend/routers/stop.py`
-- `backend/routers/student.py`
-
-Application bootstrap and extracted UI/session layers:
-
-- `app.py` is bootstrap-focused and now uses FastAPI lifespan for startup initialization
-- DB table initialization runs inside lifespan instead of import-time startup side effects
-- `app.py` keeps the `get_db` compatibility export used by tests
-- `backend/routers/web_pages.py` contains the server-rendered page routes
-- `backend/routers/auth.py` contains the session/auth endpoints
-- `backend/routers/ws.py` contains the GPS WebSocket endpoint
-- `backend/utils/driver_workspace.py` contains the route-first driver workspace helpers
-
-Bus rollout and compatibility layers:
-
-- `backend/models/bus.py`
-- `backend/schemas/bus.py`
-- `backend/routers/bus.py`
-- routes can optionally point to a current bus through `Route.bus_id`
-- bus is the authoritative vehicle entity
-- bus is the only user-facing source of displayed vehicle details
-
-Protected runtime and reporting:
-
-- `backend/routers/run.py`
-- `backend/routers/attendance.py`
-- `backend/routers/report.py`
-- `backend/utils/attendance_generator.py`
-- `backend/utils/report_generator.py`
-
-Explicit runtime mapping and compatibility:
-
-- `backend/models/associations.py` defines `RouteDriverAssignment` and `StudentRunAssignment`
-- `backend/routers/student_run_assignment.py` exposes read-only assignment lookup endpoints while direct create/delete mutation paths are blocked
-- `backend/routers/student.py` keeps the direct student create compatibility surface and the intentional maintenance move endpoint, but the preferred assignment flow is stop-context student creation
-
-School mobile attendance flow:
-
-- `/reports/school/{school_id}/mobile` renders `school_attendance_routes.html`
-- `/reports/school/{school_id}/mobile/route/{route_id}` renders `school_attendance_runs.html`
-- `/reports/school/{school_id}/mobile/run/{run_id}` renders `school_mobile_report.html`
-- attendance template rendering uses the current `TemplateResponse(request, template_name, context)` signature
+## Constraints / Rules
+- One pre-trip is allowed per bus per day
+- The route's active bus is authoritative for run-start validation
+- Planned schedule fields are not the same as actual runtime `start_time` and `end_time`
+- Early run start is still allowed when safety checks pass
+- No WebSocket feature is currently documented as part of the implemented system
 
 ## Structure Snapshot
-- `app.py` bootstrap and lifespan setup
-- `backend/models/` SQLAlchemy models including bus, route, run, stop, student, and associations
-- `backend/routers/` API and HTML routers
-- `backend/schemas/` request/response contracts
-- `backend/templates/` server-rendered UI templates
-- `backend/utils/` shared workflow, attendance, GPS, and auth helpers
-- `tests/` API surface and behavior protection
-
-Core models:
-
-- `backend/models/route.py`
-- `backend/models/run.py`
-- `backend/models/stop.py`
-- `backend/models/student.py`
-- `backend/models/associations.py`
+- `app.py`
+  FastAPI bootstrap, middleware, router registration, and lifespan DB setup
+- `backend/models/`
+  SQLAlchemy models including bus, route, run, pretrip, and dispatch alerts
+- `backend/routers/`
+  FastAPI routers for buses, routes, runs, pretrips, attendance, and HTML pages
+- `backend/schemas/`
+  Pydantic request and response contracts
+- `backend/utils/`
+  Shared helpers including pre-trip alert logic
+- `backend/templates/`
+  Server-rendered UI templates
+- `tests/`
+  Automated API and behavior protection
 
 ## Running The Project
 Install dependencies:
@@ -194,87 +183,3 @@ Run the tests:
 ```bash
 pytest -q
 ```
-
-## Notes
-- The main live UI is still primarily template-driven through `backend/templates/`.
-- The `frontend/` folder exists as a separate React/Vite scaffold.
-- Workflow improvements should remain additive and backward compatible.
-- Tests are green against the current behavior, so docs should be read as describing the live repo rather than an intermediate migration plan.
-
-
-## Future Improvement Notes (Run Module Consolidation)
-
-This section captures observations from backend inspection and is not yet implemented.
-
-### Run Module Structure
-The current `run.py` router mixes multiple responsibilities:
-
-- run lifecycle (create, start, end, update, delete)
-- run-context setup (stops and student assignment)
-- runtime driver actions (arrive, pickup, dropoff, complete)
-- read/report views (state, summary, running board, timeline)
-
-Future improvement may separate these concerns into clearer layers or routers while preserving the current workflow.
-
----
-
-### to decide on later:
-### Endpoint Overlap Observations
-
-Some endpoints provide similar or overlapping data:
-
-- `GET /runs/{run_id}/assignments`
-- `GET /student-run-assignments/{run_id}`
-
-These both expose assignment-level data for a run.  
-Current direction is to treat `/runs/{run_id}/assignments` as the preferred workflow surface and keep the student-run-assignment router as compatibility/internal.
-
----
-
-Additional possible overlaps:
-
-- `GET /runs/{run_id}/summary`
-- `GET /runs/{run_id}/state`
-- `GET /runs/{run_id}/occupancy_summary`
-
-These endpoints provide related operational views with partial overlap.  
-No removal is planned yet, but future consolidation may unify or simplify these views.
-
----
-
-### Compatibility vs Preferred Endpoints
-
-The backend intentionally keeps both:
-
-Preferred workflow (context-based):
-- `/routes/{route_id}/runs`
-- `/runs/{run_id}/stops`
-- `/runs/{run_id}/stops/{stop_id}/students`
-
-Legacy compatibility:
-- `/runs/`
-- `/stops/`
-- `/students/`
-- `/student-run-assignments/...`
-
-Future cleanup may:
-- de-emphasize compatibility endpoints in Swagger
-- keep them for backward compatibility only
-
----
-
-### Important Constraint
-
-Any future consolidation must:
-
-- preserve existing test coverage
-- keep backward compatibility unless explicitly removed
-- avoid breaking the Route → Run → Stop → Student workflow
-- keep `StudentRunAssignment` as the internal runtime engine
-
----
-
-### Status
-
-This is a planning note only.  
-No refactor or removal has been applied yet.

@@ -23,6 +23,7 @@ from backend.schemas.route import (
     RouteDriverAssignmentCreate,
     RouteDriverAssignmentOut,
     RouteOut,
+    RouteRestorePrimaryBus,
     RouteSchoolOut,
 )
 from backend.schemas.run import RouteRunCreate
@@ -78,6 +79,9 @@ def _serialize_route(route: Route) -> RouteOut:
         id=route.id,
         route_number=route.route_number,
         bus_id=route.bus_id,
+        primary_bus_id=route.primary_bus_id,
+        active_bus_id=route.active_bus_id,
+        clearance_note=route.clearance_note,
         school_ids=[school.id for school in sorted(route.schools, key=lambda school: (school.name, school.id))],
         school_names=[school.name for school in sorted(route.schools, key=lambda school: (school.name, school.id))],
         schools_count=len(route.schools),
@@ -199,6 +203,9 @@ def _serialize_route_detail(route: Route) -> RouteDetailOut:
         id=route.id,
         route_number=route.route_number,
         bus_id=route.bus_id,
+        primary_bus_id=route.primary_bus_id,
+        active_bus_id=route.active_bus_id,
+        clearance_note=route.clearance_note,
         schools=[
             RouteSchoolOut(
                 school_id=school.id,
@@ -434,6 +441,8 @@ def create_route_run(
     new_run = run_router._create_planned_run(                   # Reuse shared run creation rules
         route=route,                                            # Parent route context
         run_type=payload.run_type,                              # Normalized run label
+        scheduled_start_time=payload.scheduled_start_time,      # Fixed planned start time
+        scheduled_end_time=payload.scheduled_end_time,          # Fixed planned end time
         db=db,                                                  # Shared DB session
     )
     db.commit()
@@ -488,7 +497,100 @@ def assign_bus_to_route(route_id: int, bus_id: int, db: Session = Depends(get_db
     if not bus:
         raise HTTPException(status_code=404, detail="Bus not found")
 
-    route.bus_id = bus.id
+    route.active_bus_id = bus.id                               # Assign the active operational bus
+    route.bus_id = bus.id                                      # Keep compatibility-facing bus pointer aligned
+    if route.primary_bus_id is None:
+        route.primary_bus_id = bus.id                          # First assigned bus also becomes the primary/default bus
+    db.commit()
+    db.refresh(route)
+    return _serialize_route(route)
+
+
+# -----------------------------------------------------------
+# - Set primary bus for route
+# - Update the default/base route bus safely
+# -----------------------------------------------------------
+@router.post(
+    "/{route_id}/set_primary_bus/{bus_id}",
+    response_model=RouteOut,
+    summary="Set primary bus for route",
+    description="Set the default/base bus for a route. If no active bus exists yet, active bus and compatibility bus_id are aligned to the same bus.",
+    response_description="Updated route with primary bus",
+)
+def set_primary_bus_for_route(route_id: int, bus_id: int, db: Session = Depends(get_db)):
+    route = db.get(Route, route_id)
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
+
+    bus = db.get(Bus, bus_id)
+    if not bus:
+        raise HTTPException(status_code=404, detail="Bus not found")
+
+    route.primary_bus_id = bus.id                              # Set the default/base route bus
+    if route.active_bus_id is None:
+        route.active_bus_id = bus.id                           # Fill missing active bus from the new primary
+        route.bus_id = bus.id                                  # Keep compatibility bus pointer aligned
+
+    db.commit()
+    db.refresh(route)
+    return _serialize_route(route)
+
+
+# -----------------------------------------------------------
+# - Set active bus for route
+# - Update the operational bus while preserving compatibility
+# -----------------------------------------------------------
+@router.post(
+    "/{route_id}/set_active_bus/{bus_id}",
+    response_model=RouteOut,
+    summary="Set active bus for route",
+    description="Set the current operational bus for a route and keep the legacy compatibility bus_id aligned.",
+    response_description="Updated route with active bus",
+)
+def set_active_bus_for_route(route_id: int, bus_id: int, db: Session = Depends(get_db)):
+    route = db.get(Route, route_id)
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
+
+    bus = db.get(Bus, bus_id)
+    if not bus:
+        raise HTTPException(status_code=404, detail="Bus not found")
+
+    route.active_bus_id = bus.id                               # Set the current operational bus
+    route.bus_id = bus.id                                      # Keep compatibility bus pointer aligned
+
+    db.commit()
+    db.refresh(route)
+    return _serialize_route(route)
+
+
+# -----------------------------------------------------------
+# - Restore primary bus
+# - Move the active bus back to the default/base bus
+# -----------------------------------------------------------
+@router.post(
+    "/{route_id}/restore_primary_bus",
+    response_model=RouteOut,
+    summary="Restore primary bus for route",
+    description="Restore the active operational bus back to the route's primary/default bus and optionally record a clearance note.",
+    response_description="Updated route with restored primary bus",
+)
+def restore_primary_bus_for_route(
+    route_id: int,
+    payload: RouteRestorePrimaryBus | None = None,
+    db: Session = Depends(get_db),
+):
+    route = db.get(Route, route_id)
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
+
+    if route.primary_bus_id is None:
+        raise HTTPException(status_code=400, detail="Route has no primary bus to restore")
+
+    route.active_bus_id = route.primary_bus_id                 # Restore active bus from the primary/default bus
+    route.bus_id = route.primary_bus_id                        # Keep compatibility bus pointer aligned
+    route.clearance_note = payload.clearance_note if payload else None  # Store optional dispatch/operator note
+
     db.commit()
     db.refresh(route)
     return _serialize_route(route)
@@ -510,7 +612,8 @@ def unassign_bus_from_route(route_id: int, db: Session = Depends(get_db)):
     if not route:
         raise HTTPException(status_code=404, detail="Route not found")
 
-    route.bus_id = None
+    route.active_bus_id = None                                 # Clear active operational bus
+    route.bus_id = None                                        # Clear compatibility-facing bus pointer
     db.commit()
     db.refresh(route)
     return _serialize_route(route)

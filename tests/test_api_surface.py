@@ -1328,6 +1328,8 @@ def test_runs_list_requires_route_id_and_returns_route_runs_only(client):
         {
             "run_id": run_one.json()["id"],
             "run_type": "MORNING",
+            "scheduled_start_time": "07:00:00",
+            "scheduled_end_time": "08:00:00",
             "start_time": None,
             "end_time": None,
             "driver_id": driver_id,

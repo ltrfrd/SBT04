@@ -10,6 +10,8 @@ from .run_event import RunEvent
 from .associations import route_schools, StudentRunAssignment, RouteDriverAssignment
 from .student_bus_absence import StudentBusAbsence, StudentBusAbsenceSource
 from .school_attendance_verification import SchoolAttendanceVerification  # New school confirmation model
+from .pretrip import PreTripInspection, PreTripDefect
+from .dispatch_alert import DispatchAlert
 __all__ = [
     "Driver",
     "Bus",
@@ -27,4 +29,7 @@ __all__ = [
     "StudentBusAbsence",
     "StudentBusAbsenceSource",
     "SchoolAttendanceVerification",  # Export new model
+    "PreTripInspection",
+    "PreTripDefect",
+    "DispatchAlert",
 ]
