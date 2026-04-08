@@ -5,11 +5,11 @@ SBT is a school bus operations backend built on FastAPI, SQLAlchemy, Alembic, an
 
 The current implemented system includes:
 
-- route and run management
+- route, run, stop, and student management
 - flexible runtime stop execution
 - pre-trip safety enforcement
 - route bus control
-- dispatch alerting
+- alert persistence
 
 ## Core Features
 

@@ -32,6 +32,7 @@ backend/
 |-- schemas/                       Pydantic request and response schemas
 |   |-- bus.py                     Bus schemas exposing bus_number as the user-facing bus identifier
 |   |-- pretrip.py                 Pre-trip create, correction, defect, and response schemas
+|   |-- route.py                   Route summary/detail and bus-control schemas
 |   |-- run.py                     Run create, update, output, state, and runtime action schemas
 |
 |-- routers/                       FastAPI routers
