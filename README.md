@@ -25,6 +25,7 @@ The current implementation includes:
 - One pre-trip is allowed per bus per day
 - The database links pre-trips by `bus_id`
 - The current API remains backward-compatible with user-facing `bus_number` and `license_plate`
+- Pretrip create/correct accepts `bus_id` (preferred) or `bus_number` (legacy compatibility). At least one is required.
 - Pre-trip input supports:
   - `driver_name`
   - `inspection_date`
