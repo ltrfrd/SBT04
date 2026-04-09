@@ -8,10 +8,12 @@ The current implementation includes:
 - route, run, stop, and student management
 - planned run scheduling with required `scheduled_start_time` and `scheduled_end_time`
 - flexible runtime stop execution
-- bus-level pre-trip inspections
-- run-start pre-trip enforcement
-- dispatch alert persistence for pre-trip conditions
+- bus-level Pre-Trip Inspection
+- per-run Post-Trip Inspection
+- run-start safety enforcement from Pre-Trip Inspection
+- run-end safety enforcement from Post-Trip Inspection on selected close paths
 - route primary bus and active bus control
+- persistent dispatch alerts for Pre-Trip Inspection and Post-Trip Inspection conditions
 
 ## Core Features
 
@@ -22,11 +24,11 @@ The current implementation includes:
 - pickup and dropoff actions still depend on the current actual stop
 
 ### Pre-Trip Inspection
-- One pre-trip is allowed per bus per day
-- The database links pre-trips by `bus_id`
+- One Pre-Trip Inspection is allowed per bus per day
+- The database links Pre-Trip Inspections by `bus_id`
 - The current API remains backward-compatible with user-facing `bus_number` and `license_plate`
-- Pretrip create/correct accepts `bus_id` (preferred) or `bus_number` (legacy compatibility). At least one is required.
-- Pre-trip input supports:
+- Pre-Trip Inspection create/correct accepts `bus_id` (preferred) or `bus_number` (legacy compatibility). At least one is required.
+- Pre-Trip Inspection input supports:
   - `driver_name`
   - `inspection_date`
   - `inspection_time`
@@ -40,21 +42,52 @@ The current implementation includes:
 - `no_defects = true` requires an empty defect list
 - `no_defects = false` requires at least one defect row
 - Defects are stored as nested rows with severity `minor` or `major`
-- Pre-trips support create, read, list, and correction flows
+- Pre-Trip Inspection supports create, read, list, and correction flows
 - Corrections preserve `original_payload`
 
 ### Run Start Enforcement
 - `POST /runs/start` validates the route's active bus
 - Run start is blocked when:
-  - no pre-trip exists for the active bus for today
+  - no valid Pre-Trip Inspection exists for the active bus for today
   - `fit_for_duty = no`
-  - any defect on today's pre-trip has severity `major`
+  - any defect on today's Pre-Trip Inspection has severity `major`
 - Run start is allowed when:
-  - today's pre-trip exists for the active bus
+  - today's Pre-Trip Inspection exists for the active bus
   - `fit_for_duty = yes`
   - defects are empty or minor-only
 - Early run start is not blocked by time-of-day rules in the start endpoint itself
 - `POST /runs/start` still requires the run to already have stops and runtime student assignments
+
+### Post-Trip Inspection
+- Post-Trip Inspection is stored per run
+- Phase 1 checklist includes:
+  - no students remaining
+  - belongings checked
+  - checked sign hung
+- Phase 2 checklist includes:
+  - full internal recheck
+  - checked-to-cleared sign switch
+  - rear button triggered
+  - exterior status: `clear`, `minor`, or `major`
+  - exterior description when `minor` or `major`
+- `POST /runs/{run_id}/posttrip/phase1` creates or updates the run's Post-Trip Inspection Phase 1 state
+- `POST /runs/{run_id}/posttrip/phase2` updates the same Post-Trip Inspection record and finalizes Phase 2
+- `POST /runs/end` and `POST /runs/end_by_driver` require Post-Trip Inspection Phase 2 completion
+- `POST /runs/{run_id}/complete` remains legacy-compatible for the current reporting and completion flow
+
+### Post-Trip Inspection Decision Layer
+- The system persists:
+  - `phase2_pending_since`
+  - `last_driver_activity_at`
+  - `last_known_lat`
+  - `last_known_lng`
+  - `last_location_update_at`
+  - `neglect_flagged_at`
+- GPS heartbeat from the existing websocket stream is persisted into the run's Post-Trip Inspection when one exists
+- `GET /runs/{run_id}/posttrip` exposes decision fields for the current Post-Trip Inspection state
+- Neglect classification is computed from pending time, driver activity, and location activity
+- Neglect alerting is currently read-triggered from the GET inspection flow only
+- No scheduler, background job, or autonomous monitoring loop is currently implemented for neglect detection
 
 ### Route Bus Control
 - `Route.bus_id` remains a compatibility-facing bus pointer
@@ -65,29 +98,33 @@ The current implementation includes:
 - `set_primary_bus` changes the default/base bus without forcing an active replacement when one already exists
 - `set_active_bus` switches the operational bus while preserving the route's primary bus
 - `restore_primary_bus` switches the active bus back to the primary bus
-- Downstream run-start pre-trip checks use the route's active bus
+- Downstream run-start Pre-Trip Inspection checks use the route's active bus
 
 ### Dispatch Alerts
 - Alert records are stored in `DispatchAlert`
-- `backend/utils/pretrip_alerts.py` handles pre-trip alert creation, dedupe, and resolution
-- Pre-trip create/correct flows sync alerts for:
-  - major defect reported on pre-trip
+- `backend/utils/pretrip_alerts.py` handles Pre-Trip Inspection alert creation, dedupe, and resolution
+- `backend/utils/posttrip_alerts.py` handles Post-Trip Inspection alert creation, dedupe, and resolution
+- Pre-Trip Inspection create/correct flows sync alerts for:
+  - major defect reported on Pre-Trip Inspection
   - `fit_for_duty = no`
-- Missing-pretrip alerts are also supported through the existing run-start side effect
-- The repo includes utility support for the 15-minute missing-pretrip window
-- The repo does not currently implement a separate autonomous scheduler or background polling loop for that alert path
+- Missing Pre-Trip Inspection alerts can occur near scheduled run start through the existing run-start side effect
+- Post-Trip Inspection Phase 2 submission syncs the urgent major-defect alert when `exterior_status = major`
+- Post-Trip Inspection neglect alerts are triggered only through explicit `GET /runs/{run_id}/posttrip` inspection flow when the decision layer returns `suspected_neglect_ready`
+- The repo does not currently implement a scheduler or background polling loop for Pre-Trip Inspection or Post-Trip Inspection monitoring
 
 ## Workflow Summary
 The current backend flow is:
 
 1. Create buses, routes, runs, stops, and students.
 2. Assign the route's primary bus and active bus as needed.
-3. Create a pre-trip for the active bus for today.
-4. Correct the pre-trip later if dispatch needs to overwrite the submitted values.
+3. Create a Pre-Trip Inspection for the active bus for today.
+4. Correct the Pre-Trip Inspection later if dispatch needs to overwrite the submitted values.
 5. Create a planned run with `scheduled_start_time` and `scheduled_end_time`.
 6. Start the prepared run.
-7. The system blocks the start if the active bus has no valid pre-trip for today, if the pre-trip marks `fit_for_duty = no`, or if it contains a major defect.
+7. The system blocks the start if the active bus has no valid Pre-Trip Inspection for today, if the Pre-Trip Inspection marks `fit_for_duty = no`, or if it contains a major defect.
 8. Runtime stop progression continues through the existing flexible stop workflow.
+9. Submit Post-Trip Inspection Phase 1 and then Phase 2 for the run.
+10. `POST /runs/end` and `POST /runs/end_by_driver` require Post-Trip Inspection Phase 2, while `POST /runs/{run_id}/complete` remains the legacy-compatible completion path.
 
 Important runtime meaning:
 
@@ -98,13 +135,17 @@ Important runtime meaning:
 
 ## API Highlights
 
-### Pre-Trips
+### Pre-Trip Inspection
 - `POST /pretrips/`
 - `GET /pretrips/`
-- `GET /pretrips/{id}`
-- `GET /pretrips/bus/{bus_id}`
+- `GET /pretrips/{pretrip_id}`
 - `GET /pretrips/bus/{bus_id}/today`
-- `PUT /pretrips/{id}/correct`
+- `PUT /pretrips/{pretrip_id}/correct`
+
+### Post-Trip Inspection
+- `POST /runs/{run_id}/posttrip/phase1`
+- `POST /runs/{run_id}/posttrip/phase2`
+- `GET /runs/{run_id}/posttrip`
 
 ### Route Bus Control
 - `POST /routes/{route_id}/assign_bus/{bus_id}`
@@ -128,28 +169,33 @@ Important runtime meaning:
 - `PreTripInspection`
   Bus/day inspection header with correction metadata and `original_payload`
 - `PreTripDefect`
-  Nested defect rows under one inspection
+  Nested defect rows under one Pre-Trip Inspection
+- `PostTripInspection`
+  Per-run Post-Trip Inspection record with Phase 1 / Phase 2 state, activity fields, GPS heartbeat fields, and decision-layer support
 - `DispatchAlert`
-  Persistent backend alert record for pre-trip-related enforcement conditions
+  Persistent backend alert record for Pre-Trip Inspection and Post-Trip Inspection conditions
 
 ## Constraints / Rules
-- One pre-trip is allowed per bus per day
-- Pre-trips are bus-level, not run-level and not driver-level
+- One Pre-Trip Inspection is allowed per bus per day
+- Pre-Trip Inspection is bus-level, not run-level and not driver-level
+- Post-Trip Inspection is per run
 - The route's active bus is authoritative for run-start validation
+- `POST /runs/end` and `POST /runs/end_by_driver` require Post-Trip Inspection Phase 2
+- `POST /runs/{run_id}/complete` does not currently enforce Post-Trip Inspection Phase 2
 - Planned schedule fields are not the same as actual runtime `start_time` and `end_time`
-- No separate scheduler-based automation is documented as implemented for the 15-minute missing-pretrip check
+- No scheduler-based automation is documented as implemented for Pre-Trip Inspection or Post-Trip Inspection monitoring
 
 ## Structure Snapshot
 - `app.py`
   FastAPI bootstrap, middleware, lifespan DB setup, and router registration
 - `backend/models/`
-  SQLAlchemy models including bus, route, run, pretrip, and dispatch alerts
+  SQLAlchemy models including bus, route, run, Pre-Trip Inspection, Post-Trip Inspection, and dispatch alerts
 - `backend/routers/`
-  FastAPI routers for buses, routes, runs, pretrips, attendance, reports, and HTML pages
+  FastAPI routers for buses, routes, runs, Pre-Trip Inspection, Post-Trip Inspection, attendance, reports, and HTML pages
 - `backend/schemas/`
   Pydantic request and response contracts
 - `backend/utils/`
-  Shared helpers including pre-trip alert logic and runtime assignment helpers
+  Shared helpers including Pre-Trip Inspection alerts, Post-Trip Inspection alerts, Post-Trip Inspection status evaluation, and runtime assignment helpers
 - `backend/templates/`
   Server-rendered UI templates
 - `tests/`

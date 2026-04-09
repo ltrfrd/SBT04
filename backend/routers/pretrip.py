@@ -1,6 +1,6 @@
 # -----------------------------------------------------------
-# Pre-Trip Router
-# - Create and read bus/day pre-trip records
+# Pre-Trip Inspection Router
+# - Create and read bus/day Pre-Trip Inspection records
 # -----------------------------------------------------------
 from datetime import date, datetime, timezone  # Date and timestamp helpers
 
@@ -15,7 +15,7 @@ from backend.models.pretrip import PreTripDefect, PreTripInspection  # Pre-trip 
 from backend.utils.pretrip_alerts import sync_pretrip_issue_alerts  # Pre-trip alert sync helpers
 
 
-router = APIRouter(prefix="/pretrips", tags=["PreTrips"])
+router = APIRouter(prefix="/pretrips", tags=["Pre-Trip Inspection"])
 
 
 # -----------------------------------------------------------
@@ -33,7 +33,7 @@ def _get_pretrip_or_404(pretrip_id: int, db: Session) -> PreTripInspection:
         .first()
     )                                                          # Load one inspection with nested defects
     if not inspection:
-        raise HTTPException(status_code=404, detail="Pre-trip not found")
+        raise HTTPException(status_code=404, detail="Pre-Trip Inspection not found")
     return inspection
 
 
@@ -79,7 +79,7 @@ def _assert_pretrip_unique_for_bus_day(
     if query.first():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Pre-trip already exists for this bus today",
+            detail="Pre-Trip Inspection already exists for this bus today",
         )
 
 
@@ -127,16 +127,16 @@ def _serialize_pretrip_snapshot(inspection: PreTripInspection) -> dict:
 
 
 # -----------------------------------------------------------
-# - Create pre-trip
-# - Submit one final bus/day pre-trip with nested defects
+# - Create Pre-Trip Inspection
+# - Submit one final bus/day Pre-Trip Inspection with nested defects
 # -----------------------------------------------------------
 @router.post(
     "/",
     response_model=schemas.PreTripOut,
     status_code=status.HTTP_201_CREATED,
-    summary="Create pre-trip",
-    description="Create one final submitted pre-trip inspection for a bus and inspection date with nested defect rows.",
-    response_description="Created pre-trip",
+    summary="Create Pre-Trip Inspection",
+    description="Create one final submitted Pre-Trip Inspection for a bus and inspection date with nested defect rows.",
+    response_description="Created Pre-Trip Inspection",
 )
 def create_pretrip(
     payload: schemas.PreTripCreate,
@@ -174,15 +174,15 @@ def create_pretrip(
 
 
 # -----------------------------------------------------------
-# - List pre-trips
-# - Return newest-first pre-trips with optional simple filters
+# - List Pre-Trip Inspections
+# - Return newest-first Pre-Trip Inspections with optional simple filters
 # -----------------------------------------------------------
 @router.get(
     "/",
     response_model=list[schemas.PreTripOut],
-    summary="List pre-trips",
-    description="Return submitted pre-trip inspections ordered newest first with optional bus and date filters.",
-    response_description="Pre-trip list",
+    summary="List Pre-Trip Inspections",
+    description="Return submitted Pre-Trip Inspections ordered newest first with optional bus and date filters.",
+    response_description="Pre-Trip Inspection list",
 )
 def list_pretrips(
     bus_id: int | None = Query(default=None),
@@ -216,30 +216,30 @@ def list_pretrips(
 
 
 # -----------------------------------------------------------
-# - Get pre-trip
-# - Return one submitted pre-trip with nested defects
+# - Get Pre-Trip Inspection
+# - Return one submitted Pre-Trip Inspection with nested defects
 # -----------------------------------------------------------
 @router.get(
     "/{pretrip_id}",
     response_model=schemas.PreTripOut,
-    summary="Get pre-trip",
-    description="Return one submitted pre-trip inspection by id with nested defect rows.",
-    response_description="Pre-trip detail",
+    summary="Get Pre-Trip Inspection",
+    description="Return one submitted Pre-Trip Inspection by id with nested defect rows.",
+    response_description="Pre-Trip Inspection detail",
 )
 def get_pretrip(pretrip_id: int, db: Session = Depends(get_db)):
     return _get_pretrip_or_404(pretrip_id, db)
 
 
 # -----------------------------------------------------------
-# - Get today's bus pre-trip
+# - Get today's bus Pre-Trip Inspection
 # - Return today's submitted bus/day inspection when present
 # -----------------------------------------------------------
 @router.get(
     "/bus/{bus_id}/today",
     response_model=schemas.PreTripOut,
-    summary="Get today's bus pre-trip",
-    description="Return today's submitted pre-trip inspection for the selected bus when it exists.",
-    response_description="Today's bus pre-trip",
+    summary="Get today's bus Pre-Trip Inspection",
+    description="Return today's submitted Pre-Trip Inspection for the selected bus when it exists.",
+    response_description="Today's bus Pre-Trip Inspection",
 )
 def get_bus_pretrip_today(bus_id: int, db: Session = Depends(get_db)):
     if not db.get(Bus, bus_id):
@@ -256,21 +256,21 @@ def get_bus_pretrip_today(bus_id: int, db: Session = Depends(get_db)):
         .first()
     )                                                          # Today's bus/day inspection only
     if not inspection:
-        raise HTTPException(status_code=404, detail="Pre-trip not found")
+        raise HTTPException(status_code=404, detail="Pre-Trip Inspection not found")
 
     return inspection
 
 
 # -----------------------------------------------------------
-# - List bus pre-trips
-# - Return newest-first submitted pre-trips for one bus
+# - List bus Pre-Trip Inspections
+# - Return newest-first submitted Pre-Trip Inspections for one bus
 # -----------------------------------------------------------
 @router.get(
     "/bus/{bus_id}",
     response_model=list[schemas.PreTripOut],
-    summary="List bus pre-trips",
-    description="Return submitted pre-trip inspections for one bus ordered newest first.",
-    response_description="Bus pre-trip list",
+    summary="List bus Pre-Trip Inspections",
+    description="Return submitted Pre-Trip Inspections for one bus ordered newest first.",
+    response_description="Bus Pre-Trip Inspection list",
 )
 def list_bus_pretrips(bus_id: int, db: Session = Depends(get_db)):
     if not db.get(Bus, bus_id):
@@ -293,15 +293,15 @@ def list_bus_pretrips(bus_id: int, db: Session = Depends(get_db)):
 
 
 # -----------------------------------------------------------
-# - Correct pre-trip
+# - Correct Pre-Trip Inspection
 # - Overwrite the final record while preserving prior payload
 # -----------------------------------------------------------
 @router.put(
     "/{pretrip_id}/correct",
     response_model=schemas.PreTripOut,
-    summary="Correct pre-trip",
-    description="Overwrite a submitted pre-trip, preserve the prior final payload, and replace defect rows with the corrected final version.",
-    response_description="Corrected pre-trip",
+    summary="Correct Pre-Trip Inspection",
+    description="Overwrite a submitted Pre-Trip Inspection, preserve the prior final payload, and replace defect rows with the corrected final version.",
+    response_description="Corrected Pre-Trip Inspection",
 )
 def correct_pretrip(
     pretrip_id: int,

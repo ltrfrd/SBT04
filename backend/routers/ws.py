@@ -5,13 +5,14 @@
 # ===========================================================
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from database import get_db
+from backend.models.posttrip import PostTripInspection
 from backend.utils import gps_tools
 
 
@@ -75,6 +76,17 @@ async def websocket_gps_endpoint(websocket: WebSocket, run_id: int, db: Session 
             alerts = gps_tools.get_approaching_alerts(db, run_id, gps["lat"], gps["lng"])
             if alerts:
                 broadcast_data["alerts"] = alerts
+
+            posttrip = (
+                db.query(PostTripInspection)
+                .filter(PostTripInspection.run_id == run_id)
+                .first()
+            )                                                          # Persist location only when post-trip already exists
+            if posttrip is not None:
+                posttrip.last_known_lat = gps["lat"]                    # Store last known latitude from live GPS
+                posttrip.last_known_lng = gps["lng"]                    # Store last known longitude from live GPS
+                posttrip.last_location_update_at = datetime.now(timezone.utc).replace(tzinfo=None)  # Naive UTC update time
+                db.commit()
 
             # Send update to all connected clients on same run_id
             for client in list(active_connections.get(run_id, [])):

@@ -1,5 +1,5 @@
 # -----------------------------------------------------------
-# Pre-Trip Alert Helpers
+# Pre-Trip Inspection Alert Helpers
 # - Keep alert creation and dedupe logic small and reusable
 # -----------------------------------------------------------
 from datetime import date, datetime, timedelta, timezone  # Date and timestamp helpers
@@ -135,8 +135,8 @@ def _resolve_matching_alerts(
 
 
 # -----------------------------------------------------------
-# - Pre-trip alert reset
-# - Clear unresolved alerts tied to one pre-trip before resync
+# - Pre-Trip Inspection alert reset
+# - Clear unresolved alerts tied to one Pre-Trip Inspection before resync
 # -----------------------------------------------------------
 def _resolve_unresolved_pretrip_alerts(
     *,
@@ -157,8 +157,8 @@ def _resolve_unresolved_pretrip_alerts(
 
 
 # -----------------------------------------------------------
-# - Pre-trip issue alert sync
-# - Create or resolve major-defect / not-fit alerts per pre-trip
+# - Pre-Trip Inspection issue alert sync
+# - Create or resolve major-defect / not-fit alerts per Pre-Trip Inspection
 # -----------------------------------------------------------
 def sync_pretrip_issue_alerts(
     *,
@@ -177,7 +177,7 @@ def sync_pretrip_issue_alerts(
         _create_alert_if_missing(
             db=db,
             alert_type=ALERT_TYPE_MAJOR_DEFECT,
-            message="Urgent: major defect reported on pre-trip",
+            message="Urgent: major defect reported on Pre-Trip Inspection",
             bus_id=inspection.bus_id,
             pretrip_id=inspection.id,
         )
@@ -192,7 +192,7 @@ def sync_pretrip_issue_alerts(
         _create_alert_if_missing(
             db=db,
             alert_type=ALERT_TYPE_NOT_FIT,
-            message="Urgent: driver marked not fit for duty on pre-trip",
+            message="Urgent: driver marked not fit for duty on Pre-Trip Inspection",
             bus_id=inspection.bus_id,
             pretrip_id=inspection.id,
         )
@@ -211,8 +211,8 @@ def sync_pretrip_issue_alerts(
 
 
 # -----------------------------------------------------------
-# - Missing pre-trip alert helpers
-# - Create and resolve bus/day run-start pre-trip alerts
+# - Missing Pre-Trip Inspection alert helpers
+# - Create and resolve bus/day run-start Pre-Trip Inspection alerts
 # -----------------------------------------------------------
 def create_missing_pretrip_alert_if_needed(
     *,
@@ -232,7 +232,7 @@ def create_missing_pretrip_alert_if_needed(
     _create_alert_if_missing(
         db=db,
         alert_type=ALERT_TYPE_MISSING_PRETRIP,
-        message="Urgent: no pre-trip found for active bus within 15 minutes of scheduled run start",
+        message="Urgent: no Pre-Trip Inspection found for active bus within 15 minutes of scheduled run start",
         bus_id=bus_id,
         route_id=route_id,
         run_id=run_id,

@@ -90,6 +90,11 @@ from .pretrip import (
     PreTripDefectOut,
     PreTripOut,
 )
+from .posttrip import (
+    PostTripOut,
+    PostTripPhase1Submit,
+    PostTripPhase2Submit,
+)
 
 
 # -----------------------------------------------------------
@@ -173,6 +178,9 @@ __all__ = [
     "PreTripCorrect",
     "PreTripDefectOut",
     "PreTripOut",
+    "PostTripPhase1Submit",
+    "PostTripPhase2Submit",
+    "PostTripOut",
 
     "DispatchCreate",
     "DispatchOut",

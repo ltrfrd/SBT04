@@ -18,6 +18,7 @@ from backend.models import route as route_model
 from backend.models import school as school_model
 from backend.models import stop as stop_model
 from backend.models import pretrip as pretrip_model
+from backend.models import posttrip as posttrip_model
 from backend.models.run import Run                            # Run model
 from backend.models.student import Student                      # Student model
 from backend.models.stop import Stop                            # Stop model
@@ -100,6 +101,19 @@ def _build_run_occupancy_counts(assignments: list[StudentRunAssignment]) -> dict
 
 def _is_run_active(run: Run) -> bool:
     return run.start_time is not None and run.end_time is None  # Planned runs are not active until they start
+
+
+def _require_posttrip_phase2_completed(run_id: int, db: Session) -> None:
+    inspection = (
+        db.query(posttrip_model.PostTripInspection)
+        .filter(posttrip_model.PostTripInspection.run_id == run_id)
+        .first()
+    )                                                          # One post-trip row may exist per run
+    if not inspection or inspection.phase2_completed is not True:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Post-trip phase 2 must be completed before ending the run",
+        )
 
 
 # -----------------------------------------------------------
@@ -865,6 +879,8 @@ def end_run(run_id: int, db: Session = Depends(get_db)):
     if run.end_time:
         raise HTTPException(status_code=400, detail="Run already ended")
 
+    _require_posttrip_phase2_completed(run.id, db)             # Run cannot close until post-trip phase 2 is complete
+
     run.end_time = datetime.now(timezone.utc).replace(tzinfo=None)  # Set end timestamp
     db.commit()  # Save changes
     db.refresh(run)  # Reload updated run
@@ -911,6 +927,8 @@ def end_run_by_driver(
     # -------------------------------------------------------------------------
     if not active_run:                              # If no active run found
         raise HTTPException(status_code=404, detail="No active run found for this driver")
+
+    _require_posttrip_phase2_completed(active_run.id, db)      # Run cannot close until post-trip phase 2 is complete
 
     # -------------------------------------------------------------------------
     # End the active run
