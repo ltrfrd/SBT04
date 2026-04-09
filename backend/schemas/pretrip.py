@@ -1,10 +1,12 @@
 # -----------------------------------------------------------
-# Pre-Trip Schemas
-# - Validate bus/day pre-trip payloads and nested defect rows
+# - Pre-Trip Schemas
 # -----------------------------------------------------------
-from datetime import date as dt_date, datetime, time as dt_time  # Date and timestamp types
+from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator  # Pydantic schema helpers
+from datetime import date as dt_date, datetime, time as dt_time  # Date and timestamp types
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator  # Pydantic schema helpers
 
 
 VALID_USE_TYPES = {"school_bus", "charter"}  # Supported inspection use types
@@ -12,9 +14,15 @@ VALID_FIT_FOR_DUTY = {"yes", "no"}  # Supported duty declarations
 VALID_DEFECT_SEVERITIES = {"minor", "major"}  # Supported defect severities
 
 
+def _normalize_required_string(value: str, field_name: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError(f"{field_name} is required")
+    return normalized
+
+
 # -----------------------------------------------------------
-# - Shared pre-trip defect fields
-# - Normalize and validate one defect row
+# - Pre-trip defect base
 # -----------------------------------------------------------
 class PreTripDefectBase(BaseModel):
     description: str = Field(min_length=1)  # Reported defect description
@@ -24,11 +32,8 @@ class PreTripDefectBase(BaseModel):
 
     @field_validator("description")
     @classmethod
-    def normalize_description(cls, value: str) -> str:
-        normalized = value.strip()
-        if not normalized:
-            raise ValueError("description is required")
-        return normalized
+    def validate_description(cls, value: str) -> str:
+        return _normalize_required_string(value, "description")
 
     @field_validator("severity")
     @classmethod
@@ -46,16 +51,16 @@ class PreTripDefectCreate(PreTripDefectBase):
 class PreTripDefectOut(PreTripDefectBase):
     id: int  # Defect identifier
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
 
 
 # -----------------------------------------------------------
 # - Pre-trip create payload
-# - Validate bus/day inspection header and XOR defect rules
 # -----------------------------------------------------------
 class PreTripCreate(BaseModel):
-    bus_number: str = Field(min_length=1)  # User-facing bus number mapped to the stored bus record
-    license_plate: str = Field(min_length=1)  # Reported bus plate captured on the form
+    bus_id: int | None = None  # Forward-compatible bus identifier
+    bus_number: str | None = Field(default=None, min_length=1)  # Legacy user-facing bus number
+    license_plate: str = Field(min_length=1)  # Legacy reported bus plate
     driver_name: str = Field(min_length=1)  # Manual driver name entry
     inspection_date: dt_date  # Required inspection date
     inspection_time: dt_time  # Required inspection time
@@ -65,24 +70,16 @@ class PreTripCreate(BaseModel):
     fit_for_duty: str  # yes or no
     no_defects: bool  # XOR flag against defect rows
     signature: str = Field(min_length=1)  # Captured signature value
-    defects: list[PreTripDefectCreate] = []  # Optional nested defect rows
+    defects: list[PreTripDefectCreate] = Field(default_factory=list)  # Nested reported defect rows
 
     model_config = ConfigDict(extra="forbid")
 
     @field_validator("bus_number", "license_plate", "driver_name", "inspection_place", "signature")
     @classmethod
-    def normalize_required_strings(cls, value: str) -> str:
-        normalized = value.strip()
-        if not normalized:
-            raise ValueError("field is required")
-        return normalized
-
-    @field_validator("odometer")
-    @classmethod
-    def validate_odometer(cls, value: int) -> int:
-        if value < 0:
-            raise ValueError("odometer must be greater than or equal to 0")
-        return value
+    def validate_required_strings(cls, value: str | None, info) -> str | None:
+        if value is None and info.field_name == "bus_number":
+            return value
+        return _normalize_required_string(value, info.field_name)
 
     @field_validator("use_type")
     @classmethod
@@ -101,40 +98,36 @@ class PreTripCreate(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def validate_defect_xor_rules(self) -> "PreTripCreate":
+    def validate_defect_xor_rules(self) -> PreTripCreate:
+        if self.bus_id is None and not self.bus_number:
+            raise ValueError("bus_id or bus_number is required")
         if self.no_defects and self.defects:
-            raise ValueError("no_defects=True cannot coexist with defect rows")
-
+            raise ValueError("defects must be empty when no_defects is true")
         if not self.no_defects and not self.defects:
-            raise ValueError("no_defects=False requires at least one defect row")
-
+            raise ValueError("at least one defect is required when no_defects is false")
         return self
 
 
 # -----------------------------------------------------------
 # - Pre-trip correction payload
-# - Reuse create validation and capture correction actor
 # -----------------------------------------------------------
 class PreTripCorrect(PreTripCreate):
     corrected_by: str = Field(min_length=1)  # Dispatch/operator making the correction
 
     @field_validator("corrected_by")
     @classmethod
-    def normalize_corrected_by(cls, value: str) -> str:
-        normalized = value.strip()
-        if not normalized:
-            raise ValueError("corrected_by is required")
-        return normalized
+    def validate_corrected_by(cls, value: str) -> str:
+        return _normalize_required_string(value, "corrected_by")
 
 
 # -----------------------------------------------------------
 # - Pre-trip response payload
-# - Return inspection data with nested defects and metadata
 # -----------------------------------------------------------
 class PreTripOut(BaseModel):
     id: int  # Inspection identifier
-    bus_number: str  # User-facing bus number
-    license_plate: str  # Reported bus plate captured on the form
+    bus_id: int  # Linked bus identifier
+    bus_number: str | None = None  # Legacy user-facing bus number
+    license_plate: str  # Legacy reported bus plate
     driver_name: str  # Manual driver name entry
     inspection_date: dt_date  # Inspection date
     inspection_time: dt_time  # Inspection time
@@ -147,9 +140,9 @@ class PreTripOut(BaseModel):
     is_corrected: bool  # Future correction flag
     corrected_by: str | None = None  # Future correction actor
     corrected_at: datetime | None = None  # Future correction timestamp
-    original_payload: dict | list | str | int | float | bool | None = None  # Future audit snapshot
+    original_payload: Any = None  # Future audit snapshot
     created_at: datetime  # Record creation timestamp
     updated_at: datetime  # Record update timestamp
-    defects: list[PreTripDefectOut] = []  # Nested reported defects
+    defects: list[PreTripDefectOut] = Field(default_factory=list)  # Nested reported defects
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, extra="forbid")

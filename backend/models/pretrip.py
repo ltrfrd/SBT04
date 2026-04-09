@@ -1,6 +1,5 @@
 # -----------------------------------------------------------
-# Pre-Trip Inspection Models
-# - Store one bus-level pre-trip inspection per bus per day
+# - Pre-Trip Inspection Models
 # -----------------------------------------------------------
 from datetime import datetime, timezone  # Timestamp helpers
 
@@ -12,27 +11,26 @@ from database import Base  # Shared declarative base
 
 # -----------------------------------------------------------
 # - Pre-trip inspection
-# - Store bus/day inspection header fields and audit metadata
 # -----------------------------------------------------------
 class PreTripInspection(Base):
-    __tablename__ = "pretrip_inspections"  # Persist bus/day inspections here
+    __tablename__ = "pretrip_inspections"  # Persist one inspection per bus per day
 
     id = Column(Integer, primary_key=True, index=True)  # Unique inspection identifier
-    bus_id = Column(Integer, ForeignKey("buses.id", ondelete="CASCADE"), nullable=False, index=True)  # Inspected bus
-    license_plate = Column(String, nullable=False)  # Reported bus plate captured on the form
-    driver_name = Column(String(255), nullable=False)  # Manual driver name captured on the form
+    bus_id = Column(Integer, ForeignKey("buses.id", ondelete="CASCADE"), nullable=False, index=True)  # Linked bus record
+    license_plate = Column(String(50), nullable=False)  # Legacy API compatibility field
+    driver_name = Column(String(255), nullable=False)  # Manual driver name entry
     inspection_date = Column(Date, nullable=False, index=True)  # Bus-level inspection date
     inspection_time = Column(Time, nullable=False)  # Reported inspection time
-    odometer = Column(Integer, nullable=False)  # Reported odometer reading
+    odometer = Column(Integer, nullable=False)  # Reported odometer value
     inspection_place = Column(String(255), nullable=False)  # Where the inspection happened
     use_type = Column(String(50), nullable=False)  # school_bus or charter
     fit_for_duty = Column(String(10), nullable=False)  # yes or no
-    no_defects = Column(Boolean, nullable=False, default=False)  # Defect-free flag for XOR validation
+    no_defects = Column(Boolean, nullable=False, default=False)  # XOR flag against defects list
     signature = Column(Text, nullable=False)  # Captured signature payload/text
     is_corrected = Column(Boolean, nullable=False, default=False)  # Future correction workflow flag
     corrected_by = Column(String(255), nullable=True)  # Future correction actor
     corrected_at = Column(DateTime, nullable=True)  # Future correction timestamp
-    original_payload = Column(JSON, nullable=True)  # Future audit snapshot of the submitted payload
+    original_payload = Column(JSON, nullable=True)  # Future audit snapshot of submitted data
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))  # Naive UTC creation time
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))  # Naive UTC update time
 
@@ -41,16 +39,20 @@ class PreTripInspection(Base):
     )
 
     bus = relationship("Bus")  # Load inspected bus when needed
-    defects = relationship("PreTripDefect", back_populates="inspection", cascade="all, delete-orphan", passive_deletes=True)  # Load attached defect rows
+    defects = relationship(
+        "PreTripDefect",
+        back_populates="inspection",  # Parent-child ORM pairing
+        cascade="all, delete-orphan",  # Delete defects with the inspection
+        passive_deletes=True,  # Respect FK cascade on supported backends
+    )
 
     @property
     def bus_number(self) -> str | None:
-        return self.bus.unit_number if self.bus is not None else None  # Expose the user-facing bus number from the related bus
+        return self.bus.unit_number if self.bus is not None else None  # Legacy response compatibility
 
 
 # -----------------------------------------------------------
 # - Pre-trip defect
-# - Store one reported defect row under a pre-trip inspection
 # -----------------------------------------------------------
 class PreTripDefect(Base):
     __tablename__ = "pretrip_defects"  # Persist defect rows here

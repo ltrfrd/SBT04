@@ -76,6 +76,8 @@ class RouteOut(BaseModel):
     bus_id: Optional[int] = None
     primary_bus_id: Optional[int] = None
     active_bus_id: Optional[int] = None
+    primary_bus_unit_number: Optional[str] = None
+    active_bus_unit_number: Optional[str] = None
     clearance_note: Optional[str] = None
     school_ids: Optional[List[int]] = None
     school_names: List[str] = []
@@ -160,6 +162,8 @@ class RouteDetailOut(BaseModel):
     bus_id: Optional[int] = None
     primary_bus_id: Optional[int] = None
     active_bus_id: Optional[int] = None
+    primary_bus_unit_number: Optional[str] = None
+    active_bus_unit_number: Optional[str] = None
     clearance_note: Optional[str] = None
     schools: List[RouteSchoolOut] = []
     active_driver_id: int | None = None  # Current operational driver id

@@ -1,30 +1,31 @@
 # SBT
 
 ## Project Overview
-SBT is a school bus operations backend built on FastAPI, SQLAlchemy, Alembic, and Jinja templates.
+SBT is a school bus operations backend built with FastAPI, SQLAlchemy, Alembic, and Jinja templates.
 
-The current implemented system includes:
+The current implementation includes:
 
 - route, run, stop, and student management
+- planned run scheduling with required `scheduled_start_time` and `scheduled_end_time`
 - flexible runtime stop execution
-- pre-trip safety enforcement
-- route bus control
-- alert persistence
+- bus-level pre-trip inspections
+- run-start pre-trip enforcement
+- dispatch alert persistence for pre-trip conditions
+- route primary bus and active bus control
 
 ## Core Features
 
 ### Flexible Run Execution
-- The existing runtime stop model remains flexible
+- Runtime stop handling remains flexible
 - `POST /runs/{run_id}/arrive_stop` updates the actual runtime location
 - `POST /runs/{run_id}/next_stop` remains a compatibility helper
 - pickup and dropoff actions still depend on the current actual stop
 
-### Pre-Trip Inspection System
+### Pre-Trip Inspection
 - One pre-trip is allowed per bus per day
-- Models: `PreTripInspection`, `PreTripDefect`
-- User-facing pre-trip input includes:
-  - `bus_number`
-  - `license_plate`
+- The database links pre-trips by `bus_id`
+- The current API remains backward-compatible with user-facing `bus_number` and `license_plate`
+- Pre-trip input supports:
   - `driver_name`
   - `inspection_date`
   - `inspection_time`
@@ -35,75 +36,70 @@ The current implemented system includes:
   - `no_defects`
   - `defects`
   - `signature`
-- `no_defects` and defect rows are mutually exclusive
-- Corrections overwrite the final values
+- `no_defects = true` requires an empty defect list
+- `no_defects = false` requires at least one defect row
+- Defects are stored as nested rows with severity `minor` or `major`
+- Pre-trips support create, read, list, and correction flows
 - Corrections preserve `original_payload`
 
-### Route Bus Management
-- `Route.bus_id` remains the compatibility-facing active bus pointer
-- `Route.primary_bus_id` stores the default/base bus
-- `Route.active_bus_id` stores the current operational bus
-- `Route.clearance_note` stores the optional restore note
-- Only one active bus exists at a time because `active_bus_id` is a single FK field
-- `assign_bus` sets the active bus and seeds the primary bus when it is empty
-- The active bus is authoritative for run-start validation
-- `restore_primary_bus` switches the active bus back to the primary bus
-
-### Run Scheduling
-- Planned fields:
-  - `scheduled_start_time`
-  - `scheduled_end_time`
-- Actual runtime fields remain:
-  - `start_time`
-  - `end_time`
-- Both run creation paths require planned schedule fields:
-  - `POST /runs/`
-  - `POST /routes/{route_id}/runs`
-
-### Run Start Safety Enforcement
-- `POST /runs/start` blocks when:
-  - no pre-trip exists for the route's active bus for today
+### Run Start Enforcement
+- `POST /runs/start` validates the route's active bus
+- Run start is blocked when:
+  - no pre-trip exists for the active bus for today
   - `fit_for_duty = no`
-  - any pre-trip defect has severity `major`
-- `POST /runs/start` allows start when:
+  - any defect on today's pre-trip has severity `major`
+- Run start is allowed when:
   - today's pre-trip exists for the active bus
   - `fit_for_duty = yes`
-  - defects are none or minor only
+  - defects are empty or minor-only
+- Early run start is not blocked by time-of-day rules in the start endpoint itself
+- `POST /runs/start` still requires the run to already have stops and runtime student assignments
+
+### Route Bus Control
+- `Route.bus_id` remains a compatibility-facing bus pointer
+- `Route.primary_bus_id` stores the default/base bus
+- `Route.active_bus_id` stores the current operational bus
+- `Route.clearance_note` stores an optional note when restoring the primary bus
+- `assign_bus` sets the active bus and seeds the primary bus when the route has no primary bus yet
+- `set_primary_bus` changes the default/base bus without forcing an active replacement when one already exists
+- `set_active_bus` switches the operational bus while preserving the route's primary bus
+- `restore_primary_bus` switches the active bus back to the primary bus
+- Downstream run-start pre-trip checks use the route's active bus
 
 ### Dispatch Alerts
-- Model: `DispatchAlert`
-- Utility: `backend/utils/pretrip_alerts.py`
-- Alerts are triggered for:
-  - major defect
+- Alert records are stored in `DispatchAlert`
+- `backend/utils/pretrip_alerts.py` handles pre-trip alert creation, dedupe, and resolution
+- Pre-trip create/correct flows sync alerts for:
+  - major defect reported on pre-trip
   - `fit_for_duty = no`
-  - missing pre-trip near scheduled run start
-- Duplicate unresolved alerts are deduped
-- Open alerts are resolved when the triggering condition clears
+- Missing-pretrip alerts are also supported through the existing run-start side effect
+- The repo includes utility support for the 15-minute missing-pretrip window
+- The repo does not currently implement a separate autonomous scheduler or background polling loop for that alert path
 
-## Workflow
-The implemented flow is:
+## Workflow Summary
+The current backend flow is:
 
-1. Create and manage buses, routes, runs, stops, and students.
-2. Assign or switch the route's active bus.
-3. Driver submits a pre-trip using `bus_number` and `license_plate`.
-4. Dispatch may correct the pre-trip if needed.
-5. Create the run with `scheduled_start_time` and `scheduled_end_time`.
-6. Start the run.
-7. The system blocks unsafe starts if pre-trip rules fail.
-8. The run continues with the existing flexible runtime stop behavior.
+1. Create buses, routes, runs, stops, and students.
+2. Assign the route's primary bus and active bus as needed.
+3. Create a pre-trip for the active bus for today.
+4. Correct the pre-trip later if dispatch needs to overwrite the submitted values.
+5. Create a planned run with `scheduled_start_time` and `scheduled_end_time`.
+6. Start the prepared run.
+7. The system blocks the start if the active bus has no valid pre-trip for today, if the pre-trip marks `fit_for_duty = no`, or if it contains a major defect.
+8. Runtime stop progression continues through the existing flexible stop workflow.
 
 Important runtime meaning:
 
 - `POST /runs/start` starts an existing prepared run only
-- the run must already have stops and runtime student assignments
-- `POST /runs/start` does not create stops
-- `POST /runs/start` does not create students
-- `POST /runs/start` does not create `StudentRunAssignment` rows
+- it does not create stops
+- it does not create students
+- it does not create `StudentRunAssignment` rows
 
 ## API Highlights
 
 ### Pre-Trips
 - `POST /pretrips/`
+- `GET /pretrips/`
 - `GET /pretrips/{id}`
 - `GET /pretrips/bus/{bus_id}`
 - `GET /pretrips/bus/{bus_id}/today`
@@ -125,7 +121,7 @@ Important runtime meaning:
 - `Bus`
   Standalone bus record stored with internal `unit_number` and exposed to users as `bus_number`
 - `Route`
-  Planning container with compatibility `bus_id`, `primary_bus_id`, `active_bus_id`, and `clearance_note`
+  Planning container with compatibility `bus_id`, plus `primary_bus_id`, `active_bus_id`, and `clearance_note`
 - `Run`
   Planned schedule fields `scheduled_start_time` and `scheduled_end_time`, plus actual runtime `start_time` and `end_time`
 - `PreTripInspection`
@@ -133,37 +129,30 @@ Important runtime meaning:
 - `PreTripDefect`
   Nested defect rows under one inspection
 - `DispatchAlert`
-  Persistent backend alert record for pre-trip enforcement conditions
-
-## Naming Notes
-- Users see `bus_number`
-- The internal database column remains `Bus.unit_number`
-- Internal relationships and route compatibility fields still use `bus_id`
-- `unit_number` is not the user-facing API field name
-- `bus_id` is not a driver-entered pre-trip input field
+  Persistent backend alert record for pre-trip-related enforcement conditions
 
 ## Constraints / Rules
 - One pre-trip is allowed per bus per day
+- Pre-trips are bus-level, not run-level and not driver-level
 - The route's active bus is authoritative for run-start validation
 - Planned schedule fields are not the same as actual runtime `start_time` and `end_time`
-- Early run start is still allowed when safety checks pass
-- No WebSocket feature is currently documented as part of the implemented system
+- No separate scheduler-based automation is documented as implemented for the 15-minute missing-pretrip check
 
 ## Structure Snapshot
 - `app.py`
-  FastAPI bootstrap, middleware, router registration, and lifespan DB setup
+  FastAPI bootstrap, middleware, lifespan DB setup, and router registration
 - `backend/models/`
   SQLAlchemy models including bus, route, run, pretrip, and dispatch alerts
 - `backend/routers/`
-  FastAPI routers for buses, routes, runs, pretrips, attendance, and HTML pages
+  FastAPI routers for buses, routes, runs, pretrips, attendance, reports, and HTML pages
 - `backend/schemas/`
   Pydantic request and response contracts
 - `backend/utils/`
-  Shared helpers including pre-trip alert logic
+  Shared helpers including pre-trip alert logic and runtime assignment helpers
 - `backend/templates/`
   Server-rendered UI templates
 - `tests/`
-  Automated API and behavior protection
+  Automated API and behavior coverage
 
 ## Running The Project
 Install dependencies:

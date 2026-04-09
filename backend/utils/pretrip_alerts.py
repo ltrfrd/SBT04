@@ -135,6 +135,28 @@ def _resolve_matching_alerts(
 
 
 # -----------------------------------------------------------
+# - Pre-trip alert reset
+# - Clear unresolved alerts tied to one pre-trip before resync
+# -----------------------------------------------------------
+def _resolve_unresolved_pretrip_alerts(
+    *,
+    db: Session,
+    pretrip_id: int,
+) -> None:
+    resolved_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    alerts = (
+        db.query(DispatchAlert)
+        .filter(DispatchAlert.pretrip_id == pretrip_id)
+        .filter(DispatchAlert.resolved.is_(False))
+        .all()
+    )                                                          # Only alerts tied directly to this pre-trip record
+
+    for alert in alerts:
+        alert.resolved = True                                  # Reset pre-trip-linked alert state before rebuilding it
+        alert.resolved_at = resolved_at                        # Keep resolution timestamp consistent
+
+
+# -----------------------------------------------------------
 # - Pre-trip issue alert sync
 # - Create or resolve major-defect / not-fit alerts per pre-trip
 # -----------------------------------------------------------
@@ -143,6 +165,11 @@ def sync_pretrip_issue_alerts(
     inspection: PreTripInspection,
     db: Session,
 ) -> None:
+    _resolve_unresolved_pretrip_alerts(
+        db=db,
+        pretrip_id=inspection.id,
+    )
+
     has_major_defect = any(defect.severity == "major" for defect in inspection.defects)
     not_fit = inspection.fit_for_duty == "no"
 

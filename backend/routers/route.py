@@ -81,6 +81,8 @@ def _serialize_route(route: Route) -> RouteOut:
         bus_id=route.bus_id,
         primary_bus_id=route.primary_bus_id,
         active_bus_id=route.active_bus_id,
+        primary_bus_unit_number=route.primary_bus.unit_number if route.primary_bus else None,
+        active_bus_unit_number=route.active_bus.unit_number if route.active_bus else None,
         clearance_note=route.clearance_note,
         school_ids=[school.id for school in sorted(route.schools, key=lambda school: (school.name, school.id))],
         school_names=[school.name for school in sorted(route.schools, key=lambda school: (school.name, school.id))],
@@ -207,6 +209,8 @@ def _serialize_route_detail(route: Route) -> RouteDetailOut:
         bus_id=route.bus_id,
         primary_bus_id=route.primary_bus_id,
         active_bus_id=route.active_bus_id,
+        primary_bus_unit_number=route.primary_bus.unit_number if route.primary_bus else None,
+        active_bus_unit_number=route.active_bus.unit_number if route.active_bus else None,
         clearance_note=route.clearance_note,
         schools=[
             RouteSchoolOut(

@@ -1,10 +1,10 @@
 # -----------------------------------------------------------
 # Pre-Trip Router
-# - Create, read, list, and correct bus/day pre-trip records
+# - Create and read bus/day pre-trip records
 # -----------------------------------------------------------
 from datetime import date, datetime, timezone  # Date and timestamp helpers
 
-from fastapi import APIRouter, Depends, HTTPException, status  # FastAPI router helpers
+from fastapi import APIRouter, Depends, HTTPException, Query, status  # FastAPI router helpers
 from sqlalchemy.orm import Session, selectinload  # SQLAlchemy session and eager loading
 
 from database import get_db  # Shared DB session dependency
@@ -12,7 +12,7 @@ from database import get_db  # Shared DB session dependency
 from backend import schemas  # Shared schema exports
 from backend.models.bus import Bus  # Bus model for FK validation
 from backend.models.pretrip import PreTripDefect, PreTripInspection  # Pre-trip persistence models
-from backend.utils.pretrip_alerts import sync_pretrip_issue_alerts  # Alert sync helpers
+from backend.utils.pretrip_alerts import sync_pretrip_issue_alerts  # Pre-trip alert sync helpers
 
 
 router = APIRouter(prefix="/pretrips", tags=["PreTrips"])
@@ -48,6 +48,19 @@ def _get_bus_by_number_or_404(bus_number: str, db: Session) -> Bus:
     return bus
 
 
+def _resolve_bus_or_404(payload: schemas.PreTripCreate | schemas.PreTripCorrect, db: Session) -> Bus:
+    if payload.bus_id is not None:
+        bus = db.get(Bus, payload.bus_id)                     # Prefer authoritative bus id when provided
+        if not bus:
+            raise HTTPException(status_code=404, detail="Bus not found")
+        return bus
+
+    if payload.bus_number:
+        return _get_bus_by_number_or_404(payload.bus_number, db)
+
+    raise HTTPException(status_code=400, detail="Invalid bus reference")
+
+
 def _assert_pretrip_unique_for_bus_day(
     *,
     bus_id: int,
@@ -66,8 +79,13 @@ def _assert_pretrip_unique_for_bus_day(
     if query.first():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Pre-trip already exists for this bus and inspection date",
+            detail="Pre-trip already exists for this bus today",
         )
+
+
+def _assert_inspection_date_is_today(inspection_date: date) -> None:
+    if inspection_date != date.today():
+        raise HTTPException(status_code=400, detail="Inspection date must be today")
 
 
 def _replace_pretrip_defects(
@@ -124,7 +142,8 @@ def create_pretrip(
     payload: schemas.PreTripCreate,
     db: Session = Depends(get_db),
 ):
-    bus = _get_bus_by_number_or_404(payload.bus_number, db)
+    bus = _resolve_bus_or_404(payload, db)
+    _assert_inspection_date_is_today(payload.inspection_date)
     _assert_pretrip_unique_for_bus_day(
         bus_id=bus.id,
         inspection_date=payload.inspection_date,
@@ -147,11 +166,53 @@ def create_pretrip(
     _replace_pretrip_defects(inspection=inspection, defects=payload.defects)
 
     db.add(inspection)
-    db.flush()                                                 # Allocate inspection id before creating alerts
+    db.flush()                                                 # Allocate inspection id before syncing alerts
     sync_pretrip_issue_alerts(inspection=inspection, db=db)    # Create or resolve pre-trip issue alerts
     db.commit()
     db.refresh(inspection)
     return _get_pretrip_or_404(inspection.id, db)
+
+
+# -----------------------------------------------------------
+# - List pre-trips
+# - Return newest-first pre-trips with optional simple filters
+# -----------------------------------------------------------
+@router.get(
+    "/",
+    response_model=list[schemas.PreTripOut],
+    summary="List pre-trips",
+    description="Return submitted pre-trip inspections ordered newest first with optional bus and date filters.",
+    response_description="Pre-trip list",
+)
+def list_pretrips(
+    bus_id: int | None = Query(default=None),
+    inspection_date: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    query = (
+        db.query(PreTripInspection)
+        .options(
+            selectinload(PreTripInspection.bus),
+            selectinload(PreTripInspection.defects),
+        )
+    )                                                          # Base pre-trip query with nested relationships
+
+    if bus_id is not None:
+        if not db.get(Bus, bus_id):
+            raise HTTPException(status_code=404, detail="Bus not found")
+        query = query.filter(PreTripInspection.bus_id == bus_id)
+
+    if inspection_date is not None:
+        query = query.filter(PreTripInspection.inspection_date == inspection_date)
+
+    return (
+        query.order_by(
+            PreTripInspection.inspection_date.desc(),
+            PreTripInspection.inspection_time.desc(),
+            PreTripInspection.id.desc(),
+        )
+        .all()
+    )
 
 
 # -----------------------------------------------------------
@@ -248,7 +309,8 @@ def correct_pretrip(
     db: Session = Depends(get_db),
 ):
     inspection = _get_pretrip_or_404(pretrip_id, db)
-    bus = _get_bus_by_number_or_404(payload.bus_number, db)
+    bus = _resolve_bus_or_404(payload, db)
+    _assert_inspection_date_is_today(payload.inspection_date)
     _assert_pretrip_unique_for_bus_day(
         bus_id=bus.id,
         inspection_date=payload.inspection_date,
@@ -274,8 +336,8 @@ def correct_pretrip(
 
     _replace_pretrip_defects(inspection=inspection, defects=payload.defects)
 
-    db.flush()                                                 # Ensure corrected row and defects are available to alert sync
-    sync_pretrip_issue_alerts(inspection=inspection, db=db)    # Create or resolve pre-trip issue alerts
+    db.flush()                                                 # Ensure corrected row and defects are visible to alert sync
+    sync_pretrip_issue_alerts(inspection=inspection, db=db)    # Reconcile pre-trip issue alerts after correction
     db.commit()
     db.refresh(inspection)
     return _get_pretrip_or_404(inspection.id, db)

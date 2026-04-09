@@ -1,6 +1,7 @@
 SBT04
 School bus operations backend with route/run management, flexible runtime stop execution,
-pre-trip safety enforcement, route bus control, planned run scheduling, and dispatch alerts.
+bus-level pre-trip inspections, run-start safety enforcement, route primary/active bus control,
+and persistent dispatch alerts for pre-trip conditions.
 
 ===============================================================================
 ROOT LEVEL
@@ -32,39 +33,45 @@ backend/
 |-- schemas/                       Pydantic request and response schemas
 |   |-- bus.py                     Bus schemas exposing bus_number as the user-facing bus identifier
 |   |-- pretrip.py                 Pre-trip create, correction, defect, and response schemas
-|   |-- route.py                   Route summary/detail and bus-control schemas
+|   |-- route.py                   Route summary/detail and route bus-control schemas
 |   |-- run.py                     Run create, update, output, state, and runtime action schemas
 |
 |-- routers/                       FastAPI routers
 |   |-- bus.py                     Bus CRUD and detail endpoints using bus_number in user-facing payloads
-|   |-- pretrip.py                 Pre-trip create, read, list, and correction endpoints
-|   |-- route.py                   Route CRUD, bus-control endpoints, and route-context run creation
-|   |-- run.py                     Run creation, safety-gated start, runtime stop actions, and run views
+|   |-- pretrip.py                 Pre-trip create, read, list, bus/day lookup, and correction endpoints
+|   |-- route.py                   Route CRUD, route bus-control endpoints, and route-context run creation
+|   |-- run.py                     Run creation, pre-trip-gated start, runtime stop actions, and run views
 |
 |-- utils/                         Shared helper modules
-|   |-- pretrip_alerts.py          Pre-trip alert creation, dedupe, and resolution helpers
+|   |-- pretrip_alerts.py          Pre-trip alert creation, dedupe, resolution, and missing-pretrip helper logic
 
 ===============================================================================
 alembic/versions/
 ===============================================================================
 
 alembic/versions/
-|-- 20260408_add_pretrip_foundation_tables.py        Creates pretrip_inspections and pretrip_defects tables
-|-- 20260408_add_pretrip_license_plate.py            Adds required pretrip_inspections.license_plate
-|-- 20260408_add_route_bus_control_fields.py         Adds primary_bus_id, active_bus_id, and clearance_note to routes
-|-- 20260408_add_run_schedule_and_dispatch_alerts.py Adds run schedule fields and dispatch_alerts
+|-- 20260228_uniq_stop_route_seq_add_unique_route_sequence.py
+|-- 20260330_route_run_stop_school_simplification.py
+|-- 20260408_add_pretrip_foundation_tables.py
+|-- 20260408_add_pretrip_license_plate.py
+|-- 20260408_add_route_bus_control_fields.py
+|-- 20260408_add_run_schedule_and_dispatch_alerts.py
+|-- 39429b00c9d3_add_run_events_table.py
+|-- f216358c4479_stops_add_route_id_sequence_index.py
 
 ===============================================================================
 IMPLEMENTED SYSTEM NOTES
 ===============================================================================
 
 - One pre-trip exists per bus per day
-- Pre-trip input is user-facing through bus_number and license_plate
-- Internal bus lookup still uses Bus.unit_number and internal relationships still use bus_id
+- Pre-trips are stored by bus_id and remain API-compatible with bus_number and license_plate
+- Pre-trip create and correction flows sync dispatch alerts for major defects and fit_for_duty = no
+- Missing-pretrip alerts are currently triggered through the run-start flow and supported by alert helpers
 - Active bus is authoritative for run-start safety checks
-- assign_bus sets the active bus and seeds the primary bus when empty
-- restore_primary_bus moves the active bus back to the primary bus
+- assign_bus sets the active bus and seeds the primary bus when the route has no primary bus yet
+- set_primary_bus updates the route's default/base bus
+- set_active_bus switches the current operational bus
+- restore_primary_bus moves the active bus back to the primary bus and can store a clearance note
 - Runs store scheduled_start_time and scheduled_end_time in addition to actual start_time and end_time
 - Run start is blocked when no valid pre-trip exists for today's active bus, when fit_for_duty is no, or when any major defect exists
-- DispatchAlert stores major-defect, not-fit, and missing-pretrip alert records
 - Runtime stop execution remains flexible through arrive_stop, next_stop, pickup, and dropoff endpoints
