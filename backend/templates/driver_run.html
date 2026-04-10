@@ -67,11 +67,6 @@
       {% set pretrip_fit_for_duty = workspace.pretrip_fit_for_duty if workspace else none %}
       {% set pretrip_issue_description = workspace.pretrip_issue_description if workspace else none %}
       {% set pretrip_date = workspace.pretrip_date if workspace else none %}
-      {% set enable_pretrip_checklist = False %}
-      {% set pretrip_brakes_checked = active_pretrip.brakes_checked if active_pretrip else False %}
-      {% set pretrip_lights_checked = active_pretrip.lights_checked if active_pretrip else False %}
-      {% set pretrip_tires_checked = active_pretrip.tires_checked if active_pretrip else False %}
-      {% set pretrip_emergency_checked = active_pretrip.emergency_equipment_checked if active_pretrip else False %}
       {% set active_run_ready_for_posttrip = workspace.active_run.posttrip_ready if workspace and workspace.active_run else False %}
       {% set active_posttrip_exists = active_posttrip is not none %}
       {% set active_posttrip_phase1_completed = active_posttrip.phase1_completed if active_posttrip else False %}
@@ -215,21 +210,21 @@
         </div>
 
         <div id="preTripFormWrap" class="{% if pretrip_exists %}d-none{% endif %}">
-          {% if enable_pretrip_checklist %}
+          {% if false %}
           <div class="form-check mb-2">
-            <input class="form-check-input" type="checkbox" id="preTripBrakes" {% if pretrip_brakes_checked %}checked{% endif %}>
+            <input class="form-check-input" type="checkbox" id="preTripBrakes">
             <label class="form-check-label" for="preTripBrakes">Brakes checked</label>
           </div>
           <div class="form-check mb-2">
-            <input class="form-check-input" type="checkbox" id="preTripLights" {% if pretrip_lights_checked %}checked{% endif %}>
+            <input class="form-check-input" type="checkbox" id="preTripLights">
             <label class="form-check-label" for="preTripLights">Lights checked</label>
           </div>
           <div class="form-check mb-2">
-            <input class="form-check-input" type="checkbox" id="preTripTires" {% if pretrip_tires_checked %}checked{% endif %}>
+            <input class="form-check-input" type="checkbox" id="preTripTires">
             <label class="form-check-label" for="preTripTires">Tires checked</label>
           </div>
           <div class="form-check mb-3">
-            <input class="form-check-input" type="checkbox" id="preTripEmergency" {% if pretrip_emergency_checked %}checked{% endif %}>
+            <input class="form-check-input" type="checkbox" id="preTripEmergency">
             <label class="form-check-label" for="preTripEmergency">Emergency equipment checked</label>
           </div>
           {% endif %}

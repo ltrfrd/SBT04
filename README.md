@@ -43,8 +43,7 @@ The current implementation includes:
   - `no_defects`
   - `defects`
   - `signature`
-- Pre-Trip records persist checklist history for brakes, lights, tires, and emergency equipment
-- Those checklist fields are currently stored for future use but are not active in the driver workflow UI
+- Pre-Trip checklist fields remain supported in backend storage and API payloads, but are currently deactivated in user-facing workflow
 - `no_defects = true` requires an empty defect list
 - `no_defects = false` requires at least one defect row
 - Defects are stored as nested rows with severity `minor` or `major`
@@ -138,7 +137,6 @@ The current backend flow is:
 ## Driver Workflow
 - The driver workspace page requires a valid bus/day Pre-Trip Inspection before Start Run is unlocked for a planned run
 - The driver workspace page can correct the same-day invalid Pre-Trip record inline before Start Run is unlocked again
-- The driver workspace currently hides checklist editing and submits stored checklist fields with safe defaults for future compatibility
 - The driver workspace page requires Post-Trip Phase 2 before End Run is unlocked for an active run
 
 Important runtime meaning:
@@ -182,7 +180,7 @@ Important runtime meaning:
 - `Run`
   Planned schedule fields `scheduled_start_time` and `scheduled_end_time`, plus actual runtime `start_time` and `end_time`
 - `PreTripInspection`
-  Bus/day inspection header with checklist history, correction metadata, and `original_payload`
+  Bus/day inspection header with correction metadata, `original_payload`, and retained checklist fields for future use
 - `PreTripDefect`
   Nested defect rows under one Pre-Trip Inspection
 - `PostTripInspection`

@@ -215,7 +215,6 @@ def driver_run_view(
             "workspace": workspace,
             "active_run_id": active_run.id if active_run else None,
             "active_route_id": active_run.route_id if active_run else None,
-            "active_pretrip": active_pretrip,
             "active_posttrip": active_posttrip,
             "selected_run_id": run_id,
             "today": datetime.now().date().isoformat(),
