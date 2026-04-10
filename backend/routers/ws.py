@@ -83,9 +83,11 @@ async def websocket_gps_endpoint(websocket: WebSocket, run_id: int, db: Session 
                 .first()
             )                                                          # Persist location only when post-trip already exists
             if posttrip is not None:
+                now = datetime.now(timezone.utc).replace(tzinfo=None)   # Keep GPS/activity timestamps aligned to one heartbeat
                 posttrip.last_known_lat = gps["lat"]                    # Store last known latitude from live GPS
                 posttrip.last_known_lng = gps["lng"]                    # Store last known longitude from live GPS
-                posttrip.last_location_update_at = datetime.now(timezone.utc).replace(tzinfo=None)  # Naive UTC update time
+                posttrip.last_location_update_at = now                  # Naive UTC update time
+                posttrip.last_driver_activity_at = now                  # GPS heartbeat counts as current driver activity for decision flow
                 db.commit()
 
             # Send update to all connected clients on same run_id

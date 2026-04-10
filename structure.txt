@@ -61,6 +61,7 @@ alembic/versions/
 |-- 20260408_add_pretrip_license_plate.py
 |-- 20260408_add_route_bus_control_fields.py
 |-- 20260408_add_run_schedule_and_dispatch_alerts.py
+|-- 20260409_add_posttrip_inspections.py
 |-- 39429b00c9d3_add_run_events_table.py
 |-- f216358c4479_stops_add_route_id_sequence_index.py
 
@@ -83,7 +84,7 @@ IMPLEMENTED SYSTEM NOTES
 - `POST /runs/end` and `POST /runs/end_by_driver` require Post-Trip Inspection Phase 2
 - `POST /runs/{run_id}/complete` remains legacy-compatible and does not currently enforce Post-Trip Inspection Phase 2
 - Post-Trip Inspection Phase 2 syncs the urgent major-defect alert when exterior_status is major
-- Post-Trip Inspection persists GPS heartbeat fields from the existing websocket GPS stream
+- Post-Trip Inspection persists `last_known_lat`, `last_known_lng`, `last_location_update_at`, and `last_driver_activity_at` from the existing websocket GPS stream when a post-trip record already exists
 - Post-Trip Inspection decision-layer fields support pending/completed/inactive classification
-- Post-Trip Inspection neglect alerts are currently read-triggered from `GET /runs/{run_id}/posttrip`, not scheduler-driven
+- Post-Trip Inspection neglect alerts are currently read-triggered from `GET /runs/{run_id}/posttrip`, which also stamps `neglect_flagged_at` when the record first reaches suspected neglect state
 - Runtime stop execution remains flexible through arrive_stop, next_stop, pickup, and dropoff endpoints

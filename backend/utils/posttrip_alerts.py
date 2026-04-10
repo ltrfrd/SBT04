@@ -155,6 +155,8 @@ def create_posttrip_neglect_alert_if_needed(
     inspection: PostTripInspection,
     db: Session,
 ) -> None:
+    if inspection.neglect_flagged_at is None:
+        inspection.neglect_flagged_at = datetime.now(timezone.utc).replace(tzinfo=None)  # Preserve first-neglect flag time
     _create_alert_if_missing(
         db=db,
         alert_type=ALERT_TYPE_POSTTRIP_NEGLECT,

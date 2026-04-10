@@ -84,9 +84,11 @@ The current implementation includes:
   - `last_location_update_at`
   - `neglect_flagged_at`
 - GPS heartbeat from the existing websocket stream is persisted into the run's Post-Trip Inspection when one exists
+- That websocket persistence updates `last_known_lat`, `last_known_lng`, `last_location_update_at`, and `last_driver_activity_at`
 - `GET /runs/{run_id}/posttrip` exposes decision fields for the current Post-Trip Inspection state
 - Neglect classification is computed from pending time, driver activity, and location activity
 - Neglect alerting is currently read-triggered from the GET inspection flow only
+- `neglect_flagged_at` is stamped when that read-triggered neglect flow first flags the record
 - No scheduler, background job, or autonomous monitoring loop is currently implemented for neglect detection
 
 ### Route Bus Control
