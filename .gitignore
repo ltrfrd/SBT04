@@ -55,3 +55,7 @@ alembic/**/__pycache__/
 # -----------------------------------------------------------
 dist/
 build/
+
+README.md
+structure.txt
+DEFERRED_FEATURES.md
