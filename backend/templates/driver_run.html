@@ -39,6 +39,14 @@
     .board-students { border-top: 1px solid #edf1f5; }
     .board-student-row + .board-student-row { border-top: 1px solid #eef2f6; }
     .board-label { font-size: 0.72rem; letter-spacing: 0.04em; text-transform: uppercase; color: #6c757d; }
+    .pretrip-panel { border: 1px solid #d9e1eb; border-radius: 16px; background: #fff; }
+    .pretrip-status { border: 1px solid #e3e8ee; border-radius: 12px; background: #f8fafc; }
+    .pretrip-error { border: 1px solid #f5c2c7; background: #fff5f5; color: #842029; border-radius: 12px; }
+    .posttrip-panel { border: 1px solid #d9e1eb; border-radius: 16px; background: #fff; }
+    .posttrip-status-badge { min-width: 140px; text-align: center; }
+    .posttrip-message { border: 1px solid #e3e8ee; border-radius: 12px; background: #f8fafc; }
+    .posttrip-phase { border: 1px solid #e7ecf2; border-radius: 14px; background: #fbfcfd; }
+    .posttrip-error { border: 1px solid #f5c2c7; background: #fff5f5; color: #842029; border-radius: 12px; }
     #map { height: 320px; border-radius: 16px; }
     .toast-stack { position: fixed; bottom: 1rem; right: 1rem; z-index: 9999; min-width: 320px; }
   </style>
@@ -52,6 +60,18 @@
       {% set bus_size_display = workspace.bus_size if workspace and workspace.bus_size else "-" %}
       {% set bus_plate_display = workspace.bus_license_plate if workspace and workspace.bus_license_plate else "-" %}
       {% set schools_display = workspace.schools if workspace and workspace.schools else [] %}
+      {% set show_pretrip_panel = workspace and not workspace.active_run %}
+      {% set pretrip_exists = workspace.pretrip_exists if workspace else False %}
+      {% set pretrip_id = workspace.pretrip_id if workspace else none %}
+      {% set pretrip_is_valid = workspace.pretrip_is_valid if workspace else False %}
+      {% set pretrip_fit_for_duty = workspace.pretrip_fit_for_duty if workspace else none %}
+      {% set pretrip_issue_description = workspace.pretrip_issue_description if workspace else none %}
+      {% set pretrip_date = workspace.pretrip_date if workspace else none %}
+      {% set active_run_ready_for_posttrip = workspace.active_run.posttrip_ready if workspace and workspace.active_run else False %}
+      {% set active_posttrip_exists = active_posttrip is not none %}
+      {% set active_posttrip_phase1_completed = active_posttrip.phase1_completed if active_posttrip else False %}
+      {% set active_posttrip_phase2_completed = active_posttrip.phase2_completed if active_posttrip else False %}
+      {% set show_posttrip_panel = workspace and workspace.active_run and (active_run_ready_for_posttrip or active_posttrip_exists) %}
 
       <div class="route-header p-3 p-lg-4 mb-4">
         <div class="route-header-top">
@@ -132,6 +152,98 @@
       {% endif %}
 
       {% if workspace %}
+      {% if show_pretrip_panel %}
+      <div
+        id="preTripPanel"
+        class="pretrip-panel p-3 p-lg-4 mb-4"
+        data-pretrip-id="{{ pretrip_id or '' }}"
+        data-pretrip-exists="{{ 'true' if pretrip_exists else 'false' }}"
+        data-pretrip-valid="{{ 'true' if pretrip_is_valid else 'false' }}"
+        data-pretrip-correct-endpoint="{% if pretrip_id %}/pretrips/{{ pretrip_id }}/correct{% endif %}"
+        data-pretrip-editing="false"
+        data-pretrip-submit-endpoint="/pretrips/"
+        data-pretrip-get-endpoint="/pretrips/bus/{{ workspace.bus_id }}/today"
+        data-pretrip-bus-id="{{ workspace.bus_id or '' }}"
+        data-pretrip-bus-number="{{ workspace.bus_unit_number or '' }}"
+        data-pretrip-license-plate="{{ workspace.bus_license_plate or '' }}"
+        data-pretrip-driver-name="{{ driver_name }}"
+        data-pretrip-route-number="{{ workspace.route_number }}"
+        data-pretrip-today="{{ today }}"
+      >
+        <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-3">
+          <div>
+            <h3 class="h5 mb-1">Pre-Trip Inspection</h3>
+            <p class="text-muted mb-0">A valid Pre-Trip for today's assigned active bus is required before a run can start.</p>
+          </div>
+          <span class="badge {% if pretrip_is_valid %}text-bg-success{% elif pretrip_exists %}text-bg-danger{% else %}text-bg-secondary{% endif %}" id="preTripStatusBadge">
+            {% if pretrip_is_valid %}Pre-Trip completed{% elif pretrip_exists %}Pre-Trip invalid{% else %}Pre-Trip pending{% endif %}
+          </span>
+        </div>
+
+        <div id="preTripError" class="pretrip-error small p-3 mb-3 d-none"></div>
+
+        <div class="pretrip-status p-3 mb-3 small" id="preTripStatusMessage">
+          {% if not workspace.bus_id %}
+          No active bus is assigned to this route, so Pre-Trip cannot be completed here.
+          {% elif pretrip_is_valid %}
+          Pre-Trip completed for {{ pretrip_date }}. Bus fit for duty.
+          {% elif pretrip_exists and pretrip_fit_for_duty == False %}
+          Bus not fit for duty. Start Run remains locked.
+          {% elif pretrip_exists %}
+          Pre-Trip is on file but does not meet current run-start rules.
+          {% else %}
+          Submit today's Pre-Trip to unlock Start Run.
+          {% endif %}
+        </div>
+
+        {% if workspace.bus_id %}
+        <div id="preTripSummary" class="small text-muted mb-3 {% if not pretrip_exists %}d-none{% endif %}">
+          <div id="preTripSummaryDate">{% if pretrip_date %}<strong>Date:</strong> {{ pretrip_date }}{% endif %}</div>
+          <div id="preTripSummaryIssue" class="{% if not pretrip_issue_description %}d-none{% endif %}">
+            {% if pretrip_issue_description %}<strong>Issue:</strong> {{ pretrip_issue_description }}{% endif %}
+          </div>
+        </div>
+
+        <div id="preTripCorrectionActions" class="d-flex gap-2 mb-3 {% if not pretrip_exists or pretrip_is_valid %}d-none{% endif %}">
+          <button type="button" class="btn btn-outline-primary btn-sm" id="editPreTripButton">Edit Pre-Trip</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="cancelPreTripEditButton">Cancel</button>
+        </div>
+
+        <div id="preTripFormWrap" class="{% if pretrip_exists %}d-none{% endif %}">
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="preTripBrakes" {% if pretrip_exists and not pretrip_is_valid %}checked{% endif %}>
+            <label class="form-check-label" for="preTripBrakes">Brakes checked</label>
+          </div>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="preTripLights" {% if pretrip_exists and not pretrip_is_valid %}checked{% endif %}>
+            <label class="form-check-label" for="preTripLights">Lights checked</label>
+          </div>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="preTripTires" {% if pretrip_exists and not pretrip_is_valid %}checked{% endif %}>
+            <label class="form-check-label" for="preTripTires">Tires checked</label>
+          </div>
+          <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" id="preTripEmergency" {% if pretrip_exists and not pretrip_is_valid %}checked{% endif %}>
+            <label class="form-check-label" for="preTripEmergency">Emergency equipment checked</label>
+          </div>
+
+          <label class="form-label" for="preTripFitForDuty">Fit for duty</label>
+          <select class="form-select mb-3" id="preTripFitForDuty">
+            <option value="yes" {% if pretrip_fit_for_duty != False %}selected{% endif %}>Yes</option>
+            <option value="no" {% if pretrip_fit_for_duty == False %}selected{% endif %}>No</option>
+          </select>
+
+          <div id="preTripIssueWrap" class="mb-3 {% if pretrip_fit_for_duty == False %}{% else %}d-none{% endif %}">
+            <label class="form-label" for="preTripIssueDescription">Describe issue</label>
+            <textarea class="form-control" id="preTripIssueDescription" rows="3">{{ pretrip_issue_description or '' }}</textarea>
+          </div>
+
+          <button type="button" class="btn btn-primary btn-sm" id="submitPreTripButton">Submit Pre-Trip</button>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
       {% if workspace.active_run %}
       <div class="live-panel p-3 p-lg-4 mb-4">
         <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 mb-3">
@@ -141,9 +253,26 @@
             <p class="text-muted mb-0">Live run actions stay available only for the active run.</p>
           </div>
           <div>
-            <button type="button" class="btn btn-danger" id="endActiveRunButton" data-run-id="{{ workspace.active_run.id }}" data-reload-url="/driver_run/{{ driver_id }}?route_id={{ workspace.id }}">
+            <button
+              type="button"
+              class="btn btn-danger"
+              id="endActiveRunButton"
+              data-run-id="{{ workspace.active_run.id }}"
+              data-reload-url="/driver_run/{{ driver_id }}?route_id={{ workspace.id }}"
+              data-posttrip-phase2-completed="{{ 'true' if active_posttrip_phase2_completed else 'false' }}"
+              {% if not active_posttrip_phase2_completed %}disabled aria-disabled="true"{% endif %}
+            >
               <i class="bi bi-stop-circle me-1"></i> End Active Run
             </button>
+            <div id="endRunStatusMessage" class="small text-muted mt-2">
+              {% if active_posttrip_phase2_completed %}
+              Post-Trip completed. End Run is available.
+              {% elif active_run_ready_for_posttrip or active_posttrip_exists %}
+              Complete Post-Trip Phase 2 before ending the run.
+              {% else %}
+              End Run stays locked until all assigned rider actions are finished and Post-Trip Phase 2 is complete.
+              {% endif %}
+            </div>
           </div>
         </div>
 
@@ -173,6 +302,94 @@
           <div class="col-lg-7">
             <div id="map"></div>
           </div>
+        </div>
+      </div>
+
+      <div
+        id="postTripPanel"
+        class="posttrip-panel p-3 p-lg-4 mb-4 {% if not show_posttrip_panel %}d-none{% endif %}"
+        data-posttrip-visible="{{ 'true' if show_posttrip_panel else 'false' }}"
+        data-posttrip-ready="{{ 'true' if active_run_ready_for_posttrip else 'false' }}"
+        data-posttrip-get-endpoint="/runs/{{ workspace.active_run.id }}/posttrip"
+        data-phase1-endpoint="/runs/{{ workspace.active_run.id }}/posttrip/phase1"
+        data-phase2-endpoint="/runs/{{ workspace.active_run.id }}/posttrip/phase2"
+      >
+        <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-3">
+          <div>
+            <h3 class="h5 mb-1">Post-Trip Inspection</h3>
+            <p class="text-muted mb-0" id="postTripIntroMessage">
+              Complete Phase 1 and Phase 2 here before ending the active run.
+            </p>
+          </div>
+          <div class="d-flex flex-wrap gap-2">
+            <span class="badge text-bg-secondary posttrip-status-badge" id="phase1StatusBadge">
+              {% if active_posttrip_phase1_completed %}Phase 1 completed{% else %}Phase 1 pending{% endif %}
+            </span>
+            <span class="badge {% if active_posttrip_phase2_completed %}text-bg-success{% else %}text-bg-warning{% endif %} posttrip-status-badge" id="phase2StatusBadge">
+              {% if active_posttrip_phase2_completed %}Post-Trip completed{% else %}Phase 2 pending{% endif %}
+            </span>
+          </div>
+        </div>
+
+        <div id="postTripError" class="posttrip-error small p-3 mb-3 d-none"></div>
+
+        <div class="posttrip-message p-3 mb-3 small" id="postTripStatusMessage">
+          {% if active_posttrip_phase2_completed %}
+          Post-Trip completed.
+          {% elif active_posttrip_phase1_completed %}
+          Phase 1 completed. Phase 2 is still required before End Run becomes available.
+          {% else %}
+          Phase 1 pending.
+          {% endif %}
+        </div>
+
+        <div class="posttrip-phase p-3 mb-3" id="postTripPhase1Section">
+          <div class="fw-semibold mb-2">Phase 1</div>
+          <div class="text-muted small mb-3">Confirm the bus is clear before moving into the final post-trip checks.</div>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="postTripPhase1NoStudents" {% if active_posttrip and active_posttrip.phase1_no_students_remaining %}checked{% endif %}>
+            <label class="form-check-label" for="postTripPhase1NoStudents">No students remaining</label>
+          </div>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="postTripPhase1Belongings" {% if active_posttrip and active_posttrip.phase1_belongings_checked %}checked{% endif %}>
+            <label class="form-check-label" for="postTripPhase1Belongings">Belongings checked</label>
+          </div>
+          <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" id="postTripPhase1Sign" {% if active_posttrip and active_posttrip.phase1_checked_sign_hung %}checked{% endif %}>
+            <label class="form-check-label" for="postTripPhase1Sign">"Checked" sign placed</label>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" id="postTripPhase1Button">Complete Phase 1</button>
+        </div>
+
+        <div class="posttrip-phase p-3" id="postTripPhase2Section">
+          <div class="fw-semibold mb-2">Phase 2</div>
+          <div class="text-muted small mb-3">Final interior and exterior confirmation is required before End Run is unlocked.</div>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="postTripPhase2Recheck" {% if active_posttrip and active_posttrip.phase2_full_internal_recheck %}checked{% endif %}>
+            <label class="form-check-label" for="postTripPhase2Recheck">Full internal re-check completed</label>
+          </div>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="postTripPhase2Sign" {% if active_posttrip and active_posttrip.phase2_checked_to_cleared_switched %}checked{% endif %}>
+            <label class="form-check-label" for="postTripPhase2Sign">Sign switched to cleared</label>
+          </div>
+          <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" id="postTripPhase2RearButton" {% if active_posttrip and active_posttrip.phase2_rear_button_triggered %}checked{% endif %}>
+            <label class="form-check-label" for="postTripPhase2RearButton">Rear button triggered</label>
+          </div>
+
+          <label class="form-label" for="postTripExteriorStatus">Exterior status</label>
+          <select class="form-select mb-3" id="postTripExteriorStatus">
+            <option value="clear" {% if active_posttrip and active_posttrip.exterior_status == 'clear' %}selected{% endif %}>clear</option>
+            <option value="minor" {% if active_posttrip and active_posttrip.exterior_status == 'minor' %}selected{% endif %}>minor</option>
+            <option value="major" {% if active_posttrip and active_posttrip.exterior_status == 'major' %}selected{% endif %}>major</option>
+          </select>
+
+          <div id="postTripExteriorDescriptionWrap" class="mb-3 d-none">
+            <label class="form-label" for="postTripExteriorDescription">Describe issue</label>
+            <textarea class="form-control" id="postTripExteriorDescription" rows="3">{% if active_posttrip and active_posttrip.exterior_description %}{{ active_posttrip.exterior_description }}{% endif %}</textarea>
+          </div>
+
+          <button type="button" class="btn btn-primary btn-sm" id="postTripPhase2Button">Complete Phase 2</button>
         </div>
       </div>
       {% endif %}
@@ -215,6 +432,8 @@
                     class="btn btn-success btn-sm start-run-button"
                     data-run-id="{{ run.id }}"
                     data-reload-url="/driver_run/{{ driver_id }}?route_id={{ workspace.id }}&run_id={{ run.id }}"
+                    data-pretrip-valid="{{ 'true' if pretrip_is_valid else 'false' }}"
+                    {% if not pretrip_is_valid %}disabled aria-disabled="true"{% endif %}
                   >
                     <i class="bi bi-play-fill me-1"></i> Start Run
                   </button>
@@ -327,8 +546,537 @@
       toast.addEventListener("hidden.bs.toast", () => toast.remove());
     }
 
+    function showPreTripError(message) {
+      const errorBox = document.getElementById("preTripError");
+      if (!errorBox) {
+        return;
+      }
+
+      if (!message) {
+        errorBox.textContent = "";
+        errorBox.classList.add("d-none");
+        return;
+      }
+
+      errorBox.textContent = message;
+      errorBox.classList.remove("d-none");
+    }
+
+    function showInlineError(message) {
+      const errorBox = document.getElementById("postTripError");
+      if (!errorBox) {
+        return;
+      }
+
+      if (!message) {
+        errorBox.textContent = "";
+        errorBox.classList.add("d-none");
+        return;
+      }
+
+      errorBox.textContent = message;
+      errorBox.classList.remove("d-none");
+    }
+
+    function getErrorMessage(body, fallbackMessage) {
+      if (!body) {
+        return fallbackMessage;
+      }
+
+      if (typeof body.detail === "string") {
+        return body.detail;
+      }
+
+      if (Array.isArray(body.detail) && body.detail.length) {
+        const first = body.detail[0];
+        if (first && typeof first.msg === "string") {
+          return first.msg;
+        }
+      }
+
+      return fallbackMessage;
+    }
+
+    async function readJsonResponse(response) {
+      const text = await response.text();
+      if (!text) {
+        return null;
+      }
+
+      try {
+        return JSON.parse(text);
+      } catch {
+        return { detail: text };
+      }
+    }
+
+    function setButtonBusy(button, isBusy, busyLabel) {
+      if (!button) {
+        return;
+      }
+
+      if (!button.dataset.defaultLabel) {
+        button.dataset.defaultLabel = button.innerHTML;
+      }
+
+      if (isBusy) {
+        button.dataset.wasDisabled = button.disabled ? "true" : "false";
+        button.disabled = true;
+        button.innerHTML = busyLabel;
+      } else {
+        button.disabled = button.dataset.wasDisabled === "true";
+        button.innerHTML = button.dataset.defaultLabel;
+      }
+    }
+
+    function togglePreTripIssueRequirement() {
+      const fitSelect = document.getElementById("preTripFitForDuty");
+      const issueWrap = document.getElementById("preTripIssueWrap");
+      const issueField = document.getElementById("preTripIssueDescription");
+
+      if (!fitSelect || !issueWrap || !issueField) {
+        return;
+      }
+
+      const requiresIssue = fitSelect.value === "no";
+      issueWrap.classList.toggle("d-none", !requiresIssue);
+      issueField.required = requiresIssue;
+
+      if (!requiresIssue) {
+        issueField.value = "";
+      }
+    }
+
+    function getPreTripFormState() {
+      return {
+        brakes: document.getElementById("preTripBrakes"),
+        lights: document.getElementById("preTripLights"),
+        tires: document.getElementById("preTripTires"),
+        emergency: document.getElementById("preTripEmergency"),
+        fitSelect: document.getElementById("preTripFitForDuty"),
+        issueField: document.getElementById("preTripIssueDescription")
+      };
+    }
+
+    function fillPreTripFormFromInspection(inspection) {
+      const formState = getPreTripFormState();
+      if (!formState.brakes || !formState.fitSelect || !formState.issueField) {
+        return;
+      }
+
+      const issueDescription = buildPreTripIssueDescription(inspection) || "";
+      [formState.brakes, formState.lights, formState.tires, formState.emergency].forEach((field) => {
+        field.checked = true;
+      });
+      formState.fitSelect.value = inspection && inspection.fit_for_duty === "no" ? "no" : "yes";
+      formState.issueField.value = issueDescription;
+      togglePreTripIssueRequirement();
+    }
+
+    function resetPreTripForm() {
+      const formState = getPreTripFormState();
+      if (!formState.brakes || !formState.fitSelect || !formState.issueField) {
+        return;
+      }
+
+      [formState.brakes, formState.lights, formState.tires, formState.emergency].forEach((field) => {
+        field.checked = false;
+      });
+      formState.fitSelect.value = "yes";
+      formState.issueField.value = "";
+      togglePreTripIssueRequirement();
+    }
+
+    function setPreTripEditMode(isEditing, inspection = null) {
+      const preTripPanel = document.getElementById("preTripPanel");
+      const formWrap = document.getElementById("preTripFormWrap");
+      const summaryWrap = document.getElementById("preTripSummary");
+      const editButton = document.getElementById("editPreTripButton");
+      const cancelButton = document.getElementById("cancelPreTripEditButton");
+      if (!preTripPanel || !formWrap) {
+        return;
+      }
+
+      const hasInspection = Boolean(inspection);
+      const fitForDuty = hasInspection ? inspection.fit_for_duty === "yes" : false;
+      const hasMajorDefect = Boolean(
+        hasInspection
+        && Array.isArray(inspection.defects)
+        && inspection.defects.some((defect) => defect.severity === "major")
+      );
+      const isValid = Boolean(hasInspection && fitForDuty && !hasMajorDefect);
+      const canEditInvalidInspection = Boolean(hasInspection && !isValid);
+      const showEditing = Boolean(isEditing && canEditInvalidInspection);
+
+      preTripPanel.dataset.pretripEditing = showEditing ? "true" : "false";
+
+      if (formWrap) {
+        formWrap.classList.toggle("d-none", hasInspection ? !showEditing : false);
+      }
+
+      if (summaryWrap) {
+        summaryWrap.classList.toggle("d-none", !hasInspection);
+      }
+
+      if (editButton) {
+        editButton.classList.toggle("d-none", !canEditInvalidInspection || showEditing);
+      }
+
+      if (cancelButton) {
+        cancelButton.classList.toggle("d-none", !showEditing);
+      }
+
+      if (showEditing) {
+        fillPreTripFormFromInspection(inspection);
+      } else if (!hasInspection) {
+        resetPreTripForm();
+      }
+    }
+
+    function toggleExteriorDescriptionRequirement() {
+      const statusSelect = document.getElementById("postTripExteriorStatus");
+      const descriptionWrap = document.getElementById("postTripExteriorDescriptionWrap");
+      const description = document.getElementById("postTripExteriorDescription");
+
+      if (!statusSelect || !descriptionWrap || !description) {
+        return;
+      }
+
+      const requiresDescription = ["minor", "major"].includes(statusSelect.value);
+      descriptionWrap.classList.toggle("d-none", !requiresDescription);
+      description.required = requiresDescription;
+
+      if (!requiresDescription) {
+        description.value = "";
+      }
+    }
+
+    function setPostTripVisibility(isVisible) {
+      const postTripPanel = document.getElementById("postTripPanel");
+      if (!postTripPanel) {
+        return;
+      }
+
+      postTripPanel.classList.toggle("d-none", !isVisible);
+      postTripPanel.dataset.posttripVisible = isVisible ? "true" : "false";
+    }
+
+    function setStartRunAvailability(isEnabled) {
+      document.querySelectorAll(".start-run-button").forEach((button) => {
+        button.disabled = !isEnabled;
+        button.setAttribute("aria-disabled", isEnabled ? "false" : "true");
+        button.dataset.pretripValid = isEnabled ? "true" : "false";
+      });
+    }
+
+    function buildPreTripIssueDescription(inspection) {
+      if (!inspection || !Array.isArray(inspection.defects) || inspection.defects.length === 0) {
+        return null;
+      }
+
+      return inspection.defects
+        .map((defect) => defect.description)
+        .filter(Boolean)
+        .join("; ") || null;
+    }
+
+    function applyPreTripState(inspection) {
+      const preTripPanel = document.getElementById("preTripPanel");
+      if (!preTripPanel) {
+        return;
+      }
+
+      const statusBadge = document.getElementById("preTripStatusBadge");
+      const statusMessage = document.getElementById("preTripStatusMessage");
+      const summaryWrap = document.getElementById("preTripSummary");
+      const summaryDate = document.getElementById("preTripSummaryDate");
+      const summaryIssue = document.getElementById("preTripSummaryIssue");
+      const formWrap = document.getElementById("preTripFormWrap");
+      const correctionActions = document.getElementById("preTripCorrectionActions");
+      const busId = preTripPanel.dataset.pretripBusId;
+      const hasInspection = Boolean(inspection);
+      const fitForDuty = hasInspection ? inspection.fit_for_duty === "yes" : false;
+      const hasMajorDefect = Boolean(
+        hasInspection
+        && Array.isArray(inspection.defects)
+        && inspection.defects.some((defect) => defect.severity === "major")
+      );
+      const isValid = Boolean(hasInspection && fitForDuty && !hasMajorDefect);
+      const issueDescription = buildPreTripIssueDescription(inspection);
+
+      preTripPanel.dataset.pretripId = hasInspection ? String(inspection.id) : "";
+      preTripPanel.dataset.pretripExists = hasInspection ? "true" : "false";
+      preTripPanel.dataset.pretripValid = isValid ? "true" : "false";
+      preTripPanel.dataset.pretripCorrectEndpoint = hasInspection ? `/pretrips/${inspection.id}/correct` : "";
+
+      if (!busId) {
+        setStartRunAvailability(false);
+        if (statusBadge) {
+          statusBadge.textContent = "No active bus";
+          statusBadge.className = "badge text-bg-secondary";
+        }
+        if (statusMessage) {
+          statusMessage.textContent = "No active bus is assigned to this route, so Pre-Trip cannot be completed here.";
+        }
+        if (formWrap) {
+          formWrap.classList.add("d-none");
+        }
+        if (summaryWrap) {
+          summaryWrap.classList.add("d-none");
+        }
+        if (correctionActions) {
+          correctionActions.classList.add("d-none");
+        }
+        showPreTripError("");
+        return;
+      }
+
+      setStartRunAvailability(isValid);
+
+      if (statusBadge) {
+        if (isValid) {
+          statusBadge.textContent = "Pre-Trip completed";
+          statusBadge.className = "badge text-bg-success";
+        } else if (hasInspection) {
+          statusBadge.textContent = "Pre-Trip invalid";
+          statusBadge.className = "badge text-bg-danger";
+        } else {
+          statusBadge.textContent = "Pre-Trip pending";
+          statusBadge.className = "badge text-bg-secondary";
+        }
+      }
+
+      if (statusMessage) {
+        if (isValid) {
+          statusMessage.textContent = `Pre-Trip completed for ${inspection.inspection_date}. Bus fit for duty.`;
+        } else if (hasInspection && !fitForDuty) {
+          statusMessage.textContent = "Bus not fit for duty. Start Run remains locked.";
+        } else if (hasInspection && hasMajorDefect) {
+          statusMessage.textContent = "A major defect was reported on today's Pre-Trip. Start Run remains locked.";
+        } else {
+          statusMessage.textContent = "Submit today's Pre-Trip to unlock Start Run.";
+        }
+      }
+
+      if (summaryWrap) {
+        summaryWrap.classList.toggle("d-none", !hasInspection);
+      }
+
+      if (summaryDate) {
+        summaryDate.innerHTML = hasInspection ? `<strong>Date:</strong> ${inspection.inspection_date}` : "";
+      }
+
+      if (summaryIssue) {
+        if (issueDescription) {
+          summaryIssue.innerHTML = `<strong>Issue:</strong> ${issueDescription}`;
+          summaryIssue.classList.remove("d-none");
+        } else {
+          summaryIssue.innerHTML = "";
+          summaryIssue.classList.add("d-none");
+        }
+      }
+
+      if (correctionActions) {
+        correctionActions.classList.toggle("d-none", !hasInspection || isValid);
+      }
+
+      setPreTripEditMode(preTripPanel.dataset.pretripEditing === "true", inspection);
+      showPreTripError("");
+    }
+
+    async function refreshPreTripState() {
+      const preTripPanel = document.getElementById("preTripPanel");
+      if (!preTripPanel) {
+        return;
+      }
+
+      if (!preTripPanel.dataset.pretripBusId) {
+        applyPreTripState(null);
+        return;
+      }
+
+      const response = await fetch(preTripPanel.dataset.pretripGetEndpoint);
+      if (response.status === 404) {
+        applyPreTripState(null);
+        return;
+      }
+
+      if (!response.ok) {
+        const errorBody = await readJsonResponse(response);
+        showPreTripError(getErrorMessage(errorBody, "Unable to load Pre-Trip status."));
+        setStartRunAvailability(false);
+        return;
+      }
+
+      const inspection = await readJsonResponse(response);
+      applyPreTripState(inspection);
+    }
+
+    function setEndRunAvailability(isEnabled, message) {
+      const endButton = document.getElementById("endActiveRunButton");
+      const statusMessage = document.getElementById("endRunStatusMessage");
+
+      if (endButton) {
+        endButton.disabled = !isEnabled;
+        endButton.setAttribute("aria-disabled", isEnabled ? "false" : "true");
+        endButton.dataset.posttripPhase2Completed = isEnabled ? "true" : "false";
+      }
+
+      if (statusMessage && message) {
+        statusMessage.textContent = message;
+      }
+    }
+
+    function applyPostTripState(inspection, isReadyForPostTrip) {
+      const postTripPanel = document.getElementById("postTripPanel");
+      const phase1StatusBadge = document.getElementById("phase1StatusBadge");
+      const phase2StatusBadge = document.getElementById("phase2StatusBadge");
+      const statusMessage = document.getElementById("postTripStatusMessage");
+      const introMessage = document.getElementById("postTripIntroMessage");
+      const phase1Button = document.getElementById("postTripPhase1Button");
+      const phase2Button = document.getElementById("postTripPhase2Button");
+      const phase2Section = document.getElementById("postTripPhase2Section");
+      const phase1Inputs = [
+        document.getElementById("postTripPhase1NoStudents"),
+        document.getElementById("postTripPhase1Belongings"),
+        document.getElementById("postTripPhase1Sign")
+      ];
+      const phase2Inputs = [
+        document.getElementById("postTripPhase2Recheck"),
+        document.getElementById("postTripPhase2Sign"),
+        document.getElementById("postTripPhase2RearButton"),
+        document.getElementById("postTripExteriorStatus"),
+        document.getElementById("postTripExteriorDescription")
+      ];
+
+      if (!postTripPanel) {
+        return;
+      }
+
+      const hasInspection = Boolean(inspection);
+      setPostTripVisibility(isReadyForPostTrip || hasInspection);
+      postTripPanel.dataset.posttripReady = isReadyForPostTrip ? "true" : "false";
+
+      if (!isReadyForPostTrip && !hasInspection) {
+        setEndRunAvailability(false, "End Run stays locked until all assigned rider actions are finished and Post-Trip Phase 2 is complete.");
+        showInlineError("");
+        return;
+      }
+
+      const phase1Completed = Boolean(inspection && inspection.phase1_completed);
+      const phase2Completed = Boolean(inspection && inspection.phase2_completed);
+
+      phase1Inputs[0].checked = Boolean(inspection && inspection.phase1_no_students_remaining);
+      phase1Inputs[1].checked = Boolean(inspection && inspection.phase1_belongings_checked);
+      phase1Inputs[2].checked = Boolean(inspection && inspection.phase1_checked_sign_hung);
+      phase2Inputs[0].checked = Boolean(inspection && inspection.phase2_full_internal_recheck);
+      phase2Inputs[1].checked = Boolean(inspection && inspection.phase2_checked_to_cleared_switched);
+      phase2Inputs[2].checked = Boolean(inspection && inspection.phase2_rear_button_triggered);
+      phase2Inputs[3].value = inspection && inspection.exterior_status ? inspection.exterior_status : "clear";
+      phase2Inputs[4].value = inspection && inspection.exterior_description ? inspection.exterior_description : "";
+      toggleExteriorDescriptionRequirement();
+
+      phase1Inputs.forEach((input) => {
+        input.disabled = phase1Completed || !isReadyForPostTrip;
+      });
+      phase2Inputs.forEach((input) => {
+        input.disabled = phase2Completed || !phase1Completed;
+      });
+
+      if (phase1Button) {
+        phase1Button.disabled = phase1Completed || !isReadyForPostTrip;
+        phase1Button.textContent = phase1Completed ? "Phase 1 Completed" : "Complete Phase 1";
+      }
+
+      if (phase2Button) {
+        phase2Button.disabled = phase2Completed || !phase1Completed;
+        phase2Button.textContent = phase2Completed ? "Phase 2 Completed" : "Complete Phase 2";
+      }
+
+      if (phase2Section) {
+        phase2Section.classList.toggle("d-none", !phase1Completed);
+      }
+
+      if (phase1StatusBadge) {
+        phase1StatusBadge.textContent = phase1Completed ? "Phase 1 completed" : "Phase 1 pending";
+        phase1StatusBadge.className = `badge ${phase1Completed ? "text-bg-success" : "text-bg-secondary"} posttrip-status-badge`;
+      }
+
+      if (phase2StatusBadge) {
+        phase2StatusBadge.textContent = phase2Completed ? "Post-Trip completed" : "Phase 2 pending";
+        phase2StatusBadge.className = `badge ${phase2Completed ? "text-bg-success" : "text-bg-warning"} posttrip-status-badge`;
+      }
+
+      if (introMessage) {
+        if (!isReadyForPostTrip && hasInspection) {
+          introMessage.textContent = "An existing Post-Trip record is shown below. Phase 2 still controls End Run availability.";
+        } else {
+          introMessage.textContent = "Complete Phase 1 and Phase 2 here before ending the active run.";
+        }
+      }
+
+      if (statusMessage) {
+        if (phase2Completed) {
+          statusMessage.textContent = "Post-Trip completed.";
+        } else if (phase1Completed) {
+          statusMessage.textContent = "Phase 1 completed. Phase 2 is still required before End Run becomes available.";
+        } else {
+          statusMessage.textContent = "Phase 1 pending.";
+        }
+      }
+
+      if (phase2Completed) {
+        setEndRunAvailability(true, "Post-Trip completed. End Run is available.");
+      } else if (isReadyForPostTrip) {
+        setEndRunAvailability(false, "Complete Post-Trip Phase 2 before ending the run.");
+      } else {
+        setEndRunAvailability(false, "End Run stays locked until all assigned rider actions are finished and Post-Trip Phase 2 is complete.");
+      }
+    }
+
+    async function refreshPostTripState() {
+      const postTripPanel = document.getElementById("postTripPanel");
+      if (!activeRunId || !postTripPanel) {
+        return;
+      }
+
+      let isReadyForPostTrip = postTripPanel.dataset.posttripReady === "true";
+      const stateResponse = await fetch(`/runs/${activeRunId}/state`);
+      if (stateResponse.ok) {
+        const stateData = await readJsonResponse(stateResponse);
+        isReadyForPostTrip = Boolean(
+          stateData
+          && stateData.students_onboard === 0
+          && stateData.remaining_pickups === 0
+          && stateData.remaining_dropoffs === 0
+        );
+      }
+
+      const inspectionResponse = await fetch(postTripPanel.dataset.posttripGetEndpoint);
+      if (inspectionResponse.status === 404) {
+        applyPostTripState(null, isReadyForPostTrip);
+        return;
+      }
+
+      if (!inspectionResponse.ok) {
+        const errorBody = await readJsonResponse(inspectionResponse);
+        showInlineError(getErrorMessage(errorBody, "Unable to load Post-Trip status."));
+        applyPostTripState(null, isReadyForPostTrip);
+        return;
+      }
+
+      const inspection = await readJsonResponse(inspectionResponse);
+      showInlineError("");
+      applyPostTripState(inspection, isReadyForPostTrip);
+    }
+
     document.querySelectorAll(".start-run-button").forEach((button) => {
       button.addEventListener("click", async () => {
+        if (button.dataset.pretripValid !== "true") {
+          showAlert("A valid Pre-Trip is required before starting a run.", "warning");
+          return;
+        }
+
         const runId = Number(button.dataset.runId);
         const reloadUrl = button.dataset.reloadUrl;
 
@@ -345,9 +1093,125 @@
       });
     });
 
+    const preTripFitForDuty = document.getElementById("preTripFitForDuty");
+    if (preTripFitForDuty) {
+      preTripFitForDuty.addEventListener("change", togglePreTripIssueRequirement);
+      togglePreTripIssueRequirement();
+    }
+
+    const editPreTripButton = document.getElementById("editPreTripButton");
+    if (editPreTripButton) {
+      editPreTripButton.addEventListener("click", async () => {
+        const preTripPanel = document.getElementById("preTripPanel");
+        if (!preTripPanel || !preTripPanel.dataset.pretripId) {
+          return;
+        }
+
+        preTripPanel.dataset.pretripEditing = "true";
+        await refreshPreTripState();
+      });
+    }
+
+    const cancelPreTripEditButton = document.getElementById("cancelPreTripEditButton");
+    if (cancelPreTripEditButton) {
+      cancelPreTripEditButton.addEventListener("click", async () => {
+        const preTripPanel = document.getElementById("preTripPanel");
+        if (!preTripPanel) {
+          return;
+        }
+
+        preTripPanel.dataset.pretripEditing = "false";
+        await refreshPreTripState();
+      });
+    }
+
+    const submitPreTripButton = document.getElementById("submitPreTripButton");
+    if (submitPreTripButton) {
+      submitPreTripButton.addEventListener("click", async () => {
+        const preTripPanel = document.getElementById("preTripPanel");
+        const fitForDuty = document.getElementById("preTripFitForDuty").value;
+        const issueDescription = document.getElementById("preTripIssueDescription").value.trim();
+        const requiredChecks = [
+          document.getElementById("preTripBrakes").checked,
+          document.getElementById("preTripLights").checked,
+          document.getElementById("preTripTires").checked,
+          document.getElementById("preTripEmergency").checked
+        ];
+
+        if (requiredChecks.some((checked) => !checked)) {
+          showPreTripError("All Pre-Trip checklist items must be checked before submission.");
+          return;
+        }
+
+        if (fitForDuty === "no" && !issueDescription) {
+          showPreTripError("Describe issue is required when fit for duty is No.");
+          return;
+        }
+
+        showPreTripError("");
+        setButtonBusy(submitPreTripButton, true, "Saving...");
+
+        try {
+          const now = new Date();
+          const inspectionTime = now.toTimeString().slice(0, 8);
+          const payload = {
+            bus_id: Number(preTripPanel.dataset.pretripBusId),
+            bus_number: preTripPanel.dataset.pretripBusNumber,
+            license_plate: preTripPanel.dataset.pretripLicensePlate,
+            driver_name: preTripPanel.dataset.pretripDriverName,
+            inspection_date: preTripPanel.dataset.pretripToday,
+            inspection_time: inspectionTime,
+            odometer: 0,
+            inspection_place: `Driver Workspace - ${preTripPanel.dataset.pretripRouteNumber}`,
+            use_type: "school_bus",
+            fit_for_duty: fitForDuty,
+            no_defects: fitForDuty === "yes",
+            signature: preTripPanel.dataset.pretripDriverName,
+            defects: fitForDuty === "yes" ? [] : [{ description: issueDescription, severity: "major" }]
+          };
+
+          const isCorrection = Boolean(
+            preTripPanel.dataset.pretripExists === "true"
+            && preTripPanel.dataset.pretripValid !== "true"
+            && preTripPanel.dataset.pretripId
+          );
+          if (isCorrection) {
+            payload.corrected_by = preTripPanel.dataset.pretripDriverName;
+          }
+
+          const response = await fetch(
+            isCorrection ? preTripPanel.dataset.pretripCorrectEndpoint : preTripPanel.dataset.pretripSubmitEndpoint,
+            {
+              method: isCorrection ? "PUT" : "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload)
+            }
+          );
+
+          const body = await readJsonResponse(response);
+          if (!response.ok) {
+            throw new Error(getErrorMessage(body, isCorrection ? "Unable to correct Pre-Trip." : "Unable to submit Pre-Trip."));
+          }
+
+          preTripPanel.dataset.pretripEditing = "false";
+          await refreshPreTripState();
+          showAlert(isCorrection ? "Pre-Trip corrected." : "Pre-Trip submitted.", "success");
+        } catch (error) {
+          showPreTripError(error.message);
+        } finally {
+          setButtonBusy(submitPreTripButton, false, "Saving...");
+        }
+      });
+    }
+
     const endActiveRunButton = document.getElementById("endActiveRunButton");
     if (endActiveRunButton) {
       endActiveRunButton.addEventListener("click", async () => {
+        if (endActiveRunButton.disabled) {
+          showAlert("Complete Post-Trip Phase 2 before ending the run.", "warning");
+          return;
+        }
+
         const runId = Number(endActiveRunButton.dataset.runId);
         const reloadUrl = endActiveRunButton.dataset.reloadUrl;
 
@@ -360,6 +1224,92 @@
           window.location.href = reloadUrl;
         } catch (error) {
           showAlert(error.message, "danger");
+        }
+      });
+    }
+
+    const postTripPhase1Button = document.getElementById("postTripPhase1Button");
+    if (postTripPhase1Button) {
+      postTripPhase1Button.addEventListener("click", async () => {
+        const postTripPanel = document.getElementById("postTripPanel");
+        const isReadyForPostTrip = postTripPanel && postTripPanel.dataset.posttripReady === "true";
+        if (!isReadyForPostTrip) {
+          showInlineError("Post-Trip Phase 1 becomes available after all assigned rider actions are finished.");
+          return;
+        }
+
+        showInlineError("");
+        setButtonBusy(postTripPhase1Button, true, "Saving...");
+
+        try {
+          const response = await fetch(postTripPanel.dataset.phase1Endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              phase1_no_students_remaining: document.getElementById("postTripPhase1NoStudents").checked,
+              phase1_belongings_checked: document.getElementById("postTripPhase1Belongings").checked,
+              phase1_checked_sign_hung: document.getElementById("postTripPhase1Sign").checked
+            })
+          });
+
+          const body = await readJsonResponse(response);
+          if (!response.ok) {
+            throw new Error(getErrorMessage(body, "Unable to complete Post-Trip Phase 1."));
+          }
+
+          await refreshPostTripState();
+          showAlert("Post-Trip Phase 1 completed.", "success");
+        } catch (error) {
+          showInlineError(error.message);
+        } finally {
+          setButtonBusy(postTripPhase1Button, false, "Saving...");
+        }
+      });
+    }
+
+    const postTripExteriorStatus = document.getElementById("postTripExteriorStatus");
+    if (postTripExteriorStatus) {
+      postTripExteriorStatus.addEventListener("change", toggleExteriorDescriptionRequirement);
+      toggleExteriorDescriptionRequirement();
+    }
+
+    const postTripPhase2Button = document.getElementById("postTripPhase2Button");
+    if (postTripPhase2Button) {
+      postTripPhase2Button.addEventListener("click", async () => {
+        const postTripPanel = document.getElementById("postTripPanel");
+        showInlineError("");
+        setButtonBusy(postTripPhase2Button, true, "Saving...");
+
+        try {
+          const payload = {
+            phase2_full_internal_recheck: document.getElementById("postTripPhase2Recheck").checked,
+            phase2_checked_to_cleared_switched: document.getElementById("postTripPhase2Sign").checked,
+            phase2_rear_button_triggered: document.getElementById("postTripPhase2RearButton").checked,
+            exterior_status: document.getElementById("postTripExteriorStatus").value
+          };
+
+          const exteriorDescription = document.getElementById("postTripExteriorDescription").value.trim();
+          if (exteriorDescription) {
+            payload.exterior_description = exteriorDescription;
+          }
+
+          const response = await fetch(postTripPanel.dataset.phase2Endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+
+          const body = await readJsonResponse(response);
+          if (!response.ok) {
+            throw new Error(getErrorMessage(body, "Unable to complete Post-Trip Phase 2."));
+          }
+
+          await refreshPostTripState();
+          showAlert("Post-Trip Phase 2 completed.", "success");
+        } catch (error) {
+          showInlineError(error.message);
+        } finally {
+          setButtonBusy(postTripPhase2Button, false, "Saving...");
         }
       });
     }
@@ -399,6 +1349,8 @@
 
       document.addEventListener("DOMContentLoaded", () => {
         initMap();
+        refreshPostTripState();
+        setInterval(refreshPostTripState, 10000);
 
         const protocol = window.location.protocol === "https:" ? "wss" : "ws";
         ws = new WebSocket(`${protocol}://${window.location.host}/ws/gps/${activeRunId}`);
@@ -427,6 +1379,10 @@
         }, 3000);
       });
     }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      refreshPreTripState();
+    });
   </script>
 </body>
 </html>

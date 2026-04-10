@@ -74,6 +74,7 @@ The current implementation includes:
 - `POST /runs/{run_id}/posttrip/phase2` updates the same Post-Trip Inspection record and finalizes Phase 2
 - `POST /runs/end` and `POST /runs/end_by_driver` require Post-Trip Inspection Phase 2 completion
 - `POST /runs/{run_id}/complete` remains legacy-compatible for the current reporting and completion flow
+- The existing driver workspace page surfaces the active-run Post-Trip Phase 1 and Phase 2 flow and keeps End Run locked until Phase 2 is complete
 
 ### Post-Trip Inspection Decision Layer
 - The system persists:
@@ -127,6 +128,11 @@ The current backend flow is:
 8. Runtime stop progression continues through the existing flexible stop workflow.
 9. Submit Post-Trip Inspection Phase 1 and then Phase 2 for the run.
 10. `POST /runs/end` and `POST /runs/end_by_driver` require Post-Trip Inspection Phase 2, while `POST /runs/{run_id}/complete` remains the legacy-compatible completion path.
+
+## Driver Workflow
+- The driver workspace page requires a valid bus/day Pre-Trip Inspection before Start Run is unlocked for a planned run
+- The driver workspace page can correct the same-day invalid Pre-Trip record inline before Start Run is unlocked again
+- The driver workspace page requires Post-Trip Phase 2 before End Run is unlocked for an active run
 
 Important runtime meaning:
 

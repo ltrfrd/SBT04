@@ -31,7 +31,7 @@ def _build_route_workspace(route: route_model.Route, selected_run_id: int | None
         (assignment for assignment in route.driver_assignments if assignment.active),
         None,
     )
-    assigned_bus = route.bus                                 # Current assigned bus when present
+    assigned_bus = route.active_bus or route.bus             # Active bus is authoritative for driver workspace display
 
     # -----------------------------------------------------------
     # - Order route runs
@@ -46,6 +46,15 @@ def _build_route_workspace(route: route_model.Route, selected_run_id: int | None
     run_rows = []                                            # Final nested run workspace rows
 
     for run in ordered_runs:
+        total_picked_up = sum(1 for assignment in run.student_assignments if assignment.picked_up)  # Riders picked up at least once
+        total_currently_onboard = sum(1 for assignment in run.student_assignments if assignment.is_onboard)  # Riders still on the bus
+        total_not_yet_boarded = sum(1 for assignment in run.student_assignments if not assignment.picked_up)  # Riders still waiting to board
+        total_remaining_dropoffs = sum(
+            1
+            for assignment in run.student_assignments
+            if assignment.picked_up and not assignment.dropped_off
+        )                                                   # Riders who boarded but still need dropoff
+
         # -----------------------------------------------------------
         # - Order run stops
         # - Keep stop sequence stable for running-board review
@@ -121,10 +130,20 @@ def _build_route_workspace(route: route_model.Route, selected_run_id: int | None
                 "student_count": len(run.student_assignments),
                 "current_stop_id": run.current_stop_id,
                 "current_stop_sequence": run.current_stop_sequence,
+                "picked_up_students": total_picked_up,
+                "students_onboard": total_currently_onboard,
+                "remaining_pickups": total_not_yet_boarded,
+                "remaining_dropoffs": total_remaining_dropoffs,
                 "can_start": run.start_time is None,         # Start only from ready runs
                 "can_update": run.start_time is None,        # Non-started runs remain editable in backend flows
                 "can_delete": run.start_time is None,        # Non-started runs remain deletable in backend flows
                 "can_end": status == "active",               # Preserve active end-run behavior
+                "posttrip_ready": (
+                    status == "active"
+                    and total_currently_onboard == 0
+                    and total_not_yet_boarded == 0
+                    and total_remaining_dropoffs == 0
+                ),                                           # Show post-trip only after rider work is complete
                 "stops": stop_rows,
             }
         )
@@ -147,6 +166,12 @@ def _build_route_workspace(route: route_model.Route, selected_run_id: int | None
         "bus_license_plate": assigned_bus.license_plate if assigned_bus else None,
         "bus_capacity": assigned_bus.capacity if assigned_bus else None,
         "bus_size": assigned_bus.size if assigned_bus else None,
+        "pretrip_id": None,
+        "pretrip_exists": False,
+        "pretrip_fit_for_duty": None,
+        "pretrip_issue_description": None,
+        "pretrip_date": None,
+        "pretrip_is_valid": False,
         "schools": [
             {
                 "id": school.id,

@@ -16,6 +16,8 @@ from database import get_db
 from backend.models import (
     dispatch as dispatch_model,
     driver as driver_model,
+    pretrip as pretrip_model,
+    posttrip as posttrip_model,
     route as route_model,
     run as run_model,
     school as school_model,
@@ -121,6 +123,7 @@ def driver_run_view(
         db.query(route_model.Route)
         .options(
             joinedload(route_model.Route.bus),               # Current assigned bus display data
+            joinedload(route_model.Route.active_bus),        # Current operational bus display data
             joinedload(route_model.Route.schools),           # Route header school list
             joinedload(route_model.Route.driver_assignments).joinedload(RouteDriverAssignment.driver),  # Assigned driver display
             joinedload(route_model.Route.runs).joinedload(run_model.Run.stops),  # Run -> stop hierarchy
@@ -148,6 +151,58 @@ def driver_run_view(
     # - Include selected run review state when present
     # -----------------------------------------------------------
     workspace = _build_route_workspace(selected_route, run_id) if selected_route else None
+    active_pretrip = None                                    # Optional current selected-route pre-trip state for no-active-run UI
+    if selected_route and workspace:
+        route_bus = selected_route.active_bus or selected_route.bus
+        if route_bus is not None:
+            active_pretrip = (
+                db.query(pretrip_model.PreTripInspection)
+                .options(joinedload(pretrip_model.PreTripInspection.defects))
+                .filter(pretrip_model.PreTripInspection.bus_id == route_bus.id)
+                .filter(pretrip_model.PreTripInspection.inspection_date == datetime.now().date())
+                .first()
+            )                                                # Today's pre-trip for the selected route's active bus
+
+            issue_description = None
+            if active_pretrip and active_pretrip.defects:
+                issue_description = "; ".join(
+                    defect.description
+                    for defect in active_pretrip.defects
+                    if defect.description
+                ) or None
+
+            has_major_defect = bool(
+                active_pretrip
+                and any(defect.severity == "major" for defect in active_pretrip.defects)
+            )
+            workspace["pretrip_id"] = active_pretrip.id if active_pretrip else None
+            workspace["pretrip_exists"] = active_pretrip is not None
+            workspace["pretrip_fit_for_duty"] = (
+                active_pretrip.fit_for_duty == "yes" if active_pretrip else None
+            )
+            workspace["pretrip_issue_description"] = issue_description
+            workspace["pretrip_date"] = (
+                active_pretrip.inspection_date.isoformat() if active_pretrip else None
+            )
+            workspace["pretrip_is_valid"] = bool(
+                active_pretrip
+                and active_pretrip.fit_for_duty == "yes"
+                and not has_major_defect
+            )
+        else:
+            workspace["pretrip_id"] = None
+            workspace["pretrip_exists"] = False
+            workspace["pretrip_fit_for_duty"] = None
+            workspace["pretrip_issue_description"] = None
+            workspace["pretrip_date"] = None
+            workspace["pretrip_is_valid"] = False
+    active_posttrip = None                                   # Optional initial post-trip state for active run UI
+    if workspace and workspace.get("active_run"):
+        active_posttrip = (
+            db.query(posttrip_model.PostTripInspection)
+            .filter(posttrip_model.PostTripInspection.run_id == workspace["active_run"]["id"])
+            .first()
+        )                                                    # Seed initial UI without changing post-trip business rules
 
     return templates.TemplateResponse(
         request,                                              # Request must be first
@@ -160,6 +215,8 @@ def driver_run_view(
             "workspace": workspace,
             "active_run_id": active_run.id if active_run else None,
             "active_route_id": active_run.route_id if active_run else None,
+            "active_pretrip": active_pretrip,
+            "active_posttrip": active_posttrip,
             "selected_run_id": run_id,
             "today": datetime.now().date().isoformat(),
         }
