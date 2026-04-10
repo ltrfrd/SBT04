@@ -11,6 +11,29 @@ from backend.models.dispatch_alert import DispatchAlert
 from tests.conftest import ensure_prepared_run_student
 
 
+def _pretrip_payload(context, **overrides):
+    payload = {
+        "bus_number": context["bus"]["bus_number"],
+        "license_plate": context["bus"]["license_plate"],
+        "driver_name": context["driver"]["name"],
+        "inspection_date": datetime.now().date().isoformat(),
+        "inspection_time": "06:15:00",
+        "odometer": 12345,
+        "inspection_place": "Main Yard",
+        "use_type": "school_bus",
+        "brakes_checked": True,
+        "lights_checked": True,
+        "tires_checked": True,
+        "emergency_equipment_checked": True,
+        "fit_for_duty": "yes",
+        "no_defects": True,
+        "signature": "driver-signature",
+        "defects": [],
+    }
+    payload.update(overrides)
+    return payload
+
+
 # -----------------------------------------------------------
 # - Shared setup helper
 # - Create one prepared run with driver and active bus
@@ -129,20 +152,7 @@ def test_start_run_blocks_when_driver_marked_not_fit(client):
 
     pretrip = client.post(
         "/pretrips/",
-        json={
-            "bus_number": context["bus"]["bus_number"],
-            "license_plate": context["bus"]["license_plate"],
-            "driver_name": context["driver"]["name"],
-            "inspection_date": datetime.now().date().isoformat(),
-            "inspection_time": "06:15:00",
-            "odometer": 12345,
-            "inspection_place": "Main Yard",
-            "use_type": "school_bus",
-            "fit_for_duty": "no",
-            "no_defects": True,
-            "signature": "driver-signature",
-            "defects": [],
-        },
+        json=_pretrip_payload(context, fit_for_duty="no"),
     )
     assert pretrip.status_code in (200, 201)
 
@@ -157,20 +167,13 @@ def test_start_run_blocks_when_major_defect_reported(client):
 
     pretrip = client.post(
         "/pretrips/",
-        json={
-            "bus_number": context["bus"]["bus_number"],
-            "license_plate": context["bus"]["license_plate"],
-            "driver_name": context["driver"]["name"],
-            "inspection_date": datetime.now().date().isoformat(),
-            "inspection_time": "06:20:00",
-            "odometer": 22345,
-            "inspection_place": "Main Yard",
-            "use_type": "school_bus",
-            "fit_for_duty": "yes",
-            "no_defects": False,
-            "signature": "driver-signature",
-            "defects": [{"description": "Brake issue", "severity": "major"}],
-        },
+        json=_pretrip_payload(
+            context,
+            inspection_time="06:20:00",
+            odometer=22345,
+            no_defects=False,
+            defects=[{"description": "Brake issue", "severity": "major"}],
+        ),
     )
     assert pretrip.status_code in (200, 201)
 
@@ -178,6 +181,52 @@ def test_start_run_blocks_when_major_defect_reported(client):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Run blocked: major defect reported on pre-trip"
+
+
+def test_pretrip_create_and_correct_persist_checklist_history(client):
+    context = _create_pretrip_enforced_run(client, route_number="PRETRIP-CHECKLIST-PERSIST")
+
+    created = client.post(
+        "/pretrips/",
+        json=_pretrip_payload(
+            context,
+            brakes_checked=True,
+            lights_checked=False,
+            tires_checked=True,
+            emergency_equipment_checked=False,
+        ),
+    )
+    assert created.status_code in (200, 201)
+    created_body = created.json()
+
+    assert created_body["brakes_checked"] is True
+    assert created_body["lights_checked"] is False
+    assert created_body["tires_checked"] is True
+    assert created_body["emergency_equipment_checked"] is False
+
+    corrected = client.put(
+        f"/pretrips/{created_body['id']}/correct",
+        json=_pretrip_payload(
+            context,
+            inspection_time="06:25:00",
+            brakes_checked=False,
+            lights_checked=True,
+            tires_checked=False,
+            emergency_equipment_checked=True,
+            corrected_by=context["driver"]["name"],
+        ),
+    )
+    assert corrected.status_code == 200
+    corrected_body = corrected.json()
+
+    assert corrected_body["brakes_checked"] is False
+    assert corrected_body["lights_checked"] is True
+    assert corrected_body["tires_checked"] is False
+    assert corrected_body["emergency_equipment_checked"] is True
+    assert corrected_body["original_payload"]["brakes_checked"] is True
+    assert corrected_body["original_payload"]["lights_checked"] is False
+    assert corrected_body["original_payload"]["tires_checked"] is True
+    assert corrected_body["original_payload"]["emergency_equipment_checked"] is False
 
 
 def test_start_run_creates_one_missing_pretrip_alert_within_window(client, db_engine):

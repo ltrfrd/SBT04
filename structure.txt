@@ -74,6 +74,8 @@ IMPLEMENTED SYSTEM NOTES
 - Driver workflow keeps End Run locked until active-run Post-Trip Phase 2 is complete
 - One Pre-Trip Inspection exists per bus per day
 - Pre-Trip Inspection is stored by bus_id and remains API-compatible with bus_number and license_plate
+- Pre-Trip Inspection persists checklist history for brakes, lights, tires, and emergency equipment
+- Those checklist fields are currently stored for future use but are not active in the driver workflow UI
 - Pre-Trip Inspection create and correction flows sync dispatch alerts for major defects and fit_for_duty = no
 - Missing Pre-Trip Inspection alerts are currently triggered through the run-start flow and supported by alert helpers
 - Active bus is authoritative for run-start safety checks

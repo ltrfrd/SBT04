@@ -113,6 +113,10 @@ def _serialize_pretrip_snapshot(inspection: PreTripInspection) -> dict:
         "odometer": inspection.odometer,
         "inspection_place": inspection.inspection_place,
         "use_type": inspection.use_type,
+        "brakes_checked": inspection.brakes_checked,
+        "lights_checked": inspection.lights_checked,
+        "tires_checked": inspection.tires_checked,
+        "emergency_equipment_checked": inspection.emergency_equipment_checked,
         "fit_for_duty": inspection.fit_for_duty,
         "no_defects": inspection.no_defects,
         "signature": inspection.signature,
@@ -159,6 +163,10 @@ def create_pretrip(
         odometer=payload.odometer,
         inspection_place=payload.inspection_place,
         use_type=payload.use_type,
+        brakes_checked=payload.brakes_checked,
+        lights_checked=payload.lights_checked,
+        tires_checked=payload.tires_checked,
+        emergency_equipment_checked=payload.emergency_equipment_checked,
         fit_for_duty=payload.fit_for_duty,
         no_defects=payload.no_defects,
         signature=payload.signature,
@@ -327,6 +335,10 @@ def correct_pretrip(
     inspection.odometer = payload.odometer
     inspection.inspection_place = payload.inspection_place
     inspection.use_type = payload.use_type
+    inspection.brakes_checked = payload.brakes_checked
+    inspection.lights_checked = payload.lights_checked
+    inspection.tires_checked = payload.tires_checked
+    inspection.emergency_equipment_checked = payload.emergency_equipment_checked
     inspection.fit_for_duty = payload.fit_for_duty
     inspection.no_defects = payload.no_defects
     inspection.signature = payload.signature

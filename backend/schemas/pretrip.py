@@ -67,6 +67,10 @@ class PreTripCreate(BaseModel):
     odometer: int  # Reported odometer reading
     inspection_place: str = Field(min_length=1)  # Where the inspection occurred
     use_type: str  # school_bus or charter
+    brakes_checked: bool  # Checklist audit field
+    lights_checked: bool  # Checklist audit field
+    tires_checked: bool  # Checklist audit field
+    emergency_equipment_checked: bool  # Checklist audit field
     fit_for_duty: str  # yes or no
     no_defects: bool  # XOR flag against defect rows
     signature: str = Field(min_length=1)  # Captured signature value
@@ -134,6 +138,10 @@ class PreTripOut(BaseModel):
     odometer: int  # Reported odometer reading
     inspection_place: str  # Inspection location
     use_type: str  # school_bus or charter
+    brakes_checked: bool  # Checklist audit field
+    lights_checked: bool  # Checklist audit field
+    tires_checked: bool  # Checklist audit field
+    emergency_equipment_checked: bool  # Checklist audit field
     fit_for_duty: str  # yes or no
     no_defects: bool  # Defect-free flag
     signature: str  # Captured signature value

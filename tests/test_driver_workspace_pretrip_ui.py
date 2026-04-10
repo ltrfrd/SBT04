@@ -3,6 +3,30 @@ from datetime import date
 from tests.test_run_pretrip_enforcement import _create_pretrip_enforced_run
 
 
+def _pretrip_payload(context, **overrides):
+    payload = {
+        "bus_id": context["bus"]["id"],
+        "bus_number": context["bus"]["bus_number"],
+        "license_plate": context["bus"]["license_plate"],
+        "driver_name": context["driver"]["name"],
+        "inspection_date": date.today().isoformat(),
+        "inspection_time": "06:20:00",
+        "odometer": 0,
+        "inspection_place": "Driver Workspace",
+        "use_type": "school_bus",
+        "brakes_checked": True,
+        "lights_checked": True,
+        "tires_checked": True,
+        "emergency_equipment_checked": True,
+        "fit_for_duty": "yes",
+        "no_defects": True,
+        "signature": context["driver"]["name"],
+        "defects": [],
+    }
+    payload.update(overrides)
+    return payload
+
+
 def _login_and_open_workspace(client, context):
     login = client.post("/login", json={"driver_id": context["driver"]["id"]})
     assert login.status_code == 200
@@ -29,23 +53,14 @@ def test_driver_workspace_valid_pretrip_enables_start_run(client):
 
     pretrip = client.post(
         "/pretrips/",
-        json={
-            "bus_id": context["bus"]["id"],
-            "bus_number": context["bus"]["bus_number"],
-            "license_plate": context["bus"]["license_plate"],
-            "driver_name": context["driver"]["name"],
-            "inspection_date": date.today().isoformat(),
-            "inspection_time": "06:20:00",
-            "odometer": 0,
-            "inspection_place": "Driver Workspace",
-            "use_type": "school_bus",
-            "fit_for_duty": "yes",
-            "no_defects": True,
-            "signature": context["driver"]["name"],
-            "defects": [],
-        },
+        json=_pretrip_payload(context),
     )
     assert pretrip.status_code in (200, 201)
+    pretrip_body = pretrip.json()
+    assert pretrip_body["brakes_checked"] is True
+    assert pretrip_body["lights_checked"] is True
+    assert pretrip_body["tires_checked"] is True
+    assert pretrip_body["emergency_equipment_checked"] is True
 
     response = _login_and_open_workspace(client, context)
     assert response.status_code == 200
@@ -61,21 +76,17 @@ def test_driver_workspace_invalid_pretrip_keeps_start_locked(client):
 
     pretrip = client.post(
         "/pretrips/",
-        json={
-            "bus_id": context["bus"]["id"],
-            "bus_number": context["bus"]["bus_number"],
-            "license_plate": context["bus"]["license_plate"],
-            "driver_name": context["driver"]["name"],
-            "inspection_date": date.today().isoformat(),
-            "inspection_time": "06:25:00",
-            "odometer": 0,
-            "inspection_place": "Driver Workspace",
-            "use_type": "school_bus",
-            "fit_for_duty": "no",
-            "no_defects": False,
-            "signature": context["driver"]["name"],
-            "defects": [{"description": "Brake pressure issue", "severity": "major"}],
-        },
+        json=_pretrip_payload(
+            context,
+            inspection_time="06:25:00",
+            brakes_checked=False,
+            lights_checked=True,
+            tires_checked=False,
+            emergency_equipment_checked=True,
+            fit_for_duty="no",
+            no_defects=False,
+            defects=[{"description": "Brake pressure issue", "severity": "major"}],
+        ),
     )
     assert pretrip.status_code in (200, 201)
 
@@ -97,21 +108,17 @@ def test_driver_workspace_invalid_pretrip_exposes_correction_action(client):
 
     pretrip = client.post(
         "/pretrips/",
-        json={
-            "bus_id": context["bus"]["id"],
-            "bus_number": context["bus"]["bus_number"],
-            "license_plate": context["bus"]["license_plate"],
-            "driver_name": context["driver"]["name"],
-            "inspection_date": date.today().isoformat(),
-            "inspection_time": "06:30:00",
-            "odometer": 0,
-            "inspection_place": "Driver Workspace",
-            "use_type": "school_bus",
-            "fit_for_duty": "no",
-            "no_defects": False,
-            "signature": context["driver"]["name"],
-            "defects": [{"description": "Rear light issue", "severity": "major"}],
-        },
+        json=_pretrip_payload(
+            context,
+            inspection_time="06:30:00",
+            brakes_checked=False,
+            lights_checked=False,
+            tires_checked=True,
+            emergency_equipment_checked=False,
+            fit_for_duty="no",
+            no_defects=False,
+            defects=[{"description": "Rear light issue", "severity": "major"}],
+        ),
     )
     assert pretrip.status_code in (200, 201)
 
@@ -122,6 +129,10 @@ def test_driver_workspace_invalid_pretrip_exposes_correction_action(client):
     assert "Edit Pre-Trip" in body
     assert 'id="cancelPreTripEditButton"' in body
     assert 'data-pretrip-editing="false"' in body
+    assert 'id="preTripBrakes"' not in body
+    assert 'id="preTripLights"' not in body
+    assert 'id="preTripTires"' not in body
+    assert 'id="preTripEmergency"' not in body
 
 
 def test_corrected_valid_pretrip_unlocks_start_run_in_workspace(client):
@@ -129,45 +140,37 @@ def test_corrected_valid_pretrip_unlocks_start_run_in_workspace(client):
 
     pretrip = client.post(
         "/pretrips/",
-        json={
-            "bus_id": context["bus"]["id"],
-            "bus_number": context["bus"]["bus_number"],
-            "license_plate": context["bus"]["license_plate"],
-            "driver_name": context["driver"]["name"],
-            "inspection_date": date.today().isoformat(),
-            "inspection_time": "06:35:00",
-            "odometer": 0,
-            "inspection_place": "Driver Workspace",
-            "use_type": "school_bus",
-            "fit_for_duty": "no",
-            "no_defects": False,
-            "signature": context["driver"]["name"],
-            "defects": [{"description": "Initial brake issue", "severity": "major"}],
-        },
+        json=_pretrip_payload(
+            context,
+            inspection_time="06:35:00",
+            brakes_checked=False,
+            lights_checked=True,
+            tires_checked=False,
+            emergency_equipment_checked=True,
+            fit_for_duty="no",
+            no_defects=False,
+            defects=[{"description": "Initial brake issue", "severity": "major"}],
+        ),
     )
     assert pretrip.status_code in (200, 201)
     pretrip_id = pretrip.json()["id"]
 
     corrected = client.put(
         f"/pretrips/{pretrip_id}/correct",
-        json={
-            "bus_id": context["bus"]["id"],
-            "bus_number": context["bus"]["bus_number"],
-            "license_plate": context["bus"]["license_plate"],
-            "driver_name": context["driver"]["name"],
-            "inspection_date": date.today().isoformat(),
-            "inspection_time": "06:40:00",
-            "odometer": 0,
-            "inspection_place": "Driver Workspace",
-            "use_type": "school_bus",
-            "fit_for_duty": "yes",
-            "no_defects": True,
-            "signature": context["driver"]["name"],
-            "corrected_by": context["driver"]["name"],
-            "defects": [],
-        },
+        json=_pretrip_payload(
+            context,
+            inspection_time="06:40:00",
+            corrected_by=context["driver"]["name"],
+        ),
     )
     assert corrected.status_code == 200
+    corrected_body = corrected.json()
+    assert corrected_body["brakes_checked"] is True
+    assert corrected_body["lights_checked"] is True
+    assert corrected_body["tires_checked"] is True
+    assert corrected_body["emergency_equipment_checked"] is True
+    assert corrected_body["original_payload"]["brakes_checked"] is False
+    assert corrected_body["original_payload"]["tires_checked"] is False
 
     response = _login_and_open_workspace(client, context)
     assert response.status_code == 200
@@ -183,45 +186,42 @@ def test_corrected_still_invalid_pretrip_remains_blocked(client):
 
     pretrip = client.post(
         "/pretrips/",
-        json={
-            "bus_id": context["bus"]["id"],
-            "bus_number": context["bus"]["bus_number"],
-            "license_plate": context["bus"]["license_plate"],
-            "driver_name": context["driver"]["name"],
-            "inspection_date": date.today().isoformat(),
-            "inspection_time": "06:45:00",
-            "odometer": 0,
-            "inspection_place": "Driver Workspace",
-            "use_type": "school_bus",
-            "fit_for_duty": "no",
-            "no_defects": False,
-            "signature": context["driver"]["name"],
-            "defects": [{"description": "Initial issue", "severity": "major"}],
-        },
+        json=_pretrip_payload(
+            context,
+            inspection_time="06:45:00",
+            brakes_checked=False,
+            lights_checked=False,
+            tires_checked=True,
+            emergency_equipment_checked=False,
+            fit_for_duty="no",
+            no_defects=False,
+            defects=[{"description": "Initial issue", "severity": "major"}],
+        ),
     )
     assert pretrip.status_code in (200, 201)
     pretrip_id = pretrip.json()["id"]
 
     corrected = client.put(
         f"/pretrips/{pretrip_id}/correct",
-        json={
-            "bus_id": context["bus"]["id"],
-            "bus_number": context["bus"]["bus_number"],
-            "license_plate": context["bus"]["license_plate"],
-            "driver_name": context["driver"]["name"],
-            "inspection_date": date.today().isoformat(),
-            "inspection_time": "06:50:00",
-            "odometer": 0,
-            "inspection_place": "Driver Workspace",
-            "use_type": "school_bus",
-            "fit_for_duty": "no",
-            "no_defects": False,
-            "signature": context["driver"]["name"],
-            "corrected_by": context["driver"]["name"],
-            "defects": [{"description": "Updated transmission issue", "severity": "major"}],
-        },
+        json=_pretrip_payload(
+            context,
+            inspection_time="06:50:00",
+            brakes_checked=True,
+            lights_checked=False,
+            tires_checked=True,
+            emergency_equipment_checked=False,
+            fit_for_duty="no",
+            no_defects=False,
+            corrected_by=context["driver"]["name"],
+            defects=[{"description": "Updated transmission issue", "severity": "major"}],
+        ),
     )
     assert corrected.status_code == 200
+    corrected_body = corrected.json()
+    assert corrected_body["brakes_checked"] is True
+    assert corrected_body["lights_checked"] is False
+    assert corrected_body["tires_checked"] is True
+    assert corrected_body["emergency_equipment_checked"] is False
 
     response = _login_and_open_workspace(client, context)
     assert response.status_code == 200
@@ -245,3 +245,29 @@ def test_driver_workspace_pretrip_form_exposes_selected_bus_hooks(client):
     assert f'data-pretrip-license-plate="{context["bus"]["license_plate"]}"' in body
     assert 'id="preTripFitForDuty"' in body
     assert 'id="submitPreTripButton"' in body
+
+
+def test_driver_workspace_pretrip_ui_hides_stored_checklist_history(client):
+    context = _create_pretrip_enforced_run(client, route_number="DRV-PRETRIP-CHECKLIST")
+
+    pretrip = client.post(
+        "/pretrips/",
+        json=_pretrip_payload(
+            context,
+            brakes_checked=True,
+            lights_checked=False,
+            tires_checked=True,
+            emergency_equipment_checked=False,
+        ),
+    )
+    assert pretrip.status_code in (200, 201)
+
+    response = _login_and_open_workspace(client, context)
+    assert response.status_code == 200
+
+    body = response.text
+    assert 'id="preTripBrakes"' not in body
+    assert 'id="preTripLights"' not in body
+    assert 'id="preTripTires"' not in body
+    assert 'id="preTripEmergency"' not in body
+    assert "Pre-Trip completed" in body

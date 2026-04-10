@@ -24,6 +24,10 @@ class PreTripInspection(Base):
     odometer = Column(Integer, nullable=False)  # Reported odometer value
     inspection_place = Column(String(255), nullable=False)  # Where the inspection happened
     use_type = Column(String(50), nullable=False)  # school_bus or charter
+    brakes_checked = Column(Boolean, nullable=False, default=False)  # Checklist audit field
+    lights_checked = Column(Boolean, nullable=False, default=False)  # Checklist audit field
+    tires_checked = Column(Boolean, nullable=False, default=False)  # Checklist audit field
+    emergency_equipment_checked = Column(Boolean, nullable=False, default=False)  # Checklist audit field
     fit_for_duty = Column(String(10), nullable=False)  # yes or no
     no_defects = Column(Boolean, nullable=False, default=False)  # XOR flag against defects list
     signature = Column(Text, nullable=False)  # Captured signature payload/text
