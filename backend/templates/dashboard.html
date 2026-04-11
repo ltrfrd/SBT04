@@ -2,7 +2,7 @@
      backend/templates/dashboard.html - FleetOS Dashboard Template
      -----------------------------------------------------------
      Purpose: Displays system overview and navigation links to
-     other attendance pages (route attendance, attendance summary, etc.)
+     other reports pages (route reports, reports summary, etc.)
      =========================================================== -->
 <!DOCTYPE html>
 <html lang="en">
@@ -57,8 +57,8 @@
     <p><strong>Students:</strong> {{ student_count }}</p>
     <p><strong>Active Runs:</strong> {{ run_count }}</p>
     <!-- Navigation links -->
-    <a href="/route_report">View Route Attendance</a>
-    <a href="/summary_report">View Attendance Summary</a>
+    <a href="/route_report">View Route Reports</a>
+    <a href="/summary_report">View Reports Summary</a>
   </div>
 </body>
 </html>

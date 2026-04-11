@@ -1,14 +1,14 @@
 <!-- ===========================================================
-     backend/templates/summary_report.html - FleetOS Attendance Summary
+     backend/templates/summary_report.html - FleetOS Reports Summary
      -----------------------------------------------------------
-     Purpose: Displays attendance and dispatch summary for all drivers in a date range.
+     Purpose: Displays reports and dispatch summary for all drivers in a date range.
      Shows approved/pending days, charter hours, and totals.
      =========================================================== -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Attendance Summary</title>
+  <title>Reports Summary</title>
 
   <!-- Inline CSS for simple, readable styling -->
   <style>
@@ -104,7 +104,7 @@
 <body>
 
   <!-- Main title -->
-  <h1>Attendance Summary</h1>
+  <h1>Reports Summary</h1>
 
   <div class="container">
     <!-- Header section: date range and top metrics -->
@@ -122,7 +122,7 @@
       </div>
     </div>
 
-    <!-- Attendance table -->
+    <!-- Reports table -->
     <table>
       <thead>
         <tr>
@@ -150,7 +150,7 @@
         <!-- Fallback when no records exist -->
         <tr>
           <td colspan="4" style="text-align:center; color:#777;">
-            No attendance records in this date range.
+            No reports records in this date range.
           </td>
         </tr>
         {% endfor %}

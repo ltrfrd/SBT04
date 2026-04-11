@@ -25,7 +25,7 @@ from backend.models import (
 )
 from backend.models.operator import Operator, OperatorRouteAccess
 from backend.models.associations import RouteDriverAssignment, StudentRunAssignment
-from backend.utils import attendance_generator
+from backend.utils import reports_generator
 from backend.utils.auth import get_current_driver
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
@@ -62,7 +62,7 @@ def dashboard(
 
 
 # -----------------------------------------------------------
-# ROUTE ATTENDANCE PAGE
+# ROUTE REPORTS PAGE
 # -----------------------------------------------------------
 @router.get("/route_report/{route_id}", response_class=HTMLResponse)
 def route_report(
@@ -71,8 +71,8 @@ def route_report(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    """Shows route-specific attendance summary including driver name and route details."""
-    route_data = attendance_generator.route_summary(db, route_id, operator_id=operator.id)
+    """Shows route-specific reports summary including driver name and route details."""
+    route_data = reports_generator.route_summary(db, route_id, operator_id=operator.id)
     if "error" in route_data:
         raise HTTPException(status_code=404, detail=route_data["error"])
 
@@ -246,7 +246,7 @@ def driver_run_view(
 
 
 # -----------------------------------------------------------
-# DISPATCH ATTENDANCE SUMMARY PAGE
+# DISPATCH REPORTS SUMMARY PAGE
 # -----------------------------------------------------------
 @router.get("/summary_report", response_class=HTMLResponse)
 def summary_report(
@@ -256,7 +256,7 @@ def summary_report(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    """Shows dispatch attendance summary between given dates."""
+    """Shows dispatch reports summary between given dates."""
     end = end or date.today()
     start = start or end
     records = (

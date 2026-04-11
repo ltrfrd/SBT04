@@ -4,12 +4,12 @@
 # Re-exports utility modules for clean imports
 # ===========================================================
 
-from .attendance_generator import (
+from .reports_generator import (
     driver_summary,
     route_summary,
     dispatch_summary,
+    generate_reports,
     generate_attendance,
-    generate_report,
 )
 
 # Optional: Add future utils here
@@ -20,6 +20,6 @@ __all__ = [
     "driver_summary",
     "route_summary",
     "dispatch_summary",
+    "generate_reports",
     "generate_attendance",
-    "generate_report",
 ]

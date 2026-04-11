@@ -1,8 +1,8 @@
 # -----------------------------------------------------------
-# Report Router Compatibility
-# - Keep legacy imports working while attendance becomes the app layer
+# Reports Router Compatibility
+# - Keep legacy imports working while reports is the app layer
 # -----------------------------------------------------------
-from .attendance import router  # Re-export attendance router during the rename phase
+from .reports import router  # Re-export reports router during the rename phase
 
 
 __all__ = ["router"]  # Preserve legacy router export

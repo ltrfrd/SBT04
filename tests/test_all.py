@@ -359,7 +359,7 @@ def test_route_report_uses_assigned_bus_values_without_route_fallback(client, db
     assert assigned_response.status_code == 200
     assigned_body = assigned_response.text
 
-    assert "Route Attendance: REPORT-BUS-1" in assigned_body
+    assert "Route Reports: REPORT-BUS-1" in assigned_body
     assert "BUS-REPORT-REAL" in assigned_body
     assert "mid" in assigned_body
     assert "RP-PLATE-1" in assigned_body
@@ -372,7 +372,7 @@ def test_route_report_uses_assigned_bus_values_without_route_fallback(client, db
     assert fallback_response.status_code == 200
     fallback_body = fallback_response.text
 
-    assert "Route Attendance: REPORT-BUS-1" in fallback_body
+    assert "Route Reports: REPORT-BUS-1" in fallback_body
     assert "Bus:</strong> -" in fallback_body
     assert "Bus Capacity:" not in fallback_body
     assert "Legacy Report Operator" not in fallback_body
@@ -3173,9 +3173,9 @@ def test_run_complete(client):
 
 
     # =============================================================================
-# Test school attendance report returns data for one school
+# Test school reports endpoint returns data for one school
 # =============================================================================
-def test_get_school_attendance_report(client):
+def test_get_school_reports(client):
 
     # -------------------------------------------------------------------------
     # Create school
@@ -3183,15 +3183,15 @@ def test_get_school_attendance_report(client):
     school = client.post(
         "/schools/",
         json={
-            "name": "Attendance School",
-            "address": "123 Attendance St",
+            "name": "Reports School",
+            "address": "123 Reports St",
         },
     )
     assert school.status_code == 201
     school_id = school.json()["id"]
 
     # -------------------------------------------------------------------------
-    # Request school attendance report
+    # Request school reports payload
     # -------------------------------------------------------------------------
     response = client.get(f"/reports/school/{school_id}")
     assert response.status_code == 200
@@ -3199,11 +3199,11 @@ def test_get_school_attendance_report(client):
     body = response.json()
 
            # -------------------------------------------------------------------------
-    # Validate school attendance report shape
+    # Validate school reports shape
     # -------------------------------------------------------------------------
     assert isinstance(body, dict)
     assert body["school_id"] == school_id
-    assert body["school_name"] == "Attendance School"
+    assert body["school_name"] == "Reports School"
     assert "total_routes" in body
     assert "routes" in body
     assert isinstance(body["routes"], list)
@@ -3230,9 +3230,9 @@ def test_get_school_attendance_report(client):
 
 
 # =============================================================================
-# Test school mobile attendance report renders printable school layout
+# Test school mobile reports page renders printable school layout
 # =============================================================================
-def test_get_school_mobile_attendance_report(client):
+def test_get_school_mobile_reports(client):
 
     # -------------------------------------------------------------------------
     # Create driver
@@ -3255,7 +3255,7 @@ def test_get_school_mobile_attendance_report(client):
     school = client.post(
         "/schools/",
         json={
-            "name": "Rendered Attendance School",
+            "name": "Rendered Reports School",
             "address": "456 Rendered St",
         },
     )
@@ -3349,7 +3349,7 @@ def test_get_school_mobile_attendance_report(client):
 
     body = response.text  # Rendered HTML
 
-    assert "Rendered Attendance School" in body                           # School name appears
+    assert "Rendered Reports School" in body                             # School name appears
     assert "R-MOBILE" in body                                             # Route appears on landing page
 # =============================================================================
 # School confirmation persistence test
@@ -3357,7 +3357,7 @@ def test_get_school_mobile_attendance_report(client):
 # Verifies:
 # - school can confirm one run
 # - confirmation is saved in DB
-# - GET school attendance still returns confirmed state after refresh
+# - GET school reports still returns confirmed state after refresh
 # =============================================================================
 def test_school_confirmation_persists_after_refresh(client):
     # -------------------------------------------------------------------------
@@ -3408,7 +3408,7 @@ def test_school_confirmation_persists_after_refresh(client):
     run_id = run.json()["id"]                                           # save id
 
         # -------------------------------------------------------------------------
-    # Confirm school attendance                                         # POST confirm
+    # Confirm school reports                                            # POST confirm
     # -------------------------------------------------------------------------
     confirm = client.post(
         f"/reports/school/{school_id}/confirm/{run_id}",
@@ -3417,14 +3417,14 @@ def test_school_confirmation_persists_after_refresh(client):
     assert confirm.status_code == 200
     confirm_body = confirm.json()
 
-    assert confirm_body["message"] == "School attendance confirmed"
+    assert confirm_body["message"] == "School reports confirmed"
     assert confirm_body["school_id"] == school_id
     assert confirm_body["run_id"] == run_id
     assert confirm_body["confirmed_by"] == "Front Desk"
     assert confirm_body["confirmed_at"] is not None
 
     # -------------------------------------------------------------------------
-    # Reload school attendance report                                   # GET after refresh
+    # Reload school reports                                             # GET after refresh
     # -------------------------------------------------------------------------
     report = client.get(f"/reports/school/{school_id}")
     assert report.status_code == 200
@@ -3547,10 +3547,10 @@ def test_update_school_status(client, db_engine):                              #
     ).first()
             
 # -----------------------------------------------------------
-# - School attendance test fixture
+# - School reports test fixture
 # - Create minimal school / route / run / assignment setup
 # -----------------------------------------------------------
-def _build_school_attendance_fixture(client):
+def _build_school_reports_fixture(client):
     unique = uuid.uuid4().hex[:8]  # Unique suffix for test isolation
     # -------------------------------------------------------------------------
     # Create driver
@@ -3681,11 +3681,11 @@ def _build_school_attendance_fixture(client):
 
 
 # -----------------------------------------------------------
-# - School attendance report by school
+# - School reports by school
 # - Returns only students assigned to each run
 # -----------------------------------------------------------
-def test_school_attendance_report_shows_only_assigned_students_per_run(client):
-    ids = _build_school_attendance_fixture(client)                  # Build minimal attendance setup
+def test_school_reports_show_only_assigned_students_per_run(client):
+    ids = _build_school_reports_fixture(client)                     # Build minimal reports setup
 
     response = client.get(f"/reports/school/{ids['school_id']}")
     assert response.status_code == 200
@@ -3715,10 +3715,10 @@ def test_school_attendance_report_shows_only_assigned_students_per_run(client):
 
 # -----------------------------------------------------------
 # - School-side status update persistence
-# - Saved present/absent status returns in school report
+# - Saved present/absent status returns in school reports payload
 # -----------------------------------------------------------
-def test_school_status_update_persists_into_school_report(client):
-    ids = _build_school_attendance_fixture(client)                  # Build minimal attendance setup
+def test_school_status_update_persists_into_school_reports(client):
+    ids = _build_school_reports_fixture(client)                     # Build minimal reports setup
 
     update = client.post(
         "/reports/school/student-status",
@@ -3746,11 +3746,11 @@ def test_school_status_update_persists_into_school_report(client):
 
 
 # -----------------------------------------------------------
-# - School attendance confirmation persistence
-# - Confirmed run returns confirmation in school report
+# - School reports confirmation persistence
+# - Confirmed run returns confirmation in school reports payload
 # -----------------------------------------------------------
-def test_school_confirmation_persists_into_school_report(client):
-    ids = _build_school_attendance_fixture(client)                  # Build minimal attendance setup
+def test_school_confirmation_persists_into_school_reports(client):
+    ids = _build_school_reports_fixture(client)                     # Build minimal reports setup
 
     confirm = client.post(
         f"/reports/school/{ids['school_id']}/confirm/{ids['run_1_id']}",

@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>School Bus Attendance Report</title>
+    <title>School Bus Reports</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body {
@@ -326,10 +326,10 @@
 
         <div class="report-card">
             <div class="report-header">
-                <h1 class="report-title">School Bus Attendance Report</h1>
+                <h1 class="report-title">School Bus Reports</h1>
                 <div class="header-actions">
                     <a class="nav-link" href="/reports/school/{{ report.school_id }}/mobile/route/{{ route.route_id }}">Back to Runs</a>
-                    <button class="print-button" onclick="window.print()">Print Attendance Report</button>
+                    <button class="print-button" onclick="window.print()">Print Reports</button>
                 </div>
             </div>
 
@@ -369,7 +369,7 @@
                         data-school-id="{{ report.school_id }}"
                         data-run-id="{{ run.run_id }}"
                     >
-                        Confirm Attendance
+                        Confirm Reports
                     </button>
                 {% endif %}
             </div>

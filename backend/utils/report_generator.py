@@ -1,13 +1,13 @@
 # -----------------------------------------------------------
-# Report Generator Compatibility
-# - Re-export attendance-layer helpers for the app layer
+# Reports Generator Compatibility
+# - Re-export reports-layer helpers for legacy imports
 # -----------------------------------------------------------
-from .attendance_generator import (  # Re-export attendance-layer helpers during the rename phase
+from .reports_generator import (  # Re-export reports-layer helpers during the rename phase
     driver_summary,
     route_summary,
     dispatch_summary,
+    generate_reports,
     generate_attendance,
-    generate_report,
 )
 
 
@@ -15,6 +15,6 @@ __all__ = [
     "driver_summary",
     "route_summary",
     "dispatch_summary",
+    "generate_reports",
     "generate_attendance",
-    "generate_report",
 ]  # Preserve legacy helper exports
