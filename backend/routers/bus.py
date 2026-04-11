@@ -16,9 +16,13 @@ from backend.models import bus as bus_model
 from backend.models.associations import RouteDriverAssignment, StudentRunAssignment
 from backend.models import run as run_model
 from backend.models import student as student_model
+from backend.models.company import Company
 from backend.models.route import Route
 from backend.schemas.bus import BusUpdate
 from backend.routers.route import _serialize_route_detail
+from backend.utils.company_scope import get_company_context
+from backend.utils.company_scope import get_company_scoped_record_or_404
+from backend.utils.company_scope import get_route_access_level
 
 
 router = APIRouter(prefix="/buses", tags=["Buses"])
@@ -31,12 +35,17 @@ router = APIRouter(prefix="/buses", tags=["Buses"])
 def _validate_bus_uniqueness(
     *,
     db: Session,
+    company_id: int,
     unit_number: str | None = None,
     license_plate: str | None = None,
     exclude_bus_id: int | None = None,
 ) -> None:
     if unit_number is not None:
-        query = db.query(bus_model.Bus).filter(bus_model.Bus.unit_number == unit_number)
+        query = (
+            db.query(bus_model.Bus)
+            .filter(bus_model.Bus.unit_number == unit_number)
+            .filter(bus_model.Bus.company_id == company_id)
+        )
         if exclude_bus_id is not None:
             query = query.filter(bus_model.Bus.id != exclude_bus_id)
 
@@ -44,7 +53,11 @@ def _validate_bus_uniqueness(
             raise HTTPException(status_code=409, detail="Bus number already exists")
 
     if license_plate is not None:
-        query = db.query(bus_model.Bus).filter(bus_model.Bus.license_plate == license_plate)
+        query = (
+            db.query(bus_model.Bus)
+            .filter(bus_model.Bus.license_plate == license_plate)
+            .filter(bus_model.Bus.company_id == company_id)
+        )
         if exclude_bus_id is not None:
             query = query.filter(bus_model.Bus.id != exclude_bus_id)
 
@@ -64,15 +77,21 @@ def _validate_bus_uniqueness(
     description="Create a standalone bus record. Bus Number and license plate must be unique.",
     response_description="Created bus",
 )
-def create_bus(bus: schemas.BusCreate, db: Session = Depends(get_db)):
+def create_bus(
+    bus: schemas.BusCreate,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
     payload = bus.model_dump()
     _validate_bus_uniqueness(
         db=db,
+        company_id=company.id,
         unit_number=payload["bus_number"],
         license_plate=payload["license_plate"],
     )
 
     new_bus = bus_model.Bus(
+        company_id=company.id,
         unit_number=payload["bus_number"],
         license_plate=payload["license_plate"],
         capacity=payload["capacity"],
@@ -95,9 +114,13 @@ def create_bus(bus: schemas.BusCreate, db: Session = Depends(get_db)):
     description="Return all standalone bus records.",
     response_description="Bus list",
 )
-def get_buses(db: Session = Depends(get_db)):
+def get_buses(
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
     return (
         db.query(bus_model.Bus)
+        .filter(bus_model.Bus.company_id == company.id)
         .order_by(bus_model.Bus.unit_number.asc(), bus_model.Bus.id.asc())
         .all()
     )
@@ -114,7 +137,11 @@ def get_buses(db: Session = Depends(get_db)):
     description="Return a single bus record by id with current assigned route details when present.",
     response_description="Bus record",
 )
-def get_bus(bus_id: int, db: Session = Depends(get_db)):
+def get_bus(
+    bus_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
     bus = (
         db.query(bus_model.Bus)
         .options(
@@ -126,6 +153,7 @@ def get_bus(bus_id: int, db: Session = Depends(get_db)):
             selectinload(bus_model.Bus.routes).selectinload(Route.runs).selectinload(run_model.Run.student_assignments).selectinload(StudentRunAssignment.student).selectinload(student_model.Student.school),  # Include assigned students and schools
         )
         .filter(bus_model.Bus.id == bus_id)
+        .filter(bus_model.Bus.company_id == company.id)
         .first()
     )
     if not bus:
@@ -140,6 +168,7 @@ def get_bus(bus_id: int, db: Session = Depends(get_db)):
         assigned_routes=[
             _serialize_route_detail(route)
             for route in sorted(bus.routes, key=lambda route: (route.route_number, route.id))
+            if get_route_access_level(route, company.id) is not None
         ],
     )
 
@@ -155,14 +184,24 @@ def get_bus(bus_id: int, db: Session = Depends(get_db)):
     description="Update an existing bus record by id.",
     response_description="Updated bus",
 )
-def update_bus(bus_id: int, bus_in: BusUpdate, db: Session = Depends(get_db)):
-    bus = db.get(bus_model.Bus, bus_id)
-    if not bus:
-        raise HTTPException(status_code=404, detail="Bus not found")
+def update_bus(
+    bus_id: int,
+    bus_in: BusUpdate,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
+    bus = get_company_scoped_record_or_404(
+        db=db,
+        model=bus_model.Bus,
+        record_id=bus_id,
+        company_id=company.id,
+        detail="Bus not found",
+    )
 
     update_data = bus_in.model_dump(exclude_unset=True)
     _validate_bus_uniqueness(
         db=db,
+        company_id=company.id,
         unit_number=update_data.get("bus_number"),
         license_plate=update_data.get("license_plate"),
         exclude_bus_id=bus_id,
@@ -191,10 +230,18 @@ def update_bus(bus_id: int, bus_in: BusUpdate, db: Session = Depends(get_db)):
     description="Delete a bus record by id.",
     response_description="Bus deleted",
 )
-def delete_bus(bus_id: int, db: Session = Depends(get_db)):
-    bus = db.get(bus_model.Bus, bus_id)
-    if not bus:
-        raise HTTPException(status_code=404, detail="Bus not found")
+def delete_bus(
+    bus_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
+    bus = get_company_scoped_record_or_404(
+        db=db,
+        model=bus_model.Bus,
+        record_id=bus_id,
+        company_id=company.id,
+        detail="Bus not found",
+    )
 
     db.delete(bus)
     db.commit()

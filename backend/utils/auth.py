@@ -5,9 +5,12 @@
 # ===========================================================
 
 from fastapi import Request, HTTPException, status, Depends
+from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 from database import get_db
 from backend.models import driver as driver_model
+
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 
 # -----------------------------------------------------------
@@ -18,14 +21,15 @@ def get_current_driver(
 ) -> driver_model.Driver:
     """Get logged-in driver from session."""
     driver_id = request.session.get("driver_id")
-    if not driver_id:
+    company_id = request.session.get("company_id")
+    if not driver_id or not company_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Login required",
             headers={"WWW-Authenticate": "Bearer"},
         )
     driver = db.get(driver_model.Driver, driver_id)
-    if not driver:
+    if not driver or driver.company_id != company_id:
         raise HTTPException(status_code=404, detail="Driver not found")
     return driver
 
@@ -33,11 +37,30 @@ def get_current_driver(
 # -----------------------------------------------------------
 # LOGIN / LOGOUT HELPERS
 # -----------------------------------------------------------
-def login_driver(request: Request, driver_id: int):
-    """Set driver_id in session."""
-    request.session["driver_id"] = driver_id
+def hash_driver_pin(pin: str) -> str:
+    return pwd_context.hash(pin)
+
+
+def verify_driver_pin(pin: str, pin_hash: str | None) -> bool:
+    if not pin_hash:
+        return False
+    return pwd_context.verify(pin, pin_hash)
+
+
+def authenticate_driver(db: Session, driver_id: int, pin: str) -> driver_model.Driver | None:
+    driver = db.get(driver_model.Driver, driver_id)
+    if not driver or not verify_driver_pin(pin, driver.pin_hash):
+        return None
+    return driver
+
+
+def login_driver(request: Request, driver: driver_model.Driver):
+    """Set driver and company in session."""
+    request.session["driver_id"] = driver.id
+    request.session["company_id"] = driver.company_id
 
 
 def logout_driver(request: Request):
     """Clear session."""
     request.session.pop("driver_id", None)
+    request.session.pop("company_id", None)

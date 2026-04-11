@@ -1,21 +1,26 @@
 # ===========================================================
-# backend/routers/student.py — SBT Student Router
+# backend/routers/student.py - SBT Student Router
 # -----------------------------------------------------------
 # Handles CRUD operations for students and route/school lookups.
 # ===========================================================
-from fastapi import APIRouter, Depends, HTTPException, status  # FastAPI core imports
-from sqlalchemy.orm import Session  # For DB access
-from sqlalchemy.orm import selectinload  # Eager-load route schools for validation
-from typing import List  # For list responses
+from typing import List
 
-from database import get_db  # DB dependency
-from backend import schemas  # Pydantic schemas
-from backend.models import student as student_model  # Student model
-from backend.models import school as school_model  # School validation
-from backend.models import route as route_model  # Route validation
-from backend.models import stop as stop_model  # Stop validation
-from backend.models import associations as assoc_model  # Run assignment mapping
-from backend.models import run as run_model  # Route->run join
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from sqlalchemy.orm import selectinload
+
+from database import get_db
+from backend import schemas
+from backend.models.company import Company
+from backend.models import associations as assoc_model
+from backend.models import route as route_model
+from backend.models import run as run_model
+from backend.models import school as school_model
+from backend.models import stop as stop_model
+from backend.models import student as student_model
+from backend.utils.company_scope import get_company_context
+from backend.utils.company_scope import get_company_scoped_record_or_404
+from backend.utils.company_scope import get_company_scoped_route_or_404
 from backend.utils.run_setup import (
     ensure_run_is_planned_for_setup,
     get_run_stop_context_or_404,
@@ -23,33 +28,29 @@ from backend.utils.run_setup import (
 )
 
 
-# -----------------------------------------------------------
-# Router setup
-# -----------------------------------------------------------
 router = APIRouter(
-    prefix="/students",                                          # Base path
-    tags=["Students"],                                           # Swagger section
+    prefix="/students",
+    tags=["Students"],
 )
 
 
-# -----------------------------------------------------------
-# - Student workflow helpers
-# - Reuse validation and synchronization across update paths
-# -----------------------------------------------------------
-def _get_route_with_schools(route_id: int, db: Session) -> route_model.Route:
-    route = (
-        db.query(route_model.Route)
-        .options(selectinload(route_model.Route.schools))
-        .filter(route_model.Route.id == route_id)
-        .first()
-    )                                                           # Load route and assigned schools once
-    if not route:
-        raise HTTPException(status_code=404, detail="Route not found")
-    return route
+def _get_route_with_schools(
+    route_id: int,
+    db: Session,
+    company_id: int,
+    required_access: str = "owner",
+) -> route_model.Route:
+    return get_company_scoped_route_or_404(
+        db=db,
+        route_id=route_id,
+        company_id=company_id,
+        required_access=required_access,
+        options=[selectinload(route_model.Route.schools)],
+    )
 
 
 def _validate_route_school_membership(route: route_model.Route, school_id: int) -> None:
-    route_school_ids = {school.id for school in route.schools}   # Keep school validation aligned with stop-context create flow
+    route_school_ids = {school.id for school in route.schools}
     if school_id not in route_school_ids:
         raise HTTPException(status_code=400, detail="School is not assigned to the run route")
 
@@ -59,22 +60,30 @@ def _validate_compatibility_student_create_target(
     school_id: int,
     route_id: int | None,
     stop_id: int | None,
+    company_id: int,
     db: Session,
 ) -> tuple[route_model.Route | None, stop_model.Stop | None]:
-    route = _get_route_with_schools(route_id, db) if route_id is not None else None
+    route = (
+        _get_route_with_schools(route_id, db, company_id, "owner")
+        if route_id is not None else None
+    )
     stop = get_stop_or_404(stop_id, db) if stop_id is not None else None
 
     if stop is not None:
-        run = stop.run                                           # Resolve stop hierarchy only when stop compatibility pointer is present
+        run = stop.run
         if run is None:
             raise HTTPException(status_code=400, detail="Stop does not belong to route")
-        ensure_run_is_planned_for_setup(run)                     # Legacy stop-targeted create must honor planned-only setup
+        if run.route is None:
+            raise HTTPException(status_code=404, detail="Route not found")
+        if run.route.company_id != company_id:
+            raise HTTPException(status_code=404, detail="Route not found")
+        ensure_run_is_planned_for_setup(run)
 
         if route is not None and run.route_id != route.id:
             raise HTTPException(status_code=400, detail="Stop does not belong to route")
 
         if route is None:
-            route = _get_route_with_schools(run.route_id, db)    # Infer stop route for validation only
+            route = _get_route_with_schools(run.route_id, db, company_id, "owner")
 
     return route, stop
 
@@ -85,20 +94,21 @@ def _validate_student_assignment_target(
     route_id: int,
     run_id: int,
     stop_id: int,
+    company_id: int,
     db: Session,
 ) -> tuple[route_model.Route, run_model.Run, stop_model.Stop]:
-    route = _get_route_with_schools(route_id, db)                # Validate target route first
+    route = _get_route_with_schools(route_id, db, company_id, "owner")
     run, stop = get_run_stop_context_or_404(
         run_id=run_id,
         stop_id=stop_id,
         db=db,
         require_planned=True,
-    )                                                           # Centralized run/stop validation prevents mismatch writes
+    )
 
     if run.route_id != route.id:
         raise HTTPException(status_code=400, detail="Run does not belong to route")
 
-    _validate_route_school_membership(route, student.school_id)  # Keep school-route safety
+    _validate_route_school_membership(route, student.school_id)
 
     return route, run, stop
 
@@ -116,7 +126,7 @@ def _sync_student_assignment_rows_for_assignment_move(
         .join(run_model.Run, assoc_model.StudentRunAssignment.run_id == run_model.Run.id)
         .filter(assoc_model.StudentRunAssignment.student_id == student.id)
         .all()
-    )                                                           # Load runtime rows once so movement stays synchronized
+    )
 
     target_assignment = None
 
@@ -125,23 +135,23 @@ def _sync_student_assignment_rows_for_assignment_move(
         is_historical = run.end_time is not None or run.is_completed
 
         if assignment.run_id == target_run.id:
-            target_assignment = assignment                       # Reuse existing target-run row when it exists
+            target_assignment = assignment
 
         if is_historical:
-            continue                                            # Preserve completed runtime truth
+            continue
 
         if run.route_id != target_route.id:
-            db.delete(assignment)                               # Remove current/planned rows on other routes to avoid drift
+            db.delete(assignment)
 
     if target_assignment is None:
         target_assignment = assoc_model.StudentRunAssignment(
             student_id=student.id,
             run_id=target_run.id,
             stop_id=target_stop.id,
-        )                                                       # Create planning/runtime row for the newly selected stop context
+        )
         db.add(target_assignment)
     else:
-        target_assignment.stop_id = target_stop.id              # Repoint existing target-run row to the selected stop
+        target_assignment.stop_id = target_stop.id
 
     db.flush()
 
@@ -150,12 +160,13 @@ def _update_student_record(
     *,
     student: student_model.Student,
     payload: schemas.StopStudentUpdate,
+    company_id: int,
     db: Session,
     authoritative_route_id: int | None = None,
     authoritative_stop: stop_model.Stop | None = None,
     assignment: assoc_model.StudentRunAssignment | None = None,
 ):
-    updates = payload.model_dump(exclude_unset=True)             # Preserve partial-update compatibility
+    updates = payload.model_dump(exclude_unset=True)
 
     target_route_id = authoritative_route_id if authoritative_route_id is not None else updates.get("route_id", student.route_id)
     target_stop_id = authoritative_stop.id if authoritative_stop is not None else updates.get("stop_id", student.stop_id)
@@ -163,14 +174,18 @@ def _update_student_record(
 
     route = None
     if target_route_id is not None:
-        route = _get_route_with_schools(target_route_id, db)     # Needed for route-aware school validation
+        route = _get_route_with_schools(target_route_id, db, company_id, "owner")
 
-    school = db.get(school_model.School, target_school_id)
-    if not school:
-        raise HTTPException(status_code=404, detail="School not found")
+    school = get_company_scoped_record_or_404(
+        db=db,
+        model=school_model.School,
+        record_id=target_school_id,
+        company_id=company_id,
+        detail="School not found",
+    )
 
     if route is not None:
-        _validate_route_school_membership(route, target_school_id)
+        _validate_route_school_membership(route, school.id)
 
     stop = None
     if target_stop_id is not None:
@@ -181,104 +196,109 @@ def _update_student_record(
     if route is not None and stop is not None and stop.run and stop.run.route_id != route.id:
         raise HTTPException(status_code=400, detail="Stop does not belong to route")
 
-    # -----------------------------------------------------------
-    # - Apply editable student fields
-    # - Keep run-stop context authoritative for student field edits
-    # -----------------------------------------------------------
     for field_name in ("name", "grade", "school_id"):
         if field_name in updates:
             setattr(student, field_name, updates[field_name])
 
     if authoritative_route_id is not None:
-        student.route_id = authoritative_route_id                # Context route is authoritative
+        student.route_id = authoritative_route_id
 
     if authoritative_stop is not None:
-        student.stop_id = authoritative_stop.id                  # Context stop is authoritative
+        student.stop_id = authoritative_stop.id
 
     if assignment is not None and authoritative_stop is not None:
-        assignment.stop_id = authoritative_stop.id               # Keep StudentRunAssignment aligned with stop context
+        assignment.stop_id = authoritative_stop.id
 
     db.flush()
     db.refresh(student)
     return student
 
-# -----------------------------------------------------------
-# - Create student
-# - Register a student through the compatibility path
-# - Preserve direct-create support while stop-context is preferred
-# -----------------------------------------------------------
+
 @router.post(
-    "/",                                                         # Endpoint path
-    response_model=schemas.StudentOut,                           # Response schema
-    status_code=status.HTTP_201_CREATED,                         # HTTP 201 on success
-    summary="Create student (secondary compatibility)",          # Swagger title
+    "/",
+    response_model=schemas.StudentOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create student (secondary compatibility)",
     description=(
         "Secondary compatibility endpoint for creating a student record directly. "
         "Preferred layered workflow is POST /runs/{run_id}/stops/{stop_id}/students so route and stop context are inherited automatically. "
         "Optional route_id and stop_id fields are legacy planning pointers for compatibility only. "
         "When stop context is supplied, only planned runs can be modified."
-    ),                                                           # Swagger description
-    response_description="Created student",                      # Swagger response text
+    ),
+    response_description="Created student",
 )
-def create_student(student: schemas.StudentCompatibilityCreate, db: Session = Depends(get_db)):
-    """Add a new student. Runtime run/stop mapping is managed in StudentRunAssignment."""  # Internal docstring
-    school = db.get(school_model.School, student.school_id)      # Validate school exists
-    if not school:
-        raise HTTPException(status_code=404, detail="School not found")  # Return 404 when missing
-
-    _validate_compatibility_student_create_target(
-        school_id=student.school_id,                             # Compatibility create still anchors on a real school
-        route_id=student.route_id,                               # Optional legacy planning route pointer
-        stop_id=student.stop_id,                                 # Optional legacy planning stop pointer
-        db=db,                                                   # Shared DB session
+def create_student(
+    student: schemas.StudentCompatibilityCreate,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
+    school = get_company_scoped_record_or_404(
+        db=db,
+        model=school_model.School,
+        record_id=student.school_id,
+        company_id=company.id,
+        detail="School not found",
     )
 
-    new_student = student_model.Student(**student.model_dump())  # Convert schema → DB model
-    db.add(new_student)                                          # Add to session
-    db.commit()                                                  # Persist to DB
-    db.refresh(new_student)                                      # Reload with DB values
-    return new_student                                           # Return created record
+    _validate_compatibility_student_create_target(
+        school_id=student.school_id,
+        route_id=student.route_id,
+        stop_id=student.stop_id,
+        company_id=company.id,
+        db=db,
+    )
+
+    payload = student.model_dump()
+    payload["school_id"] = school.id
+    new_student = student_model.Student(
+        **payload,
+        company_id=company.id,
+    )
+    db.add(new_student)
+    db.commit()
+    db.refresh(new_student)
+    return new_student
 
 
-# -----------------------------------------------------------
-# - List students
-# - Return all registered student records
-# -----------------------------------------------------------
 @router.get(
-    "/",                                                         # Endpoint path
-    response_model=List[schemas.StudentOut],                     # Response schema
-    summary="List students",                                     # Swagger title
-    description="Return all registered student records.",        # Swagger description
-    response_description="Student list",                         # Swagger response text
+    "/",
+    response_model=List[schemas.StudentOut],
+    summary="List students",
+    description="Return all registered student records.",
+    response_description="Student list",
 )
-def get_students(db: Session = Depends(get_db)):
-    """Return all students in the system."""                     # Internal docstring
-    return db.query(student_model.Student).all()                 # Fetch and return all students
+def get_students(
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
+    return (
+        db.query(student_model.Student)
+        .filter(student_model.Student.company_id == company.id)
+        .all()
+    )
 
 
-# -----------------------------------------------------------
-# - Get student by id
-# - Return a single student record
-# -----------------------------------------------------------
 @router.get(
-    "/{student_id}",                                             # Endpoint path with student id
-    response_model=schemas.StudentOut,                           # Response schema
-    summary="Get student",                                       # Swagger title
-    description="Return a single student record by id.",         # Swagger description
-    response_description="Student record",                       # Swagger response text
+    "/{student_id}",
+    response_model=schemas.StudentOut,
+    summary="Get student",
+    description="Return a single student record by id.",
+    response_description="Student record",
 )
-def get_student(student_id: int, db: Session = Depends(get_db)):
-    """Fetch student by ID."""                                   # Internal docstring
-    student = db.get(student_model.Student, student_id)          # Load one student by primary key
-    if not student:
-        raise HTTPException(status_code=404, detail="Student not found")  # Return 404 when missing
-    return student                                               # Return matching student
+def get_student(
+    student_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
+    return get_company_scoped_record_or_404(
+        db=db,
+        model=student_model.Student,
+        record_id=student_id,
+        company_id=company.id,
+        detail="Student not found",
+    )
 
 
-# -----------------------------------------------------------
-# - Update student assignment
-# - Move a student to a different route and stop safely
-# -----------------------------------------------------------
 @router.put(
     "/{student_id}/assignment",
     response_model=schemas.StudentOut,
@@ -295,21 +315,27 @@ def update_student_assignment(
     student_id: int,
     assignment_in: schemas.StudentAssignmentUpdate,
     db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
-    student = db.get(student_model.Student, student_id)          # Validate student exists
-    if not student:
-        raise HTTPException(status_code=404, detail="Student not found")
+    student = get_company_scoped_record_or_404(
+        db=db,
+        model=student_model.Student,
+        record_id=student_id,
+        company_id=company.id,
+        detail="Student not found",
+    )
 
     target_route, target_run, target_stop = _validate_student_assignment_target(
         student=student,
         route_id=assignment_in.route_id,
         run_id=assignment_in.run_id,
         stop_id=assignment_in.stop_id,
+        company_id=company.id,
         db=db,
     )
 
-    student.route_id = target_route.id                           # Update legacy planning route pointer
-    student.stop_id = target_stop.id                             # Update legacy planning stop pointer
+    student.route_id = target_route.id
+    student.stop_id = target_stop.id
 
     _sync_student_assignment_rows_for_assignment_move(
         student=student,
@@ -324,82 +350,92 @@ def update_student_assignment(
     return student
 
 
-# -----------------------------------------------------------
-# - Delete student
-# - Remove a student record from the system
-# -----------------------------------------------------------
 @router.delete(
-    "/{student_id}",                                             # Endpoint path with student id
-    status_code=status.HTTP_204_NO_CONTENT,                      # HTTP 204 on success
-    summary="Delete student entirely",                           # Swagger title
+    "/{student_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete student entirely",
     description=(
         "Permanently remove the student record from the system. "
         "This is full system-wide student deletion, not the normal run-stop workflow removal action."
-    ),                                                           # Swagger description
-    response_description="Student permanently deleted",          # Swagger response text
+    ),
+    response_description="Student permanently deleted",
 )
-def delete_student(student_id: int, db: Session = Depends(get_db)):
-    """Delete a student record."""                               # Internal docstring
-    student = db.get(student_model.Student, student_id)          # Load student by primary key
-    if not student:
-        raise HTTPException(status_code=404, detail="Student not found")  # Return 404 when missing
-    db.delete(student)                                           # Remove student from session
-    db.commit()                                                  # Persist deletion
-    return None                                                  # Return empty 204 response
+def delete_student(
+    student_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
+    student = get_company_scoped_record_or_404(
+        db=db,
+        model=student_model.Student,
+        record_id=student_id,
+        company_id=company.id,
+        detail="Student not found",
+    )
+    db.delete(student)
+    db.commit()
+    return None
 
 
-# -----------------------------------------------------------
-# - List students by school
-# - Return students linked to one school
-# -----------------------------------------------------------
 @router.get(
-    "/school/{school_id}",                                       # Endpoint path with school id
-    response_model=List[schemas.StudentOut],                     # Response schema
-    summary="List students by school",                           # Swagger title
-    description="Return all students belonging to one school.",  # Swagger description
-    response_description="Student list for school",              # Swagger response text
+    "/school/{school_id}",
+    response_model=List[schemas.StudentOut],
+    summary="List students by school",
+    description="Return all students belonging to one school.",
+    response_description="Student list for school",
 )
-def get_students_by_school(school_id: int, db: Session = Depends(get_db)):
-    """List all students belonging to a specific school."""      # Internal docstring
-    school = db.get(school_model.School, school_id)              # Validate school exists
-    if not school:
-        raise HTTPException(status_code=404, detail="School not found")  # Return 404 when missing
+def get_students_by_school(
+    school_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
+    get_company_scoped_record_or_404(
+        db=db,
+        model=school_model.School,
+        record_id=school_id,
+        company_id=company.id,
+        detail="School not found",
+    )
 
     return (
-        db.query(student_model.Student)                          # Start student query
-        .filter(student_model.Student.school_id == school_id)    # Filter by school id
-        .all()                                                   # Return matching students
+        db.query(student_model.Student)
+        .filter(student_model.Student.company_id == company.id)
+        .filter(student_model.Student.school_id == school_id)
+        .all()
     )
 
 
-# -----------------------------------------------------------
-# - List students by route
-# - Return students assigned to runs on one route
-# -----------------------------------------------------------
 @router.get(
-    "/route/{route_id}",                                         # Endpoint path with route id
-    response_model=List[schemas.StudentOut],                     # Response schema
-    summary="List students by route",                            # Swagger title
-    description="Return students with at least one run assignment on the selected route.",  # Swagger description
-    response_description="Student list for route",               # Swagger response text
+    "/route/{route_id}",
+    response_model=List[schemas.StudentOut],
+    summary="List students by route",
+    description="Return students with at least one run assignment on the selected route.",
+    response_description="Student list for route",
 )
-def get_students_by_route(route_id: int, db: Session = Depends(get_db)):
-    """List students with at least one run assignment on this route."""  # Internal docstring
-    route = db.get(route_model.Route, route_id)                  # Validate route exists
-    if not route:
-        raise HTTPException(status_code=404, detail="Route not found")  # Return 404 when missing
+def get_students_by_route(
+    route_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
+    get_company_scoped_route_or_404(
+        db=db,
+        route_id=route_id,
+        company_id=company.id,
+        required_access="read",
+    )
 
     return (
-        db.query(student_model.Student)                          # Start student query
+        db.query(student_model.Student)
         .join(
-            assoc_model.StudentRunAssignment,                    # Join runtime student assignments
-            assoc_model.StudentRunAssignment.student_id == student_model.Student.id,  # Match student ids
+            assoc_model.StudentRunAssignment,
+            assoc_model.StudentRunAssignment.student_id == student_model.Student.id,
         )
         .join(
-            run_model.Run,                                       # Join runs
-            run_model.Run.id == assoc_model.StudentRunAssignment.run_id,  # Match run ids
+            run_model.Run,
+            run_model.Run.id == assoc_model.StudentRunAssignment.run_id,
         )
-        .filter(run_model.Run.route_id == route_id)              # Filter by route id
-        .distinct()                                              # Avoid duplicate students
-        .all()                                                   # Return matching students
+        .filter(student_model.Student.company_id == company.id)
+        .filter(run_model.Run.route_id == route_id)
+        .distinct()
+        .all()
     )

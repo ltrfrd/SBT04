@@ -1,5 +1,5 @@
 def _create_driver(client):
-    r = client.post("/drivers/", json={"name": "T", "email": "t@t.com", "phone": "1"})
+    r = client.post("/drivers/", json={"name": "T", "email": "t@t.com", "phone": "1", "pin": "1234"})
     assert r.status_code in (200, 201)
     return r.json()["id"]
 

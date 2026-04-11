@@ -19,6 +19,7 @@ from backend.models import school as school_model
 from backend.models import stop as stop_model
 from backend.models import pretrip as pretrip_model
 from backend.models import posttrip as posttrip_model
+from backend.models.company import Company
 from backend.models.run import Run                            # Run model
 from backend.models.student import Student                      # Student model
 from backend.models.stop import Stop                            # Stop model
@@ -39,6 +40,10 @@ from backend.utils.student_bus_absence import apply_run_absence_filter
 from backend.utils.route_driver_assignment import resolve_route_driver_assignment
 from backend.utils.db_errors import raise_conflict_if_unique
 from backend.utils.pretrip_alerts import create_missing_pretrip_alert_if_needed
+from backend.utils.company_scope import get_company_context
+from backend.utils.company_scope import get_company_scoped_record_or_404
+from backend.utils.company_scope import get_company_scoped_route_or_404
+from backend.utils.company_scope import get_route_access_level
 from backend.utils.run_setup import ensure_run_is_planned_for_setup, get_run_stop_context_or_404
 from backend.schemas.run import (
     PickupStudentRequest,
@@ -65,6 +70,33 @@ def _get_run_or_404(run_id: int, db: Session) -> Run:
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Run not found",
         )
+    return run
+
+
+def _get_company_scoped_run_or_404(
+    run_id: int,
+    db: Session,
+    company_id: int,
+    required_access: str = "read",
+    options: list | None = None,
+) -> Run:
+    query = db.query(Run)
+    if options:
+        query = query.options(*options)
+
+    run = query.filter(Run.id == run_id).first()
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Run not found",
+        )
+
+    get_company_scoped_route_or_404(
+        db=db,
+        route_id=run.route_id,
+        company_id=company_id,
+        required_access=required_access,
+    )
     return run
 
 
@@ -356,20 +388,24 @@ def _create_stop_context_student(
     run: run_model.Run,
     stop: stop_model.Stop,
     payload: schemas.StopStudentCreate,
+    company_id: int,
     db: Session,
 ) -> Student:
-    school = db.get(school_model.School, payload.school_id)  # Validate school exists
-    if not school:
-        raise HTTPException(status_code=404, detail="School not found")
+    school = get_company_scoped_record_or_404(
+        db=db,
+        model=school_model.School,
+        record_id=payload.school_id,
+        company_id=company_id,
+        detail="School not found",
+    )
 
-    route = (
-        db.query(route_model.Route)
-        .options(selectinload(route_model.Route.schools))
-        .filter(route_model.Route.id == run.route_id)
-        .first()
-    )  # Load route-school assignments for conservative validation
-    if not route:
-        raise HTTPException(status_code=404, detail="Route not found")
+    route = get_company_scoped_route_or_404(
+        db=db,
+        route_id=run.route_id,
+        company_id=company_id,
+        required_access="read",
+        options=[selectinload(route_model.Route.schools)],
+    )
 
     route_school_ids = {school.id for school in route.schools}
     if payload.school_id not in route_school_ids:
@@ -378,6 +414,7 @@ def _create_stop_context_student(
     student = Student(
         name=payload.name,
         grade=payload.grade,
+        company_id=company_id,
         school_id=payload.school_id,
         route_id=run.route_id,
         stop_id=stop.id,
@@ -686,23 +723,26 @@ def _serialize_run_list_item(run: run_model.Run) -> RunListOut:
     ),                                                           # Swagger description
     response_description="Created run",                          # Swagger response text
 )
-def create_run(run: RunCreateLegacy, db: Session = Depends(get_db)):
+def create_run(
+    run: RunCreateLegacy,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
     # -----------------------------------------------------------
     # - Validate route exists
     # - Load route context and optional active driver assignment
     # -----------------------------------------------------------
-    route = (
-        db.query(route_model.Route)                              # Query Route table
-        .options(
-            joinedload(route_model.Route.driver_assignments)     # Load driver assignments
-            .joinedload(RouteDriverAssignment.driver)            # Load driver details
-        )
-        .filter(route_model.Route.id == run.route_id)            # Match requested route
-        .first()                                                 # Get single result
+    route = get_company_scoped_route_or_404(
+        db=db,
+        route_id=run.route_id,
+        company_id=company.id,
+        required_access="read",
+        options=[
+            joinedload(route_model.Route.driver_assignments).joinedload(RouteDriverAssignment.driver),
+        ],
     )
-
-    if not route:
-        raise HTTPException(status_code=404, detail="Route not found")  # Route validation
+    if route.company_id != company.id:
+        raise HTTPException(status_code=404, detail="Route not found")
 
     new_run = _create_planned_run(                               # Reuse normalized planned run workflow
         route=route,                                             # Selected route context
@@ -735,33 +775,29 @@ def create_run(run: RunCreateLegacy, db: Session = Depends(get_db)):
 def start_run(
     run_id: int,
     db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
-    target_run = (
-        db.query(run_model.Run)
-        .options(
+    target_run = _get_company_scoped_run_or_404(
+        run_id,
+        db,
+        company.id,
+        "operate",
+        options=[
             joinedload(run_model.Run.driver),
             joinedload(run_model.Run.route),
-        )
-        .filter(run_model.Run.id == run_id)
-        .first()
-    )  # Load the selected planned run
-
-    if not target_run:
-        raise HTTPException(status_code=404, detail="Run not found")
+        ],
+    )
 
     if target_run.start_time is not None:
         raise HTTPException(status_code=400, detail="Run already started")
 
-    route = (
-        db.query(route_model.Route)
-        .options(
-            joinedload(route_model.Route.driver_assignments).joinedload(RouteDriverAssignment.driver)
-        )
-        .filter(route_model.Route.id == target_run.route_id)
-        .first()
-    )  # Load route context for runtime start
-    if not route:
-        raise HTTPException(status_code=404, detail="Route not found")
+    route = get_company_scoped_route_or_404(
+        db=db,
+        route_id=target_run.route_id,
+        company_id=company.id,
+        required_access="operate",
+        options=[joinedload(route_model.Route.driver_assignments).joinedload(RouteDriverAssignment.driver)],
+    )
 
     active_bus_id = route.active_bus_id or route.bus_id         # Active bus is authoritative; compatibility bus_id is fallback
     if active_bus_id is None:
@@ -870,10 +906,12 @@ def start_run(
     description="Operational runtime endpoint for ending one active run by run id.",
     response_description="Ended run",
 )
-def end_run(run_id: int, db: Session = Depends(get_db)):
-    run = db.get(run_model.Run, run_id)  # Load run
-    if not run:
-        raise HTTPException(status_code=404, detail="Run not found")
+def end_run(
+    run_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
+    run = _get_company_scoped_run_or_404(run_id, db, company.id, "operate")
     if run.start_time is None:
         raise HTTPException(status_code=400, detail="Run is not active")
     if run.end_time:
@@ -899,16 +937,20 @@ def end_run(run_id: int, db: Session = Depends(get_db)):
 )
 def end_run_by_driver(
     driver_id: int,                         # Driver whose active run should be ended
-    db: Session = Depends(get_db)          # Database session dependency
+    db: Session = Depends(get_db),          # Database session dependency
+    company: Company = Depends(get_company_context),
 ):
 
     # -------------------------------------------------------------------------
     # Validate driver exists
     # -------------------------------------------------------------------------
-    driver = db.get(driver_model.Driver, driver_id)  # Load driver by ID
-
-    if not driver:                                   # If driver not found
-        raise HTTPException(status_code=404, detail="Driver not found")
+    driver = get_company_scoped_record_or_404(
+        db=db,
+        model=driver_model.Driver,
+        record_id=driver_id,
+        company_id=company.id,
+        detail="Driver not found",
+    )
 
     # -------------------------------------------------------------------------
     # Find newest active run for this driver
@@ -953,7 +995,8 @@ def end_run_by_driver(
 )
 def get_all_runs(
     route_id: int | None = Query(None),    # Required route filter
-    db: Session = Depends(get_db)          # Database session dependency
+    db: Session = Depends(get_db),          # Database session dependency
+    company: Company = Depends(get_company_context),
 ):
 
     # -------------------------------------------------------------------------
@@ -962,9 +1005,12 @@ def get_all_runs(
     if route_id is None:
         raise HTTPException(status_code=400, detail="route_id is required")  # Require route-scoped listing
 
-    route = db.get(route_model.Route, route_id)                 # Load selected route
-    if not route:
-        raise HTTPException(status_code=404, detail="Route not found")  # Validate route exists
+    get_company_scoped_route_or_404(
+        db=db,
+        route_id=route_id,
+        company_id=company.id,
+        required_access="read",
+    )
 
     # -------------------------------------------------------------------------
     # Load route runs in stable planning order
@@ -1005,16 +1051,20 @@ def get_all_runs(
 )
 def get_active_run(
     driver_id: int,                         # Driver to check for active run
-    db: Session = Depends(get_db)          # Database session dependency
+    db: Session = Depends(get_db),          # Database session dependency
+    company: Company = Depends(get_company_context),
 ):
 
     # -------------------------------------------------------------------------
     # Validate driver exists
     # -------------------------------------------------------------------------
-    driver = db.get(driver_model.Driver, driver_id)  # Load driver by ID
-
-    if not driver:                                   # If driver not found
-        raise HTTPException(status_code=404, detail="Driver not found")
+    get_company_scoped_record_or_404(
+        db=db,
+        model=driver_model.Driver,
+        record_id=driver_id,
+        company_id=company.id,
+        detail="Driver not found",
+    )
 
     # -------------------------------------------------------------------------
     # Find newest active run for this driver
@@ -1051,14 +1101,15 @@ def get_active_run(
     description="Return the prepared stop structure for a run ordered by sequence and id so drivers and operators can work inside the selected run context.",
     response_description="Ordered run stops",
 )
-def get_run_stops(run_id: int, db: Session = Depends(get_db)):
+def get_run_stops(
+    run_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
     # -------------------------------------------------------------------------
     # Validate run exists
     # -------------------------------------------------------------------------
-    run = db.get(run_model.Run, run_id)  # Load run by ID
-
-    if not run:  # If run does not exist
-        raise HTTPException(status_code=404, detail="Run not found")
+    _get_company_scoped_run_or_404(run_id, db, company.id, "read")
 
     # -------------------------------------------------------------------------
     # Load stops in stable order
@@ -1092,8 +1143,12 @@ def create_stop_inside_run(
     run_id: int,
     payload: RunStopCreate,
     db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
     from backend.routers import stop as stop_router  # Local import avoids circular import at module load time
+    owner_run = _get_company_scoped_run_or_404(run_id, db, company.id, "read", options=[joinedload(run_model.Run.route)])
+    if owner_run.route and owner_run.route.company_id != company.id:
+        raise HTTPException(status_code=404, detail="Run not found")
 
     return stop_router.create_run_stop(                          # Reuse shared stop workflow rules
         run_id=run_id,                                          # Parent run context from path
@@ -1118,8 +1173,12 @@ def update_stop_inside_run(
     stop_id: int,
     payload: RunStopUpdate,
     db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
     from backend.routers import stop as stop_router  # Local import avoids circular import at module load time
+    owner_run = _get_company_scoped_run_or_404(run_id, db, company.id, "read", options=[joinedload(run_model.Run.route)])
+    if owner_run.route and owner_run.route.company_id != company.id:
+        raise HTTPException(status_code=404, detail="Run not found")
 
     return stop_router.update_run_stop(
         run_id=run_id,                                          # Parent run context from path
@@ -1146,11 +1205,21 @@ def create_run_stop_student(
     stop_id: int,
     payload: schemas.StopStudentCreate,
     db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
+    owner_run = _get_company_scoped_run_or_404(run_id, db, company.id, "read", options=[joinedload(run_model.Run.route)])
+    if owner_run.route and owner_run.route.company_id != company.id:
+        raise HTTPException(status_code=404, detail="Run not found")
     run, stop = _get_run_stop_or_404(run_id, stop_id, db)  # Validate stop context once
 
     try:
-        student = _create_stop_context_student(run=run, stop=stop, payload=payload, db=db)
+        student = _create_stop_context_student(
+            run=run,
+            stop=stop,
+            payload=payload,
+            company_id=company.id,
+            db=db,
+        )
         db.commit()
         db.refresh(student)
         return student
@@ -1183,8 +1252,12 @@ def update_run_stop_student(
     student_id: int,
     payload: schemas.StopStudentUpdate,
     db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
     from backend.routers import student as student_router  # Local import avoids circular import at module load time
+    owner_run = _get_company_scoped_run_or_404(run_id, db, company.id, "read", options=[joinedload(run_model.Run.route)])
+    if owner_run.route and owner_run.route.company_id != company.id:
+        raise HTTPException(status_code=404, detail="Run not found")
 
     run, stop, student, assignment = _get_run_stop_student_context_or_404(
         run_id=run_id,
@@ -1196,6 +1269,7 @@ def update_run_stop_student(
     student = student_router._update_student_record(
         student=student,                                         # Existing routed student
         payload=payload,                                         # Context-safe update payload
+        company_id=company.id,
         db=db,                                                   # Shared DB session
         authoritative_route_id=run.route_id,                     # Keep student on the run route
         authoritative_stop=stop,                                 # Keep planning stop aligned with path context
@@ -1222,7 +1296,11 @@ def delete_run_stop_student(
     stop_id: int,
     student_id: int,
     db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
+    owner_run = _get_company_scoped_run_or_404(run_id, db, company.id, "read", options=[joinedload(run_model.Run.route)])
+    if owner_run.route and owner_run.route.company_id != company.id:
+        raise HTTPException(status_code=404, detail="Run not found")
     run, stop, student, assignment = _get_run_stop_student_context_or_404(
         run_id=run_id,
         stop_id=stop_id,
@@ -1259,7 +1337,11 @@ def bulk_create_run_stop_students(
     stop_id: int,
     payload: schemas.StopStudentBulkCreate,
     db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
+    owner_run = _get_company_scoped_run_or_404(run_id, db, company.id, "read", options=[joinedload(run_model.Run.route)])
+    if owner_run.route and owner_run.route.company_id != company.id:
+        raise HTTPException(status_code=404, detail="Run not found")
     run, stop = _get_run_stop_or_404(run_id, stop_id, db)  # Validate stop context once
 
     created_students: list[Student] = []
@@ -1272,6 +1354,7 @@ def bulk_create_run_stop_students(
                     run=run,
                     stop=stop,
                     payload=student_payload,
+                    company_id=company.id,
                     db=db,
                 )
                 created_students.append(student)
@@ -1329,7 +1412,9 @@ def arrive_at_stop(
     stop_sequence: int | None = Query(None, ge=1),  # Compatibility stop-sequence target
     stop_id: int | None = Query(None, ge=1),        # Optional explicit stop target for flexible movement
     db: Session = Depends(get_db),                  # Database session dependency
+    company: Company = Depends(get_company_context),
 ):
+    _get_company_scoped_run_or_404(run_id, db, company.id, "operate")
     run = _require_active_runtime_run(_get_runtime_run_or_404(run_id, db))
     stop = _resolve_runtime_stop_target_or_404(
         run_id=run_id,
@@ -1362,7 +1447,9 @@ def arrive_at_stop(
 def advance_to_next_stop(
     run_id: int,
     db: Session = Depends(get_db),                  # Database session dependency
+    company: Company = Depends(get_company_context),
 ):
+    _get_company_scoped_run_or_404(run_id, db, company.id, "operate")
     run = _require_active_runtime_run(_get_runtime_run_or_404(run_id, db))
     stops = _get_ordered_run_stops(run_id, db)      # Stable ordered list for convenience-only navigation
 
@@ -1414,7 +1501,9 @@ def pickup_student(
     run_id: int,
     payload: PickupStudentRequest,
     db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
+    _get_company_scoped_run_or_404(run_id, db, company.id, "operate")
     run = _require_active_runtime_run(_get_runtime_run_or_404(run_id, db))
     current_stop = _require_current_runtime_stop(run, db)  # Pickup must happen at the actual current stop
     assignment = _get_runtime_assignment_or_404(
@@ -1486,7 +1575,9 @@ def dropoff_student(
     run_id: int,
     payload: DropoffStudentRequest,
     db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
+    _get_company_scoped_run_or_404(run_id, db, company.id, "operate")
     run = _require_active_runtime_run(_get_runtime_run_or_404(run_id, db))
     current_stop = _require_current_runtime_stop(run, db)  # Dropoff must happen at the actual current stop
     assignment = _get_runtime_assignment_or_404(
@@ -1554,16 +1645,15 @@ def dropoff_student(
     ),
     response_description="Run completion status",
 )
-def complete_run(run_id: int, db: Session = Depends(get_db)):
+def complete_run(
+    run_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
     # -------------------------------------------------------------------------
     # Load run
     # -------------------------------------------------------------------------
-    run = db.get(run_model.Run, run_id)  # Load run by ID
-    if not run:  # Run must exist
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Run not found",
-        )
+    run = _get_company_scoped_run_or_404(run_id, db, company.id, "operate")
 
     if not _is_run_active(run):  # Only active runs can be completed
         raise HTTPException(
@@ -1661,11 +1751,12 @@ def complete_run(run_id: int, db: Session = Depends(get_db)):
 def get_run_state(
     run_id: int,
     db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
     # -------------------------------------------------------------------------
     # Validate run exists
     # -------------------------------------------------------------------------
-    run = _get_run_or_404(run_id, db)
+    run = _get_company_scoped_run_or_404(run_id, db, company.id, "read")
 
     # -------------------------------------------------------------------------
     # Load stops in stable order for current-stop and progress context
@@ -1763,7 +1854,9 @@ def get_run_state(
 def get_onboard_students(
     run_id: int,
     db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
+    _get_company_scoped_run_or_404(run_id, db, company.id, "read")
     # -------------------------------------------------------------------------
     # Load run
     # -------------------------------------------------------------------------
@@ -1863,11 +1956,12 @@ def get_onboard_students(
 def get_run_occupancy_summary(
     run_id: int,
     db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
     # -------------------------------------------------------------------------
     # Validate run exists
     # -------------------------------------------------------------------------
-    run = _get_run_or_404(run_id, db)
+    run = _get_company_scoped_run_or_404(run_id, db, company.id, "read")
 
     # -------------------------------------------------------------------------
     # Load all runtime student assignments for this run
@@ -1910,14 +2004,12 @@ def get_run_occupancy_summary(
     ),
     response_description="Run timeline",
 )
-def get_run_timeline(run_id: int, db: Session = Depends(get_db)):
-
-    run = db.get(run_model.Run, run_id)                                   # Load run by ID
-    if not run:                                                           # If run does not exist
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Run not found",
-        )
+def get_run_timeline(
+    run_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
+    run = _get_company_scoped_run_or_404(run_id, db, company.id, "read")
 
     events = (
         db.query(RunEvent)                                                # Query run events
@@ -1953,13 +2045,15 @@ def get_run_timeline(run_id: int, db: Session = Depends(get_db)):
     ),
     response_description="Run replay",
 )
-def get_run_replay(run_id: int, db: Session = Depends(get_db)):
+def get_run_replay(
+    run_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
     # -------------------------------------------------------------------------
     # Validate run exists
     # -------------------------------------------------------------------------
-    run = db.get(run_model.Run, run_id)  # Load run by ID
-    if not run:  # If run does not exist
-        raise HTTPException(status_code=404, detail="Run not found")
+    run = _get_company_scoped_run_or_404(run_id, db, company.id, "read")
 
     # -------------------------------------------------------------------------
     # Load all run events in stable chronological order
@@ -2082,29 +2176,28 @@ def get_run_replay(run_id: int, db: Session = Depends(get_db)):
     description="Return one run by id with nested route, driver, stop, and runtime student details.",
     response_description="Run detail",
 )
-def get_run(run_id: int, db: Session = Depends(get_db)):
+def get_run(
+    run_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
 
     # -------------------------------------------------------------------------
     # Load run with linked route, stops, and student assignments
     # -------------------------------------------------------------------------
-    run = (
-        db.query(run_model.Run)                                   # Query Run table
-        .options(
-            joinedload(run_model.Run.driver),                     # Include driver
-            joinedload(run_model.Run.route),                      # Include route
-            selectinload(run_model.Run.stops),                    # Include run stops
-            selectinload(run_model.Run.student_assignments)
-            .selectinload(StudentRunAssignment.stop),             # Include assigned stop linkage
-            selectinload(run_model.Run.student_assignments)
-            .selectinload(StudentRunAssignment.student)
-            .selectinload(student_model.Student.school),          # Include student school context
-        )
-        .filter(run_model.Run.id == run_id)                       # Match requested run ID
-        .first()                                                  # Load one run
+    run = _get_company_scoped_run_or_404(
+        run_id,
+        db,
+        company.id,
+        "read",
+        options=[
+            joinedload(run_model.Run.driver),
+            joinedload(run_model.Run.route),
+            selectinload(run_model.Run.stops),
+            selectinload(run_model.Run.student_assignments).selectinload(StudentRunAssignment.stop),
+            selectinload(run_model.Run.student_assignments).selectinload(StudentRunAssignment.student).selectinload(student_model.Student.school),
+        ],
     )
-
-    if not run:
-        raise HTTPException(status_code=404, detail="Run not found")  # Validate run exists
 
     # -------------------------------------------------------------------------
     # Return nested run detail response
@@ -2127,22 +2220,23 @@ def update_run(
     run_id: int,
     payload: RunUpdate,
     db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
 
     # -------------------------------------------------------------------------
     # Load run with linked driver and route
     # -------------------------------------------------------------------------
-    run = (
-        db.query(run_model.Run)
-        .options(
+    run = _get_company_scoped_run_or_404(
+        run_id,
+        db,
+        company.id,
+        "read",
+        options=[
             joinedload(run_model.Run.driver),
             joinedload(run_model.Run.route),
-        )
-        .filter(run_model.Run.id == run_id)
-        .first()
+        ],
     )
-
-    if not run:
+    if run.route and run.route.company_id != company.id:
         raise HTTPException(status_code=404, detail="Run not found")
 
     # -------------------------------------------------------------------------
@@ -2179,14 +2273,17 @@ def update_run(
     description="Delete a planned run that has not started yet.",
     response_description="Run deleted",
 )
-def delete_run(run_id: int, db: Session = Depends(get_db)):
+def delete_run(
+    run_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
 
     # -------------------------------------------------------------------------
     # Load run
     # -------------------------------------------------------------------------
-    run = db.get(run_model.Run, run_id)
-
-    if not run:
+    run = _get_company_scoped_run_or_404(run_id, db, company.id, "read")
+    if run.route and run.route.company_id != company.id:
         raise HTTPException(status_code=404, detail="Run not found")
 
     # -------------------------------------------------------------------------
@@ -2211,15 +2308,16 @@ def delete_run(run_id: int, db: Session = Depends(get_db)):
     description="Operational runtime endpoint that returns the running board for a prepared run using runtime student assignments as the source of truth.",
     response_description="Running board",
 )
-def get_running_board(run_id: int, db: Session = Depends(get_db)):
+def get_running_board(
+    run_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
 
     # -------------------------------------------------------------------------
     # Load the run
     # -------------------------------------------------------------------------
-    run = db.get(run_model.Run, run_id)  # Retrieve run by ID
-
-    if not run:  # If run does not exist
-        raise HTTPException(status_code=404, detail="Run not found")
+    run = _get_company_scoped_run_or_404(run_id, db, company.id, "read")
 
     # -------------------------------------------------------------------------
     # Load run stops ordered by sequence
@@ -2271,15 +2369,14 @@ def get_running_board(run_id: int, db: Session = Depends(get_db)):
 )
 def get_run_assignments(
     run_id: int,                         # Run identifier
-    db: Session = Depends(get_db)        # Database session dependency
+    db: Session = Depends(get_db),        # Database session dependency
+    company: Company = Depends(get_company_context),
 ):
 
     # -------------------------------------------------------------------------
     # Validate run exists
     # -------------------------------------------------------------------------
-    run = db.get(run_model.Run, run_id)  # Load run
-    if not run:
-        raise HTTPException(status_code=404, detail="Run not found")
+    run = _get_company_scoped_run_or_404(run_id, db, company.id, "read")
 
     # -------------------------------------------------------------------------
     # Load assignments with student and stop
@@ -2331,23 +2428,25 @@ def get_run_assignments(
     description="Operational runtime endpoint that returns a compact summary for one prepared run with driver, route, and rider totals.",
     response_description="Run summary",
 )
-def get_run_summary(run_id: int, db: Session = Depends(get_db)):
+def get_run_summary(
+    run_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
 
     # -------------------------------------------------------------------------
     # Load run with driver and route
     # -------------------------------------------------------------------------
-    run = (
-        db.query(run_model.Run)
-        .options(
+    run = _get_company_scoped_run_or_404(
+        run_id,
+        db,
+        company.id,
+        "read",
+        options=[
             joinedload(run_model.Run.driver),
             joinedload(run_model.Run.route),
-        )
-        .filter(run_model.Run.id == run_id)
-        .first()
+        ],
     )
-
-    if not run:
-        raise HTTPException(status_code=404, detail="Run not found")
 
     # -------------------------------------------------------------------------
     # Load run stops

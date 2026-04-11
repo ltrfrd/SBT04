@@ -59,4 +59,22 @@ build/
 README.md
 structure.txt
 DEFERRED_FEATURES.md
-frontend/README.md
+
+# Ignore all markdown docs
+*.md
+
+# AI / planning
+.claude/
+claude/
+
+# Temp test artifacts
+tests/pytest_tmp/
+
+# Logs / temp
+*.log
+*.tmp
+
+# OS / editor
+.vscode/
+.DS_Store
+Thumbs.db

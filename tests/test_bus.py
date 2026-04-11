@@ -334,7 +334,7 @@ def test_bus_detail_returns_assigned_route_with_nested_context(client):
     )
     driver = client.post(
         "/drivers/",
-        json={"name": "Bus Detail Driver", "email": "bus.detail.driver@test.com", "phone": "901"},
+        json={"name": "Bus Detail Driver", "email": "bus.detail.driver@test.com", "phone": "901", "pin": "1234"},
     )
     route = client.post(
         "/routes/",

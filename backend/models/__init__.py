@@ -1,3 +1,4 @@
+from .company import Company, CompanyRouteAccess
 from .driver import Driver
 from .bus import Bus
 from .school import School
@@ -15,6 +16,8 @@ from .posttrip import PostTripInspection
 from .dispatch_alert import DispatchAlert
 __all__ = [
     "Driver",
+    "Company",
+    "CompanyRouteAccess",
     "Bus",
     "School",
     "Student",

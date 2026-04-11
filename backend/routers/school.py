@@ -1,171 +1,210 @@
 # ===========================================================
-# backend/routers/school.py — BST School Router
+# backend/routers/school.py - SBT School Router
 # -----------------------------------------------------------
 # Handles CRUD operations for schools and links them to routes.
 # ===========================================================
-from fastapi import APIRouter, Depends, HTTPException, status  # FastAPI tools
-from sqlalchemy.orm import Session  # DB session type
-from typing import List  # Type hint
-from database import get_db  # DB dependency
-from backend import schemas  # Pydantic schemas
-from backend.models import school as school_model  # School model
-from backend.models import route as route_model  # Route model (for linking)
+from typing import List
 
-# -----------------------------------------------------------
-# Router setup
-# -----------------------------------------------------------
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
+from database import get_db
+from backend import schemas
+from backend.models.company import Company
+from backend.models import route as route_model
+from backend.models import school as school_model
+from backend.utils.company_scope import ensure_route_owner
+from backend.utils.company_scope import ensure_same_company
+from backend.utils.company_scope import get_company_context
+from backend.utils.company_scope import get_company_scoped_record_or_404
+
+
 router = APIRouter(
-    prefix="/schools",  # All endpoints under /schools
-    tags=["Schools"],  # Swagger category label
+    prefix="/schools",
+    tags=["Schools"],
 )
 
 
-# -----------------------------------------------------------
-# - Create school
-# - Register a new school in the system
-# -----------------------------------------------------------
 @router.post(
-    "/",                                                        # Endpoint path
-    response_model=schemas.SchoolOut,                           # Response schema
-    status_code=status.HTTP_201_CREATED,                        # HTTP 201 on success
-    summary="Create school",                                   # Swagger title
-    description="Create a new school record.",                 # Swagger description
-    response_description="Created school",                     # Swagger response text
+    "/",
+    response_model=schemas.SchoolOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create school",
+    description="Create a new school record.",
+    response_description="Created school",
 )
-def create_school(school: schemas.SchoolCreate, db: Session = Depends(get_db)):
-    """Add a new school record to the database."""              # Internal docstring
-    new_school = school_model.School(**school.model_dump())     # Convert schema → DB model
-    db.add(new_school)                                         # Add to session
-    db.commit()                                                # Persist to DB
-    db.refresh(new_school)                                     # Reload with DB values
-    return new_school                                          # Return created record
+def create_school(
+    school: schemas.SchoolCreate,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
+    new_school = school_model.School(
+        **school.model_dump(),
+        company_id=company.id,
+    )
+    db.add(new_school)
+    db.commit()
+    db.refresh(new_school)
+    return new_school
 
-# -----------------------------------------------------------
-# - List schools
-# - Return all registered school records
-# -----------------------------------------------------------
+
 @router.get(
-    "/",                                                        # Endpoint path
-    response_model=List[schemas.SchoolOut],                     # Response schema (list of schools)
-    summary="List schools",                                    # Swagger title
-    description="Return all registered school records.",       # Swagger description
-    response_description="School list",                        # Swagger response text
+    "/",
+    response_model=List[schemas.SchoolOut],
+    summary="List schools",
+    description="Return all registered school records.",
+    response_description="School list",
 )
-def get_schools(db: Session = Depends(get_db)):
-    return db.query(school_model.School).all()                 # Fetch and return all school records
+def get_schools(
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
+    return (
+        db.query(school_model.School)
+        .filter(school_model.School.company_id == company.id)
+        .all()
+    )
 
-# -----------------------------------------------------------
-# - Get school by id
-# - Return a single school record
-# -----------------------------------------------------------
+
 @router.get(
-    "/{school_id}",                                             # Endpoint path with school id
-    response_model=schemas.SchoolOut,                           # Response schema
-    summary="Get school",                                       # Swagger title
-    description="Return a single school record by id.",         # Swagger description
-    response_description="School record",                       # Swagger response text
+    "/{school_id}",
+    response_model=schemas.SchoolOut,
+    summary="Get school",
+    description="Return a single school record by id.",
+    response_description="School record",
 )
-def get_school(school_id: int, db: Session = Depends(get_db)):
-    school = db.get(school_model.School, school_id)             # Load one school by primary key
-    if not school:
-        raise HTTPException(status_code=404, detail="School not found")  # Return 404 when missing
-    return school                                               # Return the matching school record
+def get_school(
+    school_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
+    return get_company_scoped_record_or_404(
+        db=db,
+        model=school_model.School,
+        record_id=school_id,
+        company_id=company.id,
+        detail="School not found",
+    )
 
-# -----------------------------------------------------------
-# - Update school
-# - Modify an existing school record
-# -----------------------------------------------------------
+
 @router.put(
-    "/{school_id}",                                             # Endpoint path with school id
-    response_model=schemas.SchoolOut,                           # Response schema
-    summary="Update school",                                    # Swagger title
-    description="Update an existing school record by id.",      # Swagger description
-    response_description="Updated school",                      # Swagger response text
+    "/{school_id}",
+    response_model=schemas.SchoolOut,
+    summary="Update school",
+    description="Update an existing school record by id.",
+    response_description="Updated school",
 )
 def update_school(
-    school_id: int, school_in: schemas.SchoolCreate, db: Session = Depends(get_db)
+    school_id: int,
+    school_in: schemas.SchoolCreate,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
-    school = db.get(school_model.School, school_id)             # Load existing school
-    if not school:
-        raise HTTPException(status_code=404, detail="School not found")  # Return 404 if missing
+    school = get_company_scoped_record_or_404(
+        db=db,
+        model=school_model.School,
+        record_id=school_id,
+        company_id=company.id,
+        detail="School not found",
+    )
 
-    update_data = school_in.model_dump(exclude_unset=True)      # Extract only provided fields
+    update_data = school_in.model_dump(exclude_unset=True)
     for key, value in update_data.items():
-        setattr(school, key, value)                            # Apply updates dynamically
+        setattr(school, key, value)
 
-    db.commit()                                                # Save changes
-    db.refresh(school)                                         # Reload updated record
-    return school                                              # Return updated school
-# -----------------------------------------------------------
-# - Delete school
-# - Remove a school record from the system
-# -----------------------------------------------------------
+    db.commit()
+    db.refresh(school)
+    return school
+
+
 @router.delete(
-    "/{school_id}",                                             # Endpoint path with school id
-    status_code=status.HTTP_204_NO_CONTENT,                     # HTTP 204 on success
-    summary="Delete school",                                    # Swagger title
-    description="Delete a school record by id.",                # Swagger description
-    response_description="School deleted",                      # Swagger response text
+    "/{school_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete school",
+    description="Delete a school record by id.",
+    response_description="School deleted",
 )
-def delete_school(school_id: int, db: Session = Depends(get_db)):
-    school = db.get(school_model.School, school_id)             # Load school by primary key
-    if not school:
-        raise HTTPException(status_code=404, detail="School not found")  # Return 404 if missing
-    db.delete(school)                                           # Remove school from session
-    db.commit()                                                 # Persist deletion
-    return None                                                 # Return empty 204 response
+def delete_school(
+    school_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
+    school = get_company_scoped_record_or_404(
+        db=db,
+        model=school_model.School,
+        record_id=school_id,
+        company_id=company.id,
+        detail="School not found",
+    )
+    db.delete(school)
+    db.commit()
+    return None
 
 
-# -----------------------------------------------------------
-# - Assign route to school
-# - Link a school with a route (many-to-many)
-# -----------------------------------------------------------
 @router.post(
-    "/{school_id}/assign_route/{route_id}",                    # Endpoint path with school + route ids
-    response_model=schemas.SchoolOut,                          # Response schema
-    summary="Assign route to school",                          # Swagger title
-    description="Link a school to a route. Prevents duplicate assignments.",  # Swagger description
-    response_description="Updated school with route link",     # Swagger response text
+    "/{school_id}/assign_route/{route_id}",
+    response_model=schemas.SchoolOut,
+    summary="Assign route to school",
+    description="Link a school to a route. Prevents duplicate assignments.",
+    response_description="Updated school with route link",
 )
 def assign_route_to_school(
-    school_id: int, route_id: int, db: Session = Depends(get_db)
+    school_id: int,
+    route_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
-    """Link an existing school to a route (many-to-many)."""   # Internal docstring
-    school = db.get(school_model.School, school_id)             # Load school
-    route = db.get(route_model.Route, route_id)                 # Load route
-    if not school or not route:
-        raise HTTPException(status_code=404, detail="School or Route not found")  # Validate existence
+    school = get_company_scoped_record_or_404(
+        db=db,
+        model=school_model.School,
+        record_id=school_id,
+        company_id=company.id,
+        detail="School or Route not found",
+    )
+    route = db.get(route_model.Route, route_id)
+    if not route:
+        raise HTTPException(status_code=404, detail="School or Route not found")
 
-    if route not in school.routes:                              # Prevent duplicate links
-        school.routes.append(route)                             # Attach route to school
-        db.commit()                                             # Persist change
-        db.refresh(school)                                      # Reload updated object
+    ensure_route_owner(route, company.id)
+    ensure_same_company(school, route)
 
-    return school                                               # Return updated school
+    if route not in school.routes:
+        school.routes.append(route)
+        db.commit()
+        db.refresh(school)
 
-# -----------------------------------------------------------
-# - Unassign route from school
-# - Remove a school-to-route link
-# -----------------------------------------------------------
+    return school
+
+
 @router.delete(
-    "/{school_id}/unassign_route/{route_id}",                  # Endpoint path with school + route ids
-    response_model=schemas.SchoolOut,                          # Response schema
-    summary="Unassign route from school",                      # Swagger title
-    description="Remove the link between a school and a route.",  # Swagger description
-    response_description="Updated school without route link",  # Swagger response text
+    "/{school_id}/unassign_route/{route_id}",
+    response_model=schemas.SchoolOut,
+    summary="Unassign route from school",
+    description="Remove the link between a school and a route.",
+    response_description="Updated school without route link",
 )
 def unassign_route_from_school(
-    school_id: int, route_id: int, db: Session = Depends(get_db)
+    school_id: int,
+    route_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
-    """Remove a route association from a school."""            # Internal docstring
-    school = db.get(school_model.School, school_id)            # Load school
-    route = db.get(route_model.Route, route_id)                # Load route
-    if not school or not route:
-        raise HTTPException(status_code=404, detail="School or Route not found")  # Validate existence
+    school = get_company_scoped_record_or_404(
+        db=db,
+        model=school_model.School,
+        record_id=school_id,
+        company_id=company.id,
+        detail="School or Route not found",
+    )
+    route = db.get(route_model.Route, route_id)
+    if not route:
+        raise HTTPException(status_code=404, detail="School or Route not found")
 
-    if route in school.routes:                                 # Only remove when linked
-        school.routes.remove(route)                            # Detach route from school
-        db.commit()                                            # Persist change
-        db.refresh(school)                                     # Reload updated object
+    ensure_route_owner(route, company.id)
 
-    return school                                              # Return updated school
+    if route in school.routes:
+        school.routes.remove(route)
+        db.commit()
+        db.refresh(school)
+
+    return school

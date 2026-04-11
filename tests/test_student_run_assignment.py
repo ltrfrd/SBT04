@@ -21,6 +21,7 @@ def _build_assignment_context(client, route_number: str, run_types: list[str]):
             "name": f"{route_number} Driver",
             "email": f"{route_number.lower()}@test.com",
             "phone": "7805553001",
+            "pin": "1234",
         },
     ).json()
 

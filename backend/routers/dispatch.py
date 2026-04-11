@@ -10,9 +10,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status  # FastAPI 
 from sqlalchemy.orm import Session  # DB session
 
 from backend import schemas  # Dispatch schemas
+from backend.models.company import Company
 from backend.models import dispatch as dispatch_model  # Dispatch module model
 from backend.models import driver as driver_model  # Validate driver link
 from database import get_db  # DB dependency
+from backend.utils.company_scope import get_company_context
+from backend.utils.company_scope import get_company_scoped_record_or_404
 
 
 # -----------------------------------------------------------
@@ -50,11 +53,16 @@ def log_charter_hours(
         examples=["2026-03-23"],                                    # Valid Swagger example
     ),
     db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
     """Drivers submit charter start/end; hours auto-calculated."""
-    driver = db.get(driver_model.Driver, driver_id)
-    if not driver:
-        raise HTTPException(status_code=404, detail="Driver not found")
+    get_company_scoped_record_or_404(
+        db=db,
+        model=driver_model.Driver,
+        record_id=driver_id,
+        company_id=company.id,
+        detail="Driver not found",
+    )
 
     record = dispatch_model.Payroll(                                # Create dispatch-backed work record
         driver_id=driver_id,
@@ -73,9 +81,17 @@ def log_charter_hours(
 # - List all dispatch entries
 # -----------------------------------------------------------
 @router.get("/", response_model=List[schemas.DispatchOut])
-def get_all_dispatch_records(db: Session = Depends(get_db)):
+def get_all_dispatch_records(
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
     """Return all dispatch records."""
-    return db.query(dispatch_model.Payroll).all()
+    return (
+        db.query(dispatch_model.Payroll)
+        .join(driver_model.Driver, driver_model.Driver.id == dispatch_model.Payroll.driver_id)
+        .filter(driver_model.Driver.company_id == company.id)
+        .all()
+    )
 
 
 # -----------------------------------------------------------
@@ -83,11 +99,19 @@ def get_all_dispatch_records(db: Session = Depends(get_db)):
 # - Driver's personal summary
 # -----------------------------------------------------------
 @router.get("/driver/{driver_id}", response_model=List[schemas.DispatchOut])
-def get_driver_dispatch_records(driver_id: int, db: Session = Depends(get_db)):
+def get_driver_dispatch_records(
+    driver_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
     """Return all dispatch records for a driver."""
-    driver = db.get(driver_model.Driver, driver_id)
-    if not driver:
-        raise HTTPException(status_code=404, detail="Driver not found")
+    get_company_scoped_record_or_404(
+        db=db,
+        model=driver_model.Driver,
+        record_id=driver_id,
+        company_id=company.id,
+        detail="Driver not found",
+    )
     return (
         db.query(dispatch_model.Payroll)
         .filter(dispatch_model.Payroll.driver_id == driver_id)
@@ -100,11 +124,22 @@ def get_driver_dispatch_records(driver_id: int, db: Session = Depends(get_db)):
 # - Keep DB model compatibility unchanged
 # -----------------------------------------------------------
 @router.put("/{dispatch_id}/approve", response_model=schemas.DispatchOut)
-def approve_dispatch_record(dispatch_id: int, db: Session = Depends(get_db)):
+def approve_dispatch_record(
+    dispatch_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
     """Approve a dispatch record."""
     record = db.get(dispatch_model.Payroll, dispatch_id)
     if not record:
         raise HTTPException(status_code=404, detail="Dispatch record not found")
+    get_company_scoped_record_or_404(
+        db=db,
+        model=driver_model.Driver,
+        record_id=record.driver_id,
+        company_id=company.id,
+        detail="Dispatch record not found",
+    )
     record.approved = True
     db.commit()
     db.refresh(record)

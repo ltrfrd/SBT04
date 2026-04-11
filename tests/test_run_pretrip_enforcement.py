@@ -41,7 +41,7 @@ def _pretrip_payload(context, **overrides):
 def _create_pretrip_enforced_run(client, *, route_number: str, run_type: str = "AM", scheduled_start_time: str = "07:00:00"):
     driver = client.post(
         "/drivers/",
-        json={"name": f"{route_number} Driver", "email": f"{route_number.lower()}@test.com", "phone": "5550000"},
+        json={"name": f"{route_number} Driver", "email": f"{route_number.lower()}@test.com", "phone": "5550000", "pin": "1234"},
     )
     assert driver.status_code in (200, 201)
 
@@ -112,7 +112,7 @@ def test_start_run_blocks_when_no_pretrip_for_active_bus(client):
 def test_start_run_blocks_when_route_has_no_active_bus(client):
     driver = client.post(
         "/drivers/",
-        json={"name": "No Bus Driver", "email": "no.bus.driver@test.com", "phone": "5550001"},
+        json={"name": "No Bus Driver", "email": "no.bus.driver@test.com", "phone": "5550001", "pin": "1234"},
     )
     assert driver.status_code in (200, 201)
 

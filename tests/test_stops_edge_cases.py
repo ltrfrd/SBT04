@@ -2,7 +2,7 @@ import pytest
 
 
 def _setup_run(client):
-    r = client.post("/drivers/", json={"name": "D", "email": "d@d.com", "phone": "1"})
+    r = client.post("/drivers/", json={"name": "D", "email": "d@d.com", "phone": "1", "pin": "1234"})
     assert r.status_code in (200, 201)
     driver_id = r.json()["id"]
 

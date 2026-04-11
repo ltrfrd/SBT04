@@ -11,12 +11,17 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from backend.deps.admin import require_admin
+from backend.models.company import Company
 from backend.models import school as school_model
 from backend.models import stop as stop_model
 from backend.models import run as run_model
 from backend.models.stop import Stop, StopType
 from backend.schemas.stop import RunStopCreate, RunStopUpdate, StopCreate, StopOut, StopUpdate, StopReorder
 from backend.utils.db_errors import raise_conflict_if_unique
+from backend.utils.company_scope import get_company_context
+from backend.utils.company_scope import get_company_scoped_record_or_404
+from backend.utils.company_scope import get_company_scoped_route_or_404
+from backend.utils.company_scope import get_route_access_level
 from backend.utils.run_setup import (
     ensure_run_is_planned_for_setup,
     get_run_or_404,
@@ -291,6 +296,19 @@ def _update_stop_record(
 
     return stop
 
+
+def _get_company_scoped_stop_or_404(stop_id: int, db: Session, company_id: int, required_access: str = "read") -> stop_model.Stop:
+    stop = db.get(stop_model.Stop, stop_id)
+    if not stop or not stop.run:
+        raise HTTPException(status_code=404, detail="Stop not found")
+    get_company_scoped_route_or_404(
+        db=db,
+        route_id=stop.run.route_id,
+        company_id=company_id,
+        required_access=required_access,
+    )
+    return stop
+
 # -----------------------------------------------------------
 # - Validate run sequences
 # - Check whether stop sequences are contiguous for a run
@@ -305,7 +323,10 @@ def validate_run_sequences(
     run_id: int,
     db: Session = Depends(get_db),
     _: None = Depends(require_admin),
+    company: Company = Depends(get_company_context),
 ):
+    run = get_run_or_404(run_id, db)
+    get_company_scoped_route_or_404(db=db, route_id=run.route_id, company_id=company.id, required_access="read")
     stops = (
         db.query(stop_model.Stop)
         .filter(stop_model.Stop.run_id == run_id)
@@ -350,8 +371,13 @@ def force_normalize_run(
     run_id: int,
     db: Session = Depends(get_db),
     _: None = Depends(require_admin),
+    company: Company = Depends(get_company_context),
 ):
     try:
+        run = get_run_or_404(run_id, db)
+        route = get_company_scoped_route_or_404(db=db, route_id=run.route_id, company_id=company.id, required_access="read")
+        if route.company_id != company.id:
+            raise HTTPException(status_code=404, detail="Run not found")
         normalize_run_sequences(db, run_id)
         db.commit()
 
@@ -391,9 +417,16 @@ def force_normalize_run(
     description="Legacy compatibility endpoint for creating a stop by sending run_id in the body. Preferred workflow-first creation is POST /runs/{run_id}/stops. Only planned runs can be modified.",
     response_description="Created stop",
 )
-def create_stop(payload: StopCreate, db: Session = Depends(get_db)):
+def create_stop(
+    payload: StopCreate,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
     try:
         run = get_run_or_404(payload.run_id, db)
+        route = get_company_scoped_route_or_404(db=db, route_id=run.route_id, company_id=company.id, required_access="read")
+        if route.company_id != company.id:
+            raise HTTPException(status_code=404, detail="Run not found")
         ensure_run_is_planned_for_setup(run)                       # Legacy compatibility create still honors planned-only setup
 
         data = _build_stop_payload(                             # Apply shared stop workflow rules
@@ -469,14 +502,24 @@ def create_run_stop(
     description="Return all stops, optionally filtered to one run.",
     response_description="Stop list",
 )
-def get_stops(run_id: int | None = None, db: Session = Depends(get_db)):
+def get_stops(
+    run_id: int | None = None,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
     query = db.query(stop_model.Stop)
 
     if run_id is not None:
+        run = get_run_or_404(run_id, db)
+        get_company_scoped_route_or_404(db=db, route_id=run.route_id, company_id=company.id, required_access="read")
         query = query.filter(stop_model.Stop.run_id == run_id)
 
     query = query.order_by(stop_model.Stop.sequence.asc())
-    return query.all()
+    stops = query.all()
+    return [
+        stop for stop in stops
+        if stop.run and stop.run.route and get_route_access_level(stop.run.route, company.id) is not None
+    ]
 
 # -----------------------------------------------------------
 # - Update stop
@@ -490,11 +533,14 @@ def get_stops(run_id: int | None = None, db: Session = Depends(get_db)):
     response_description="Updated stop",
 )
 def update_stop(
-    stop_id: int, stop_in: StopUpdate, db: Session = Depends(get_db)
+    stop_id: int,
+    stop_in: StopUpdate,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
     try:
-        stop = db.get(stop_model.Stop, stop_id)
-        if not stop:
+        stop = _get_company_scoped_stop_or_404(stop_id, db, company.id, "read")
+        if stop.run and stop.run.route and stop.run.route.company_id != company.id:
             raise HTTPException(status_code=404, detail="Stop not found")
         ensure_run_is_planned_for_setup(get_run_or_404(stop.run_id, db))  # Legacy compatibility update must stay planned-only
 
@@ -571,10 +617,14 @@ def update_run_stop(
     description="Delete a stop by id and normalize the remaining stop sequence order.",
     response_description="Stop deleted",
 )
-def delete_stop(stop_id: int, db: Session = Depends(get_db)):
+def delete_stop(
+    stop_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
     try:
-        stop = db.get(stop_model.Stop, stop_id)
-        if not stop:
+        stop = _get_company_scoped_stop_or_404(stop_id, db, company.id, "read")
+        if stop.run and stop.run.route and stop.run.route.company_id != company.id:
             raise HTTPException(status_code=404, detail="Stop not found")
 
         run_id = stop.run_id
@@ -610,11 +660,14 @@ def delete_stop(stop_id: int, db: Session = Depends(get_db)):
     response_description="Reordered stop",
 )
 def reorder_stop(
-    stop_id: int, payload: StopReorder, db: Session = Depends(get_db)
+    stop_id: int,
+    payload: StopReorder,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
     try:
-        stop = db.get(stop_model.Stop, stop_id)
-        if not stop:
+        stop = _get_company_scoped_stop_or_404(stop_id, db, company.id, "read")
+        if stop.run and stop.run.route and stop.run.route.company_id != company.id:
             raise HTTPException(status_code=404, detail="Stop not found")
 
         run_id = stop.run_id

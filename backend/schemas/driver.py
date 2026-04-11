@@ -4,7 +4,7 @@
 # Defines the Pydantic models for driver requests and responses.
 # ===========================================================
 
-from pydantic import BaseModel, ConfigDict, EmailStr  # Pydantic types for validation
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator  # Pydantic types for validation
 from typing import Optional
 
 
@@ -25,7 +25,15 @@ class DriverBase(BaseModel):
 class DriverCreate(DriverBase):
     """Schema used when creating a new driver."""
 
-    pass  # No extra fields needed beyond base fields
+    pin: str
+
+    @field_validator("pin")
+    @classmethod
+    def normalize_pin(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("pin is required")
+        return normalized
 
 
 class DriverUpdate(BaseModel):
@@ -34,8 +42,20 @@ class DriverUpdate(BaseModel):
     name: Optional[str] = None
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
+    pin: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("pin")
+    @classmethod
+    def normalize_optional_pin(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("pin is required")
+        return normalized
 
 
 # -----------------------------------------------------------

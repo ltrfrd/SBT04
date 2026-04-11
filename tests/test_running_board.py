@@ -22,7 +22,8 @@ def test_running_board_basic(client):  # Test the running board endpoint
     driver = client.post("/drivers/", json={  # Create a driver
         "name": "Test Driver",
         "email": "driver@test.com",
-        "phone": "7801110000"
+        "phone": "7801110000",
+        "pin": "1234",
     }).json()  # Convert response to JSON
 
     # -------------------------------------------------------------------------

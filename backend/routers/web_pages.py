@@ -23,9 +23,12 @@ from backend.models import (
     school as school_model,
     student as student_model,
 )
+from backend.models.company import Company, CompanyRouteAccess
 from backend.models.associations import RouteDriverAssignment, StudentRunAssignment
 from backend.utils import attendance_generator
 from backend.utils.auth import get_current_driver
+from backend.utils.company_scope import get_company_context
+from backend.utils.company_scope import get_company_scoped_route_or_404
 from backend.utils.driver_workspace import _build_route_workspace
 from backend.utils.route_driver_assignment import get_route_driver_name
 
@@ -38,14 +41,18 @@ router = APIRouter()
 # DASHBOARD PAGE
 # -----------------------------------------------------------
 @router.get("/dashboard", response_class=HTMLResponse)
-def dashboard(request: Request, db: Session = Depends(get_db)):
+def dashboard(
+    request: Request,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
     """Renders admin dashboard summary with record counts."""
     counts = {
-        "driver_count": db.query(driver_model.Driver).count(),
-        "school_count": db.query(school_model.School).count(),
-        "route_count": db.query(route_model.Route).count(),
-        "student_count": db.query(student_model.Student).count(),
-        "run_count": db.query(run_model.Run).filter(run_model.Run.end_time.is_(None)).count(),
+        "driver_count": db.query(driver_model.Driver).filter(driver_model.Driver.company_id == company.id).count(),
+        "school_count": db.query(school_model.School).filter(school_model.School.company_id == company.id).count(),
+        "route_count": db.query(route_model.Route).filter(route_model.Route.company_id == company.id).count(),
+        "student_count": db.query(student_model.Student).filter(student_model.Student.company_id == company.id).count(),
+        "run_count": db.query(run_model.Run).join(route_model.Route, route_model.Route.id == run_model.Run.route_id).filter(route_model.Route.company_id == company.id).filter(run_model.Run.end_time.is_(None)).count(),
     }
     return templates.TemplateResponse(
         request,                                              # Request first (prevents deprecation warning)
@@ -58,13 +65,23 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
 # ROUTE ATTENDANCE PAGE
 # -----------------------------------------------------------
 @router.get("/route_report/{route_id}", response_class=HTMLResponse)
-def route_report(route_id: int, request: Request, db: Session = Depends(get_db)):
+def route_report(
+    route_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
     """Shows route-specific attendance summary including driver name and route details."""
-    route_data = attendance_generator.route_summary(db, route_id)
+    route_data = attendance_generator.route_summary(db, route_id, company_id=company.id)
     if "error" in route_data:
         raise HTTPException(status_code=404, detail=route_data["error"])
 
-    route = db.get(route_model.Route, route_id)
+    route = get_company_scoped_route_or_404(
+        db=db,
+        route_id=route_id,
+        company_id=company.id,
+        required_access="read",
+    )
     driver_name = get_route_driver_name(route) if route else None
     return templates.TemplateResponse(
         request,                                              # New Starlette signature: request first
@@ -89,7 +106,7 @@ def driver_run_view(
     route_id: int | None = None,
     run_id: int | None = None,
     db: Session = Depends(get_db),
-    current_driver: driver_model.Driver = Depends(get_current_driver)
+    current_driver: driver_model.Driver = Depends(get_current_driver),
 ):
     """Render the route-first driver workspace."""
     # -----------------------------------------------------------
@@ -110,6 +127,8 @@ def driver_run_view(
         db.query(run_model.Run)
         .options(joinedload(run_model.Run.route))
         .filter(run_model.Run.driver_id == driver_id)
+        .join(route_model.Route, route_model.Route.id == run_model.Run.route_id)
+        .filter(route_model.Route.company_id == current_driver.company_id)
         .filter(run_model.Run.start_time.is_not(None))
         .filter(run_model.Run.end_time.is_(None))
         .first()
@@ -134,6 +153,10 @@ def driver_run_view(
             RouteDriverAssignment.driver_id == driver_id,
             RouteDriverAssignment.active.is_(True),
         )))
+        .filter(
+            (route_model.Route.company_id == current_driver.company_id)
+            | route_model.Route.company_access.any(CompanyRouteAccess.company_id == current_driver.company_id)
+        )
         .order_by(route_model.Route.route_number.asc(), route_model.Route.id.asc())
         .all()
     )                                                        # Driver-selectable route workspace choices
@@ -226,13 +249,23 @@ def driver_run_view(
 # PAYROLL ATTENDANCE SUMMARY PAGE
 # -----------------------------------------------------------
 @router.get("/summary_report", response_class=HTMLResponse)
-def summary_report(request: Request, start: date = None, end: date = None, db: Session = Depends(get_db)):
+def summary_report(
+    request: Request,
+    start: date = None,
+    end: date = None,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
     """Shows payroll attendance summary between given dates."""
     end = end or date.today()
     start = start or end
-    records = db.query(dispatch_model.Payroll).filter(
-        dispatch_model.Payroll.work_date.between(start, end)
-    ).all()
+    records = (
+        db.query(dispatch_model.Payroll)
+        .join(driver_model.Driver, driver_model.Driver.id == dispatch_model.Payroll.driver_id)
+        .filter(driver_model.Driver.company_id == company.id)
+        .filter(dispatch_model.Payroll.work_date.between(start, end))
+        .all()
+    )
     total_drivers = len({r.driver_id for r in records})
     approved_days = sum(1 for r in records if r.approved)
     pending_days = len(records) - approved_days

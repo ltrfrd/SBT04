@@ -28,6 +28,7 @@ def test_start_run_requires_prepared_stops(client):
             "name": "John Driver",
             "email": "john.driver@example.com",
             "phone": "111-222-3333",
+            "pin": "1234",
         },
     )
     assert driver_response.status_code in (200, 201)
@@ -88,6 +89,7 @@ def test_start_run_requires_prepared_students(client):
             "name": "Student Guard Driver",
             "email": "student.guard@example.com",
             "phone": "111-222-4444",
+            "pin": "1234",
         },
     )
     assert driver_response.status_code in (200, 201)
@@ -159,6 +161,7 @@ def test_run_state_uses_stored_current_stop_sequence(client):
             "name": "Driver State Stored",
             "email": "driver_state_stored@example.com",
             "phone": "780-555-1101",
+            "pin": "1234",
         },
     )
     assert driver_res.status_code in (200, 201)

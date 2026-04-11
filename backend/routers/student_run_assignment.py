@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from database import get_db
+from backend.models.company import Company
 from backend.models.associations import StudentRunAssignment
 from backend.models import student as student_model
 from backend.models import run as run_model
@@ -16,6 +17,9 @@ from backend.schemas.student_run_assignment import (
     StudentRunAssignmentCreate,
     StudentRunAssignmentOut,
 )
+from backend.utils.company_scope import get_company_context
+from backend.utils.company_scope import get_company_scoped_record_or_404
+from backend.utils.company_scope import get_company_scoped_route_or_404
 
 # -----------------------------------------------------------
 # Router setup
@@ -58,10 +62,17 @@ def create_assignment(payload: StudentRunAssignmentCreate, db: Session = Depends
 def get_run_assignments(
     run_id: int,
     db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
     run = db.get(run_model.Run, run_id)                          # Load run
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")  # Validate run exists
+    get_company_scoped_route_or_404(
+        db=db,
+        route_id=run.route_id,
+        company_id=company.id,
+        required_access="read",
+    )
 
     assignments = (
         db.query(StudentRunAssignment)
@@ -87,13 +98,18 @@ def get_run_assignments(
 def list_assignments(
     student_id: int | None = None,
     db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
     if student_id is None:
         raise HTTPException(status_code=400, detail="student_id is required")  # Require student-scoped lookup
 
-    student = db.get(student_model.Student, student_id)         # Load student
-    if not student:
-        raise HTTPException(status_code=404, detail="Student not found")  # Validate student exists
+    student = get_company_scoped_record_or_404(
+        db=db,
+        model=student_model.Student,
+        record_id=student_id,
+        company_id=company.id,
+        detail="Student not found",
+    )
 
     assignments = (
         db.query(StudentRunAssignment)

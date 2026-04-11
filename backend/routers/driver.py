@@ -14,6 +14,11 @@ from backend.models.route import Route
 from backend.schemas.driver import DriverUpdate
 from backend.schemas.route import RouteOut
 from backend.routers.route import _serialize_route
+from backend.models.company import Company
+from backend.utils.auth import hash_driver_pin
+from backend.utils.company_scope import get_company_context
+from backend.utils.company_scope import get_company_scoped_record_or_404
+from backend.utils.company_scope import get_route_access_level
 
 # -----------------------------------------------------------
 # Router setup
@@ -33,8 +38,18 @@ router = APIRouter(prefix="/drivers", tags=["Drivers"])
     description="Create a new driver record. Email must be unique.",
     response_description="Created driver",
 )
-def create_driver(driver: schemas.DriverCreate, db: Session = Depends(get_db)):
-    new_driver = driver_model.Driver(**driver.model_dump())
+def create_driver(
+    driver: schemas.DriverCreate,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
+    payload = driver.model_dump()
+    pin = payload.pop("pin")
+    new_driver = driver_model.Driver(
+        **payload,
+        company_id=company.id,
+        pin_hash=hash_driver_pin(pin),
+    )
     db.add(new_driver)
     db.commit()
     db.refresh(new_driver)
@@ -52,8 +67,15 @@ def create_driver(driver: schemas.DriverCreate, db: Session = Depends(get_db)):
     description="Return all registered driver records.",
     response_description="Driver list",
 )
-def get_drivers(db: Session = Depends(get_db)):
-    return db.query(driver_model.Driver).all()
+def get_drivers(
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
+    return (
+        db.query(driver_model.Driver)
+        .filter(driver_model.Driver.company_id == company.id)
+        .all()
+    )
 
 # -----------------------------------------------------------
 # - Get driver by id
@@ -66,10 +88,18 @@ def get_drivers(db: Session = Depends(get_db)):
     description="Return a single driver record by id.",
     response_description="Driver record",
 )
-def get_driver(driver_id: int, db: Session = Depends(get_db)):
-    driver = db.get(driver_model.Driver, driver_id)                         # Load one driver by primary key
-    if not driver:
-        raise HTTPException(status_code=404, detail="Driver not found")     # Return not found when missing
+def get_driver(
+    driver_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
+    driver = get_company_scoped_record_or_404(
+        db=db,
+        model=driver_model.Driver,
+        record_id=driver_id,
+        company_id=company.id,
+        detail="Driver not found",
+    )
     return driver                                                           # Return one driver object
 
 
@@ -89,12 +119,20 @@ def get_driver(driver_id: int, db: Session = Depends(get_db)):
     ),
     response_description="Driver route list",
 )
-def get_driver_routes(driver_id: int, db: Session = Depends(get_db)):
-    driver = db.get(driver_model.Driver, driver_id)
-    if not driver:
-        raise HTTPException(status_code=404, detail="Driver not found")
+def get_driver_routes(
+    driver_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
+    driver = get_company_scoped_record_or_404(
+        db=db,
+        model=driver_model.Driver,
+        record_id=driver_id,
+        company_id=company.id,
+        detail="Driver not found",
+    )
 
-    routes = (
+    candidate_routes = (
         db.query(Route)
         .join(RouteDriverAssignment, RouteDriverAssignment.route_id == Route.id)
         .filter(RouteDriverAssignment.driver_id == driver_id)
@@ -103,6 +141,11 @@ def get_driver_routes(driver_id: int, db: Session = Depends(get_db)):
         .distinct()
         .all()
     )
+    routes = [
+        route
+        for route in candidate_routes
+        if get_route_access_level(route, driver.company_id) is not None
+    ]
     return [_serialize_route(route) for route in routes]
 
 
@@ -118,15 +161,25 @@ def get_driver_routes(driver_id: int, db: Session = Depends(get_db)):
     response_description="Updated driver",
 )
 def update_driver(
-    driver_id: int, driver_in: DriverUpdate, db: Session = Depends(get_db)
+    driver_id: int,
+    driver_in: DriverUpdate,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
-    driver = db.get(driver_model.Driver, driver_id)
-    if not driver:
-        raise HTTPException(status_code=404, detail="Driver not found")
+    driver = get_company_scoped_record_or_404(
+        db=db,
+        model=driver_model.Driver,
+        record_id=driver_id,
+        company_id=company.id,
+        detail="Driver not found",
+    )
 
     update_data = driver_in.model_dump(exclude_unset=True)
+    pin = update_data.pop("pin", None)
     for key, value in update_data.items():
         setattr(driver, key, value)
+    if pin is not None:
+        driver.pin_hash = hash_driver_pin(pin)
 
     db.commit()
     db.refresh(driver)
@@ -143,10 +196,18 @@ def update_driver(
     description="Delete a driver record by id.",
     response_description="Driver deleted",
 )
-def delete_driver(driver_id: int, db: Session = Depends(get_db)):
-    driver = db.get(driver_model.Driver, driver_id)
-    if not driver:
-        raise HTTPException(status_code=404, detail="Driver not found")
+def delete_driver(
+    driver_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
+    driver = get_company_scoped_record_or_404(
+        db=db,
+        model=driver_model.Driver,
+        record_id=driver_id,
+        company_id=company.id,
+        detail="Driver not found",
+    )
     db.delete(driver)
     db.commit()
     return None

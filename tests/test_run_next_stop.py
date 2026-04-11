@@ -23,6 +23,7 @@ def test_next_stop_advances_progress(client):
             "name": "Driver Next Stop",
             "email": "driver_next_stop@example.com",
             "phone": "555-000-1111",
+            "pin": "1234",
         },
     )
     assert driver_res.status_code in (200, 201)
@@ -114,6 +115,7 @@ def test_next_stop_uses_actual_current_stop_after_manual_jump(client):
             "name": "Driver Next Stop Jump",
             "email": "driver_next_stop_jump@example.com",
             "phone": "555-000-2222",
+            "pin": "1234",
         },
     )
     assert driver_res.status_code in (200, 201)
@@ -193,6 +195,7 @@ def test_arrive_stop_accepts_explicit_stop_id_for_flexible_runtime_location(clie
             "name": "Driver Stop Id",
             "email": "driver_stop_id@example.com",
             "phone": "555-000-3333",
+            "pin": "1234",
         },
     )
     assert driver_res.status_code in (200, 201)

@@ -11,7 +11,9 @@ from database import get_db  # Shared DB session dependency
 
 from backend import schemas  # Shared schema exports
 from backend.models.bus import Bus  # Bus model for FK validation
+from backend.models.company import Company  # Company model for tenant context
 from backend.models.pretrip import PreTripDefect, PreTripInspection  # Pre-trip persistence models
+from backend.utils.company_scope import get_company_context  # Tenant auth dependency
 from backend.utils.pretrip_alerts import sync_pretrip_issue_alerts  # Pre-trip alert sync helpers
 
 
@@ -22,41 +24,53 @@ router = APIRouter(prefix="/pretrips", tags=["Pre-Trip Inspection"])
 # - Pre-trip helpers
 # - Keep duplicate checks and correction snapshots explicit
 # -----------------------------------------------------------
-def _get_pretrip_or_404(pretrip_id: int, db: Session) -> PreTripInspection:
+def _get_pretrip_or_404(pretrip_id: int, db: Session, company_id: int) -> PreTripInspection:
     inspection = (
         db.query(PreTripInspection)
         .options(
             selectinload(PreTripInspection.bus),
             selectinload(PreTripInspection.defects),
         )
+        .join(Bus, PreTripInspection.bus_id == Bus.id)
         .filter(PreTripInspection.id == pretrip_id)
+        .filter(Bus.company_id == company_id)
         .first()
-    )                                                          # Load one inspection with nested defects
+    )                                                          # Load one inspection with nested defects, company-scoped
     if not inspection:
         raise HTTPException(status_code=404, detail="Pre-Trip Inspection not found")
     return inspection
 
 
-def _get_bus_by_number_or_404(bus_number: str, db: Session) -> Bus:
+def _get_bus_by_number_or_404(bus_number: str, db: Session, company_id: int) -> Bus:
     bus = (
         db.query(Bus)
         .filter(Bus.unit_number == bus_number)
+        .filter(Bus.company_id == company_id)
         .first()
-    )                                                          # Resolve the user-facing bus number to the stored bus row
+    )                                                          # Resolve the user-facing bus number within company only
     if not bus:
         raise HTTPException(status_code=404, detail="Bus not found")
     return bus
 
 
-def _resolve_bus_or_404(payload: schemas.PreTripCreate | schemas.PreTripCorrect, db: Session) -> Bus:
+def _resolve_bus_or_404(
+    payload: schemas.PreTripCreate | schemas.PreTripCorrect,
+    db: Session,
+    company_id: int,
+) -> Bus:
     if payload.bus_id is not None:
-        bus = db.get(Bus, payload.bus_id)                     # Prefer authoritative bus id when provided
+        bus = (
+            db.query(Bus)
+            .filter(Bus.id == payload.bus_id)
+            .filter(Bus.company_id == company_id)
+            .first()
+        )                                                      # Scope bus_id resolution to company
         if not bus:
             raise HTTPException(status_code=404, detail="Bus not found")
         return bus
 
     if payload.bus_number:
-        return _get_bus_by_number_or_404(payload.bus_number, db)
+        return _get_bus_by_number_or_404(payload.bus_number, db, company_id)
 
     raise HTTPException(status_code=400, detail="Invalid bus reference")
 
@@ -145,8 +159,9 @@ def _serialize_pretrip_snapshot(inspection: PreTripInspection) -> dict:
 def create_pretrip(
     payload: schemas.PreTripCreate,
     db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
-    bus = _resolve_bus_or_404(payload, db)
+    bus = _resolve_bus_or_404(payload, db, company.id)
     _assert_inspection_date_is_today(payload.inspection_date)
     _assert_pretrip_unique_for_bus_day(
         bus_id=bus.id,
@@ -178,7 +193,7 @@ def create_pretrip(
     sync_pretrip_issue_alerts(inspection=inspection, db=db)    # Create or resolve pre-trip issue alerts
     db.commit()
     db.refresh(inspection)
-    return _get_pretrip_or_404(inspection.id, db)
+    return _get_pretrip_or_404(inspection.id, db, company.id)
 
 
 # -----------------------------------------------------------
@@ -196,6 +211,7 @@ def list_pretrips(
     bus_id: int | None = Query(default=None),
     inspection_date: date | None = Query(default=None),
     db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
     query = (
         db.query(PreTripInspection)
@@ -203,10 +219,18 @@ def list_pretrips(
             selectinload(PreTripInspection.bus),
             selectinload(PreTripInspection.defects),
         )
-    )                                                          # Base pre-trip query with nested relationships
+        .join(Bus, PreTripInspection.bus_id == Bus.id)
+        .filter(Bus.company_id == company.id)
+    )                                                          # Base pre-trip query scoped to company
 
     if bus_id is not None:
-        if not db.get(Bus, bus_id):
+        bus = (
+            db.query(Bus)
+            .filter(Bus.id == bus_id)
+            .filter(Bus.company_id == company.id)
+            .first()
+        )
+        if not bus:
             raise HTTPException(status_code=404, detail="Bus not found")
         query = query.filter(PreTripInspection.bus_id == bus_id)
 
@@ -234,8 +258,12 @@ def list_pretrips(
     description="Return one submitted Pre-Trip Inspection by id with nested defect rows.",
     response_description="Pre-Trip Inspection detail",
 )
-def get_pretrip(pretrip_id: int, db: Session = Depends(get_db)):
-    return _get_pretrip_or_404(pretrip_id, db)
+def get_pretrip(
+    pretrip_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
+    return _get_pretrip_or_404(pretrip_id, db, company.id)
 
 
 # -----------------------------------------------------------
@@ -249,8 +277,18 @@ def get_pretrip(pretrip_id: int, db: Session = Depends(get_db)):
     description="Return today's submitted Pre-Trip Inspection for the selected bus when it exists.",
     response_description="Today's bus Pre-Trip Inspection",
 )
-def get_bus_pretrip_today(bus_id: int, db: Session = Depends(get_db)):
-    if not db.get(Bus, bus_id):
+def get_bus_pretrip_today(
+    bus_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
+    bus = (
+        db.query(Bus)
+        .filter(Bus.id == bus_id)
+        .filter(Bus.company_id == company.id)
+        .first()
+    )
+    if not bus:
         raise HTTPException(status_code=404, detail="Bus not found")
 
     inspection = (
@@ -280,8 +318,18 @@ def get_bus_pretrip_today(bus_id: int, db: Session = Depends(get_db)):
     description="Return submitted Pre-Trip Inspections for one bus ordered newest first.",
     response_description="Bus Pre-Trip Inspection list",
 )
-def list_bus_pretrips(bus_id: int, db: Session = Depends(get_db)):
-    if not db.get(Bus, bus_id):
+def list_bus_pretrips(
+    bus_id: int,
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
+):
+    bus = (
+        db.query(Bus)
+        .filter(Bus.id == bus_id)
+        .filter(Bus.company_id == company.id)
+        .first()
+    )
+    if not bus:
         raise HTTPException(status_code=404, detail="Bus not found")
 
     return (
@@ -315,9 +363,10 @@ def correct_pretrip(
     pretrip_id: int,
     payload: schemas.PreTripCorrect,
     db: Session = Depends(get_db),
+    company: Company = Depends(get_company_context),
 ):
-    inspection = _get_pretrip_or_404(pretrip_id, db)
-    bus = _resolve_bus_or_404(payload, db)
+    inspection = _get_pretrip_or_404(pretrip_id, db, company.id)
+    bus = _resolve_bus_or_404(payload, db, company.id)
     _assert_inspection_date_is_today(payload.inspection_date)
     _assert_pretrip_unique_for_bus_day(
         bus_id=bus.id,
@@ -352,4 +401,4 @@ def correct_pretrip(
     sync_pretrip_issue_alerts(inspection=inspection, db=db)    # Reconcile pre-trip issue alerts after correction
     db.commit()
     db.refresh(inspection)
-    return _get_pretrip_or_404(inspection.id, db)
+    return _get_pretrip_or_404(inspection.id, db, company.id)

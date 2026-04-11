@@ -12,7 +12,7 @@ from tests.conftest import ensure_prepared_run_student
 def _create_started_run_ready_for_posttrip(client, *, route_number: str = "POSTTRIP-ROUTE"):
     driver = client.post(
         "/drivers/",
-        json={"name": f"{route_number} Driver", "email": f"{route_number.lower()}@test.com", "phone": "5551000"},
+        json={"name": f"{route_number} Driver", "email": f"{route_number.lower()}@test.com", "phone": "5551000", "pin": "1234"},
     )
     assert driver.status_code in (200, 201)
 

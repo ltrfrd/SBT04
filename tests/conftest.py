@@ -21,6 +21,9 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))  #
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)  # Ensure repo root is importable
 
+TEST_DRIVER_PIN = "1234"
+TEST_DEFAULT_DRIVER_EMAIL = "default-driver@sbt-tests.internal"
+
 
 # =============================================================================
 # Imports (after PATH FIX)
@@ -35,6 +38,52 @@ from database import Base  # SQLAlchemy Base (root database.py)
 from app import app, get_db  # FastAPI app + DB dependency
 from backend.models import driver, school, student, route, run, dispatch          # Core models used by app
 from backend.models import associations                                            # Ensure StudentRunAssignment is registered
+from backend.models.company import Company                                        # Company model for direct DB bootstrap
+from backend.models.driver import Driver                                          # Driver model for direct DB bootstrap
+from backend.utils.auth import hash_driver_pin                                    # PIN hashing for DB-direct driver creation
+
+
+# =============================================================================
+# DB-direct bootstrap helpers (bypass API to avoid auth chicken-and-egg)
+# =============================================================================
+
+def _create_company_in_db(db_engine, name: str) -> int:
+    """Create a company directly in the DB for test bootstrap."""
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+    db = TestingSessionLocal()
+    try:
+        company = Company(name=name)
+        db.add(company)
+        db.commit()
+        db.refresh(company)
+        return company.id
+    finally:
+        db.close()
+
+
+def _create_driver_in_db(
+    db_engine,
+    company_id: int,
+    name: str,
+    email: str,
+    pin: str = TEST_DRIVER_PIN,
+) -> int:
+    """Create a driver directly in the DB, bypassing the API, for test session bootstrap."""
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+    db = TestingSessionLocal()
+    try:
+        d = Driver(
+            name=name,
+            email=email,
+            company_id=company_id,
+            pin_hash=hash_driver_pin(pin),
+        )
+        db.add(d)
+        db.commit()
+        db.refresh(d)
+        return d.id
+    finally:
+        db.close()
 
 
 # =============================================================================
@@ -284,6 +333,21 @@ def client(db_engine):
             return self._wrapped_client.put(url, *args, **kwargs)
 
     with TestClient(app) as c:
-        yield LegacyAwareClient(c)
+        legacy = LegacyAwareClient(c)
+
+        # Bootstrap: create default company + driver directly in DB, then login.
+        # get_company_context now requires a valid session (no unauthenticated fallback),
+        # so every test must start with an authenticated session.
+        default_company_id = _create_company_in_db(db_engine, "Default Company")
+        default_driver_id = _create_driver_in_db(
+            db_engine,
+            default_company_id,
+            "Default Driver",
+            TEST_DEFAULT_DRIVER_EMAIL,
+        )
+        login_r = c.post("/login", json={"driver_id": default_driver_id, "pin": TEST_DRIVER_PIN})
+        assert login_r.status_code == 200, f"Test bootstrap login failed: {login_r.text}"
+
+        yield legacy
 
     app.dependency_overrides.clear()  # Remove overrides after test
