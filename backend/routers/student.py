@@ -1,5 +1,5 @@
 # ===========================================================
-# backend/routers/student.py - SBT Student Router
+# backend/routers/student.py - FleetOS Student Router
 # -----------------------------------------------------------
 # Handles CRUD operations for students and route/school lookups.
 # ===========================================================

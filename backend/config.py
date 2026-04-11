@@ -1,5 +1,5 @@
 # ===========================================================
-# backend/config.py — App Settings (SBT01)
+# backend/config.py - App Settings
 # -----------------------------------------------------------
 # Responsibilities:
 #   - Centralize environment-driven settings

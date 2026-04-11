@@ -1,5 +1,5 @@
 # ===========================================================
-# backend/routers/bus.py - SBT Bus Router
+# backend/routers/bus.py - FleetOS Bus Router
 # -----------------------------------------------------------
 # Full CRUD for standalone bus records
 # ===========================================================

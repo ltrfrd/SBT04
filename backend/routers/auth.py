@@ -1,5 +1,5 @@
 # ===========================================================
-# backend/routers/auth.py - SBT Auth Router
+# backend/routers/auth.py - FleetOS Auth Router
 # -----------------------------------------------------------
 # Session login/logout endpoints extracted from app bootstrap
 # ===========================================================

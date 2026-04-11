@@ -1,5 +1,5 @@
 # ===========================================================
-# database.py — Database Configuration (SBT01)
+# database.py - Database Configuration
 # -----------------------------------------------------------
 # Responsibilities:
 #   - Load environment variables

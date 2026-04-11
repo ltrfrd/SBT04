@@ -1,5 +1,5 @@
 # ===========================================================
-# backend/models/driver.py - SBT Driver Model
+# backend/models/driver.py - FleetOS Driver Model
 # -----------------------------------------------------------
 # Defines the Driver table and relationships with other entities.
 # ===========================================================

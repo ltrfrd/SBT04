@@ -1,5 +1,5 @@
 # ============================================================
-# End-to-end API tests for BusTrack backend behavior
+# End-to-end API tests for FleetOS backend behavior
 # ============================================================
 
 # -----------------------------
@@ -120,7 +120,7 @@ def _create_started_run_context(client, *, route_number: str, unit_number: str, 
 def test_root(client):
     r = client.get("/")
     assert r.status_code == 200
-    assert r.json()["status"] == "SBT backend is running"
+    assert r.json()["status"] == "FleetOS backend is running"
 
 
 def test_driver_crud(client):

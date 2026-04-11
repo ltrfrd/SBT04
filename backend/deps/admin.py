@@ -1,5 +1,5 @@
 # ===========================================================
-# backend/deps/admin.py — Admin Dependency (SBT01)
+# backend/deps/admin.py - Admin Dependency
 # -----------------------------------------------------------
 # Responsibilities:
 #   - Gate protected endpoints

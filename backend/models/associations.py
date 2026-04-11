@@ -1,5 +1,5 @@
 # ============================================================
-# Association models for BusTrack routing and run operations
+# Association models for FleetOS routing and run operations
 # ============================================================
 
 from sqlalchemy import (  # SQLAlchemy column types

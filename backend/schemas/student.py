@@ -1,5 +1,5 @@
 # ===========================================================
-# backend/schemas/student.py — SBT Student Schemas
+# backend/schemas/student.py - FleetOS Student Schemas
 # -----------------------------------------------------------
 # Pydantic models for student compatibility and workflow APIs.
 # ===========================================================

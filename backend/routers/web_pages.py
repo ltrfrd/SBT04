@@ -1,5 +1,5 @@
 # ===========================================================
-# backend/routers/web_pages.py - SBT Web Page Router
+# backend/routers/web_pages.py - FleetOS Web Page Router
 # -----------------------------------------------------------
 # HTML-rendered page endpoints extracted from app bootstrap
 # ===========================================================

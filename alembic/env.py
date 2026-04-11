@@ -1,5 +1,5 @@
 # ===========================================================
-# alembic/env.py — SBT01 Alembic Environment
+# alembic/env.py - FleetOS Alembic Environment
 # -----------------------------------------------------------
 # Responsibilities:
 #   - Load SQLAlchemy metadata (Base.metadata) for autogenerate

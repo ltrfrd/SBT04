@@ -1,5 +1,5 @@
 # ===========================================================
-# backend/schemas/bus.py - SBT Bus Schemas
+# backend/schemas/bus.py - FleetOS Bus Schemas
 # -----------------------------------------------------------
 # Defines the Pydantic models for bus requests and responses.
 # ===========================================================

@@ -1,5 +1,5 @@
 # ===========================================================
-# app.py — SBT FastAPI Application Entry Point
+# app.py - FleetOS FastAPI Application Entry Point
 # -----------------------------------------------------------
 # Fully documented version: all imports, functions, and logic explained.
 # ===========================================================
@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
 # APP SETUP
 # -----------------------------------------------------------
 app = FastAPI(
-    title="SBT — School Bus Tracking System",
+    title="FleetOS - School Bus Tracking System",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -89,4 +89,4 @@ app.include_router(ws.router)  # Register websocket endpoints
 @app.get("/")
 def root():
     """Basic API health endpoint."""
-    return {"status": "SBT backend is running"}
+    return {"status": "FleetOS backend is running"}

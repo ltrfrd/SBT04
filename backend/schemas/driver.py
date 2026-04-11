@@ -1,5 +1,5 @@
 # ===========================================================
-# backend/schemas/driver.py — SBT Driver Schemas
+# backend/schemas/driver.py - FleetOS Driver Schemas
 # -----------------------------------------------------------
 # Defines the Pydantic models for driver requests and responses.
 # ===========================================================

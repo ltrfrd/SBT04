@@ -1,5 +1,5 @@
 # ============================================================
-# Student-run assignment schemas for BusTrack
+# Student-run assignment schemas for FleetOS
 # ============================================================
 
 # -----------------------------

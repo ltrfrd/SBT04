@@ -1,5 +1,5 @@
 # ===========================================================
-# backend/routers/ws.py - SBT WebSocket Router
+# backend/routers/ws.py - FleetOS WebSocket Router
 # -----------------------------------------------------------
 # Real-time GPS websocket endpoint and connection state
 # ===========================================================
