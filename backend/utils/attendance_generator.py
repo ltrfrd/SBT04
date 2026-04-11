@@ -32,31 +32,31 @@ def driver_summary(db: Session, driver_id: int, operator_id: int | None = None) 
     )  # Count runs assigned to this driver
 
     total_charter_hours = (
-        db.query(dispatch_model.Payroll)
-        .filter(dispatch_model.Payroll.driver_id == driver_id)
-        .with_entities(dispatch_model.Payroll.charter_hours)
+        db.query(dispatch_model.DispatchRecord)
+        .filter(dispatch_model.DispatchRecord.driver_id == driver_id)
+        .with_entities(dispatch_model.DispatchRecord.charter_hours)
         .all()
-    )  # Load payroll hour fragments for this driver
+    )  # Load dispatch hour fragments for this driver
 
     total_hours = sum(float(h[0]) for h in total_charter_hours if h[0])  # Sum non-null charter hours
 
     approved = (
-        db.query(dispatch_model.Payroll)
+        db.query(dispatch_model.DispatchRecord)
         .filter(
-            dispatch_model.Payroll.driver_id == driver_id,
-            dispatch_model.Payroll.approved.is_(True),
+            dispatch_model.DispatchRecord.driver_id == driver_id,
+            dispatch_model.DispatchRecord.approved.is_(True),
         )
         .count()
-    )  # Count approved payroll days
+    )  # Count approved dispatch days
 
     pending = (
-        db.query(dispatch_model.Payroll)
+        db.query(dispatch_model.DispatchRecord)
         .filter(
-            dispatch_model.Payroll.driver_id == driver_id,
-            dispatch_model.Payroll.approved.is_(False),
+            dispatch_model.DispatchRecord.driver_id == driver_id,
+            dispatch_model.DispatchRecord.approved.is_(False),
         )
         .count()
-    )  # Count pending payroll days
+    )  # Count pending dispatch days
 
     return {
         "driver_id": driver_id,
@@ -138,21 +138,21 @@ def route_summary(db: Session, route_id: int, operator_id: int | None = None) ->
     }  # Preserve existing payload shape
 
 
-def payroll_summary(db: Session, start: date, end: date, operator_id: int | None = None) -> list:
+def dispatch_summary(db: Session, start: date, end: date, operator_id: int | None = None) -> list:
     query = (
-        db.query(dispatch_model.Payroll)
+        db.query(dispatch_model.DispatchRecord)
         .filter(
-            dispatch_model.Payroll.work_date >= start,
-            dispatch_model.Payroll.work_date <= end,
+            dispatch_model.DispatchRecord.work_date >= start,
+            dispatch_model.DispatchRecord.work_date <= end,
         )
     )
     if operator_id is not None:
         query = (
             query
-            .join(driver_model.Driver, driver_model.Driver.id == dispatch_model.Payroll.driver_id)
+            .join(driver_model.Driver, driver_model.Driver.id == dispatch_model.DispatchRecord.driver_id)
             .filter(driver_model.Driver.operator_id == operator_id)
         )
-    records = query.all()  # Load payroll rows inside the requested range
+    records = query.all()  # Load dispatch rows inside the requested range
 
     summary = []
     for r in records:
@@ -163,7 +163,7 @@ def payroll_summary(db: Session, start: date, end: date, operator_id: int | None
                 "charter_hours": float(r.charter_hours or 0),
                 "approved": r.approved,
             }
-        )  # Preserve existing payroll summary row shape
+        )  # Preserve existing dispatch summary row shape
     return summary
 
 
@@ -180,7 +180,7 @@ def generate_attendance(
     if attendance_type == "route" and ref_id:
         return route_summary(db, ref_id, operator_id=operator_id)  # Return route attendance summary
     if attendance_type == "payroll" and start and end:
-        return payroll_summary(db, start, end, operator_id=operator_id)  # Return payroll attendance summary
+        return dispatch_summary(db, start, end, operator_id=operator_id)  # Compatibility path for legacy attendance type
     if attendance_type == "run" and ref_id:
         run = db.get(Run, ref_id)  # Load run for run-level attendance
         if not run:

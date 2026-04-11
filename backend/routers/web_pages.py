@@ -246,7 +246,7 @@ def driver_run_view(
 
 
 # -----------------------------------------------------------
-# PAYROLL ATTENDANCE SUMMARY PAGE
+# DISPATCH ATTENDANCE SUMMARY PAGE
 # -----------------------------------------------------------
 @router.get("/summary_report", response_class=HTMLResponse)
 def summary_report(
@@ -256,14 +256,14 @@ def summary_report(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    """Shows payroll attendance summary between given dates."""
+    """Shows dispatch attendance summary between given dates."""
     end = end or date.today()
     start = start or end
     records = (
-        db.query(dispatch_model.Payroll)
-        .join(driver_model.Driver, driver_model.Driver.id == dispatch_model.Payroll.driver_id)
+        db.query(dispatch_model.DispatchRecord)
+        .join(driver_model.Driver, driver_model.Driver.id == dispatch_model.DispatchRecord.driver_id)
         .filter(driver_model.Driver.operator_id == operator.id)
-        .filter(dispatch_model.Payroll.work_date.between(start, end))
+        .filter(dispatch_model.DispatchRecord.work_date.between(start, end))
         .all()
     )
     total_drivers = len({r.driver_id for r in records})

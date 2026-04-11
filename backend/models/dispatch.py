@@ -1,7 +1,7 @@
 # ===========================================================
 # backend/models/dispatch.py — BST Dispatch Model
 # -----------------------------------------------------------
-# Dispatch module model wrapper for payroll-backed work records.
+# Dispatch module model wrapper for dispatch work records.
 # ===========================================================
 from sqlalchemy import Column, Integer, Date, Time, Boolean, ForeignKey, Numeric
 from sqlalchemy.orm import relationship
@@ -9,8 +9,8 @@ from database import Base  # Root-level
 from datetime import datetime, timedelta
 
 
-class Payroll(Base):
-    __tablename__ = "payrolls"
+class DispatchRecord(Base):
+    __tablename__ = "dispatch_records"
 
     id = Column(Integer, primary_key=True, index=True)
     driver_id = Column(Integer, ForeignKey("drivers.id"), nullable=False)
@@ -18,12 +18,12 @@ class Payroll(Base):
     charter_start = Column(Time, nullable=True)  # Start time for charter
     charter_end = Column(Time, nullable=True)  # End time for charter
     charter_hours = Column(Numeric(5, 2), default=0.00)  # Auto-calculated
-    approved = Column(Boolean, default=False)  # Payroll verification flag
+    approved = Column(Boolean, default=False)  # Dispatch verification flag
 
     # -------------------------------------------------------
     # Relationships
     # -------------------------------------------------------
-    driver = relationship("Driver", back_populates="payroll_records")
+    driver = relationship("Driver", back_populates="dispatch_records")
 
     # -------------------------------------------------------
     # Auto-calculate charter hours from start → end

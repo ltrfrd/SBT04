@@ -7,7 +7,7 @@
 from .attendance_generator import (
     driver_summary,
     route_summary,
-    payroll_summary,
+    dispatch_summary,
     generate_attendance,
     generate_report,
 )
@@ -19,7 +19,7 @@ from .attendance_generator import (
 __all__ = [
     "driver_summary",
     "route_summary",
-    "payroll_summary",
+    "dispatch_summary",
     "generate_attendance",
     "generate_report",
 ]

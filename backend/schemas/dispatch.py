@@ -43,8 +43,3 @@ class DispatchOut(BaseModel):
 
 
 # -----------------------------------------------------------
-# - Backward compatibility aliases
-# - Preserve legacy Payroll schema names
-# -----------------------------------------------------------
-PayrollCreate = DispatchCreate
-PayrollOut = DispatchOut

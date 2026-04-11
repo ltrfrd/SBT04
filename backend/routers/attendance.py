@@ -172,7 +172,7 @@ def get_run_attendance(
 
 # -----------------------------------------------------------
 # - Driver work summary
-# - Return payroll-style summary for a date range
+# - Return dispatch work summary for a date range
 # -----------------------------------------------------------
 @router.get(
     "/payroll",                                                # Endpoint path
@@ -187,10 +187,10 @@ def get_driver_work_summary(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    """Return payroll summary for all drivers within the given date range."""  # Internal docstring
-    attendance = attendance_generator.payroll_summary(db, start, end, operator_id=operator.id)  # Build payroll attendance payload
+    """Return dispatch summary for all drivers within the given date range."""  # Internal docstring
+    attendance = attendance_generator.dispatch_summary(db, start, end, operator_id=operator.id)  # Build dispatch attendance payload
     if not attendance:
-        raise HTTPException(status_code=404, detail="No payroll records found in range")  # Preserve empty-range behavior
+        raise HTTPException(status_code=404, detail="No dispatch records found in range")  # Preserve empty-range behavior
     return {
         "date_range": {"start": start, "end": end},  # Requested date range
         "total_records": len(attendance),  # Number of summary rows

@@ -6,7 +6,7 @@ from .student import Student
 from .route import Route
 from .stop import Stop, StopType
 from .run import Run
-from .dispatch import Payroll
+from .dispatch import DispatchRecord
 from .run_event import RunEvent
 from .associations import route_schools, StudentRunAssignment, RouteDriverAssignment
 from .student_bus_absence import StudentBusAbsence, StudentBusAbsenceSource
@@ -25,7 +25,7 @@ __all__ = [
     "Stop",
     "StopType",
     "Run",
-    "Payroll",
+    "DispatchRecord",
     "route_schools",
     "StudentRunAssignment",
     "RouteDriverAssignment",

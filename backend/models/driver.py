@@ -34,5 +34,5 @@ class Driver(Base):
         passive_deletes=True,
     )
     runs = relationship("Run", back_populates="driver")  # One driver -> many runs
-    payroll_records = relationship("Payroll", back_populates="driver")  # Payroll entries
+    dispatch_records = relationship("DispatchRecord", back_populates="driver")  # Dispatch entries
 

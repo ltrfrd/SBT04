@@ -99,13 +99,10 @@ from .posttrip import (
 
 # -----------------------------------------------------------
 # - Dispatch schema exports
-# - Outward-facing Dispatch names with Payroll aliases
 # -----------------------------------------------------------
 from .dispatch import (
     DispatchCreate,
     DispatchOut,
-    PayrollCreate,
-    PayrollOut,
 )  # Dispatch creation and response schemas
 
 
@@ -184,8 +181,6 @@ __all__ = [
 
     "DispatchCreate",
     "DispatchOut",
-    "PayrollCreate",
-    "PayrollOut",
 
     "StudentRunAssignmentCreate",
     "StudentRunAssignmentOut",

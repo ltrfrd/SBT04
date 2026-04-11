@@ -64,7 +64,7 @@ def log_charter_hours(
         detail="Driver not found",
     )
 
-    record = dispatch_model.Payroll(                                # Create dispatch-backed work record
+    record = dispatch_model.DispatchRecord(                         # Create dispatch-backed work record
         driver_id=driver_id,
         work_date=work_date,                                        # Save submitted work date
         charter_start=charter_start,
@@ -87,8 +87,8 @@ def get_all_dispatch_records(
 ):
     """Return all dispatch records."""
     return (
-        db.query(dispatch_model.Payroll)
-        .join(driver_model.Driver, driver_model.Driver.id == dispatch_model.Payroll.driver_id)
+        db.query(dispatch_model.DispatchRecord)
+        .join(driver_model.Driver, driver_model.Driver.id == dispatch_model.DispatchRecord.driver_id)
         .filter(driver_model.Driver.operator_id == operator.id)
         .all()
     )
@@ -113,8 +113,8 @@ def get_driver_dispatch_records(
         detail="Driver not found",
     )
     return (
-        db.query(dispatch_model.Payroll)
-        .filter(dispatch_model.Payroll.driver_id == driver_id)
+        db.query(dispatch_model.DispatchRecord)
+        .filter(dispatch_model.DispatchRecord.driver_id == driver_id)
         .all()
     )
 
@@ -130,7 +130,7 @@ def approve_dispatch_record(
     operator: Operator = Depends(get_operator_context),
 ):
     """Approve a dispatch record."""
-    record = db.get(dispatch_model.Payroll, dispatch_id)
+    record = db.get(dispatch_model.DispatchRecord, dispatch_id)
     if not record:
         raise HTTPException(status_code=404, detail="Dispatch record not found")
     get_operator_scoped_record_or_404(
