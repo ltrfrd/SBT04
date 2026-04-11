@@ -21,15 +21,15 @@ def get_current_driver(
 ) -> driver_model.Driver:
     """Get logged-in driver from session."""
     driver_id = request.session.get("driver_id")
-    company_id = request.session.get("company_id")
-    if not driver_id or not company_id:
+    operator_id = request.session.get("operator_id")
+    if not driver_id or not operator_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Login required",
             headers={"WWW-Authenticate": "Bearer"},
         )
     driver = db.get(driver_model.Driver, driver_id)
-    if not driver or driver.company_id != company_id:
+    if not driver or driver.operator_id != operator_id:
         raise HTTPException(status_code=404, detail="Driver not found")
     return driver
 
@@ -55,12 +55,13 @@ def authenticate_driver(db: Session, driver_id: int, pin: str) -> driver_model.D
 
 
 def login_driver(request: Request, driver: driver_model.Driver):
-    """Set driver and company in session."""
+    """Set driver and operator in session."""
     request.session["driver_id"] = driver.id
-    request.session["company_id"] = driver.company_id
+    request.session["operator_id"] = driver.operator_id
 
 
 def logout_driver(request: Request):
     """Clear session."""
     request.session.pop("driver_id", None)
-    request.session.pop("company_id", None)
+    request.session.pop("operator_id", None)
+

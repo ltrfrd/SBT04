@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from database import get_db
-from backend.models.company import Company
+from backend.models.operator import Operator
 from backend.models.associations import StudentRunAssignment
 from backend.models import student as student_model
 from backend.models import run as run_model
@@ -17,9 +17,9 @@ from backend.schemas.student_run_assignment import (
     StudentRunAssignmentCreate,
     StudentRunAssignmentOut,
 )
-from backend.utils.company_scope import get_company_context
-from backend.utils.company_scope import get_company_scoped_record_or_404
-from backend.utils.company_scope import get_company_scoped_route_or_404
+from backend.utils.operator_scope import get_operator_context
+from backend.utils.operator_scope import get_operator_scoped_record_or_404
+from backend.utils.operator_scope import get_operator_scoped_route_or_404
 
 # -----------------------------------------------------------
 # Router setup
@@ -62,15 +62,15 @@ def create_assignment(payload: StudentRunAssignmentCreate, db: Session = Depends
 def get_run_assignments(
     run_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     run = db.get(run_model.Run, run_id)                          # Load run
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")  # Validate run exists
-    get_company_scoped_route_or_404(
+    get_operator_scoped_route_or_404(
         db=db,
         route_id=run.route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
     )
 
@@ -98,16 +98,16 @@ def get_run_assignments(
 def list_assignments(
     student_id: int | None = None,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     if student_id is None:
         raise HTTPException(status_code=400, detail="student_id is required")  # Require student-scoped lookup
 
-    student = get_company_scoped_record_or_404(
+    student = get_operator_scoped_record_or_404(
         db=db,
         model=student_model.Student,
         record_id=student_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="Student not found",
     )
 
@@ -142,3 +142,4 @@ def delete_assignment(assignment_id: int, db: Session = Depends(get_db)):
             "Use the canonical contextual delete endpoint DELETE /runs/{run_id}/stops/{stop_id}/students/{student_id}."
         ),
     )
+

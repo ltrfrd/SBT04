@@ -10,12 +10,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status  # FastAPI 
 from sqlalchemy.orm import Session  # DB session
 
 from backend import schemas  # Dispatch schemas
-from backend.models.company import Company
+from backend.models.operator import Operator
 from backend.models import dispatch as dispatch_model  # Dispatch module model
 from backend.models import driver as driver_model  # Validate driver link
 from database import get_db  # DB dependency
-from backend.utils.company_scope import get_company_context
-from backend.utils.company_scope import get_company_scoped_record_or_404
+from backend.utils.operator_scope import get_operator_context
+from backend.utils.operator_scope import get_operator_scoped_record_or_404
 
 
 # -----------------------------------------------------------
@@ -53,14 +53,14 @@ def log_charter_hours(
         examples=["2026-03-23"],                                    # Valid Swagger example
     ),
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     """Drivers submit charter start/end; hours auto-calculated."""
-    get_company_scoped_record_or_404(
+    get_operator_scoped_record_or_404(
         db=db,
         model=driver_model.Driver,
         record_id=driver_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="Driver not found",
     )
 
@@ -83,13 +83,13 @@ def log_charter_hours(
 @router.get("/", response_model=List[schemas.DispatchOut])
 def get_all_dispatch_records(
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     """Return all dispatch records."""
     return (
         db.query(dispatch_model.Payroll)
         .join(driver_model.Driver, driver_model.Driver.id == dispatch_model.Payroll.driver_id)
-        .filter(driver_model.Driver.company_id == company.id)
+        .filter(driver_model.Driver.operator_id == operator.id)
         .all()
     )
 
@@ -102,14 +102,14 @@ def get_all_dispatch_records(
 def get_driver_dispatch_records(
     driver_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     """Return all dispatch records for a driver."""
-    get_company_scoped_record_or_404(
+    get_operator_scoped_record_or_404(
         db=db,
         model=driver_model.Driver,
         record_id=driver_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="Driver not found",
     )
     return (
@@ -127,20 +127,21 @@ def get_driver_dispatch_records(
 def approve_dispatch_record(
     dispatch_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     """Approve a dispatch record."""
     record = db.get(dispatch_model.Payroll, dispatch_id)
     if not record:
         raise HTTPException(status_code=404, detail="Dispatch record not found")
-    get_company_scoped_record_or_404(
+    get_operator_scoped_record_or_404(
         db=db,
         model=driver_model.Driver,
         record_id=record.driver_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="Dispatch record not found",
     )
     record.approved = True
     db.commit()
     db.refresh(record)
     return record
+

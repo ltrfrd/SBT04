@@ -38,7 +38,7 @@ from database import Base  # SQLAlchemy Base (root database.py)
 from app import app, get_db  # FastAPI app + DB dependency
 from backend.models import driver, school, student, route, run, dispatch          # Core models used by app
 from backend.models import associations                                            # Ensure StudentRunAssignment is registered
-from backend.models.company import Company                                        # Company model for direct DB bootstrap
+from backend.models.operator import Operator                                        # Operator model for direct DB bootstrap
 from backend.models.driver import Driver                                          # Driver model for direct DB bootstrap
 from backend.utils.auth import hash_driver_pin                                    # PIN hashing for DB-direct driver creation
 
@@ -47,23 +47,23 @@ from backend.utils.auth import hash_driver_pin                                  
 # DB-direct bootstrap helpers (bypass API to avoid auth chicken-and-egg)
 # =============================================================================
 
-def _create_company_in_db(db_engine, name: str) -> int:
-    """Create a company directly in the DB for test bootstrap."""
+def _create_operator_in_db(db_engine, name: str) -> int:
+    """Create a operator directly in the DB for test bootstrap."""
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
     db = TestingSessionLocal()
     try:
-        company = Company(name=name)
-        db.add(company)
+        operator = Operator(name=name)
+        db.add(operator)
         db.commit()
-        db.refresh(company)
-        return company.id
+        db.refresh(operator)
+        return operator.id
     finally:
         db.close()
 
 
 def _create_driver_in_db(
     db_engine,
-    company_id: int,
+    operator_id: int,
     name: str,
     email: str,
     pin: str = TEST_DRIVER_PIN,
@@ -75,7 +75,7 @@ def _create_driver_in_db(
         d = Driver(
             name=name,
             email=email,
-            company_id=company_id,
+            operator_id=operator_id,
             pin_hash=hash_driver_pin(pin),
         )
         db.add(d)
@@ -335,13 +335,13 @@ def client(db_engine):
     with TestClient(app) as c:
         legacy = LegacyAwareClient(c)
 
-        # Bootstrap: create default company + driver directly in DB, then login.
-        # get_company_context now requires a valid session (no unauthenticated fallback),
+        # Bootstrap: create default operator + driver directly in DB, then login.
+        # get_operator_context now requires a valid session (no unauthenticated fallback),
         # so every test must start with an authenticated session.
-        default_company_id = _create_company_in_db(db_engine, "Default Company")
+        default_operator_id = _create_operator_in_db(db_engine, "Default Operator")
         default_driver_id = _create_driver_in_db(
             db_engine,
-            default_company_id,
+            default_operator_id,
             "Default Driver",
             TEST_DEFAULT_DRIVER_EMAIL,
         )
@@ -351,3 +351,4 @@ def client(db_engine):
         yield legacy
 
     app.dependency_overrides.clear()  # Remove overrides after test
+

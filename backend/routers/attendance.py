@@ -37,10 +37,10 @@ from backend.models.student_bus_absence import StudentBusAbsence  # Planned abse
 from backend.models.associations import StudentRunAssignment       # Runtime student assignments
 from backend.models.route import Route                                    # Route model
 from backend.models.school_attendance_verification import SchoolAttendanceVerification  # Confirmation model
-from backend.models.company import Company
-from backend.utils.company_scope import get_company_context
-from backend.utils.company_scope import get_company_scoped_record_or_404
-from backend.utils.company_scope import get_company_scoped_route_or_404
+from backend.models.operator import Operator
+from backend.utils.operator_scope import get_operator_context
+from backend.utils.operator_scope import get_operator_scoped_record_or_404
+from backend.utils.operator_scope import get_operator_scoped_route_or_404
 
 from pydantic import BaseModel  # Small request body schema
 
@@ -70,10 +70,10 @@ class SchoolConfirmationRequest(BaseModel):
 def get_driver_attendance(
     driver_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     """Return work summary for one driver."""                   # Internal docstring
-    attendance = attendance_generator.driver_summary(db, driver_id, company_id=company.id)  # Build driver attendance payload
+    attendance = attendance_generator.driver_summary(db, driver_id, operator_id=operator.id)  # Build driver attendance payload
     if "error" in attendance:                                       # Preserve missing-resource behavior
         raise HTTPException(status_code=404, detail=attendance["error"])
     return attendance                                               # Return attendance payload
@@ -93,10 +93,10 @@ def get_driver_attendance(
 def get_route_attendance(
     route_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     """Return work summary for one route."""                    # Internal docstring
-    attendance = attendance_generator.route_summary(db, route_id, company_id=company.id)  # Build route attendance payload
+    attendance = attendance_generator.route_summary(db, route_id, operator_id=operator.id)  # Build route attendance payload
     if "error" in attendance:                                      # Preserve missing-resource behavior
         raise HTTPException(status_code=404, detail=attendance["error"])
     return attendance                                              # Return attendance payload
@@ -115,16 +115,16 @@ def get_route_attendance(
 def get_run_attendance(
     run_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     """Return student attendance status for a specific run."""  # Internal docstring
     run = db.query(Run).filter(Run.id == run_id).first()  # Load run
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")  # Preserve missing-resource behavior
-    get_company_scoped_route_or_404(
+    get_operator_scoped_route_or_404(
         db=db,
         route_id=run.route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
     )
 
@@ -185,10 +185,10 @@ def get_driver_work_summary(
     start: date,
     end: date,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     """Return payroll summary for all drivers within the given date range."""  # Internal docstring
-    attendance = attendance_generator.payroll_summary(db, start, end, company_id=company.id)  # Build payroll attendance payload
+    attendance = attendance_generator.payroll_summary(db, start, end, operator_id=operator.id)  # Build payroll attendance payload
     if not attendance:
         raise HTTPException(status_code=404, detail="No payroll records found in range")  # Preserve empty-range behavior
     return {
@@ -211,14 +211,14 @@ def get_driver_work_summary(
 def get_date_attendance(
     target_date: date,                                        # Requested attendance date
     db: Session = Depends(get_db),                            # Database session
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     return attendance_generator.generate_attendance(          # Delegate to attendance generator
         db=db,                                                # Pass DB session
         attendance_type="date",                               # Request date attendance mode
         start=target_date,                                    # Start date = target date
         end=target_date,                                      # End date = target date
-        company_id=company.id,
+        operator_id=operator.id,
     )  # Daily attendance summary                             # Return one-day attendance data
 
 # -----------------------------------------------------------
@@ -234,13 +234,13 @@ def get_date_attendance(
 def get_school_attendance(
     school_id: int,                                           # Requested school ID
     db: Session = Depends(get_db),                            # Database session
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     return attendance_generator.generate_attendance(          # Delegate to attendance generator
         db=db,                                                # Pass DB session
         attendance_type="school",                             # Request school attendance mode
         ref_id=school_id,                                     # School reference ID
-        company_id=company.id,
+        operator_id=operator.id,
     )  # School attendance summary                            # Return school attendance data
 
 # -----------------------------------------------------------
@@ -259,13 +259,13 @@ def confirm_school_attendance(
     run_id: int,  # Requested run ID
     payload: SchoolConfirmationRequest,  # Optional confirmer
     db: Session = Depends(get_db),  # Database session
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    school = get_company_scoped_record_or_404(
+    school = get_operator_scoped_record_or_404(
         db=db,
         model=School,
         record_id=school_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="School not found",
     )
 
@@ -280,10 +280,10 @@ def confirm_school_attendance(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Run not found",
         )
-    get_company_scoped_route_or_404(
+    get_operator_scoped_route_or_404(
         db=db,
         route_id=run.route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
     )
 
@@ -340,14 +340,14 @@ def confirm_school_attendance(
 def get_absences_by_date(
     target_date: date,                                                                # Requested date
     db: Session = Depends(get_db),                                                    # Database session
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
 
     absences = (
         db.query(StudentBusAbsence)                                                   # Query planned absences
         .join(Student, Student.id == StudentBusAbsence.student_id)
         .options(joinedload(StudentBusAbsence.student))                               # Load student relation
-        .filter(Student.company_id == company.id)
+        .filter(Student.operator_id == operator.id)
         .filter(StudentBusAbsence.date == target_date)                                # Only this date
         .order_by(StudentBusAbsence.created_at.asc(), StudentBusAbsence.id.asc())     # Stable ordering
         .all()                                                                        # Materialize list
@@ -387,13 +387,13 @@ def get_absences_by_date(
 def get_absences_by_school(
     school_id: int,                                                                # Requested school
     db: Session = Depends(get_db),                                                 # Database session
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    get_company_scoped_record_or_404(
+    get_operator_scoped_record_or_404(
         db=db,
         model=School,
         record_id=school_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="School not found",
     )
 
@@ -436,7 +436,7 @@ def get_absences_by_school(
 def get_absences_by_run(
     run_id: int,                                                                  # Requested run
     db: Session = Depends(get_db),                                                # Database session
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
 
     run = (
@@ -450,10 +450,10 @@ def get_absences_by_run(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Run not found",
         )
-    get_company_scoped_route_or_404(
+    get_operator_scoped_route_or_404(
         db=db,
         route_id=run.route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
     )
     if run.start_time is None:                                                    # Reject runs that have not started yet
@@ -508,13 +508,13 @@ def get_school_attendance_by_date(
     school_id: int,                                                              # Requested school
     target_date: date,                                                           # Requested date
     db: Session = Depends(get_db),                                               # Database session
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    school = get_company_scoped_record_or_404(
+    school = get_operator_scoped_record_or_404(
         db=db,
         model=School,
         record_id=school_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="School not found",
     )
 
@@ -574,12 +574,12 @@ def get_school_mobile_attendance(
     school_id: int,                                           # Requested school
     request: Request,                                         # FastAPI request object
     db: Session = Depends(get_db),                            # Database session
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     report_data = attendance_generator.school_routes_summary(  # Generate school route list
         db=db,                                                 # Pass DB session
         school_id=school_id,                                   # Requested school
-        company_id=company.id,
+        operator_id=operator.id,
     )                                                          # Navigation payload
 
     if "error" in report_data:                                 # Reject unknown school requests
@@ -612,13 +612,13 @@ def get_school_mobile_route_runs(
     route_id: int,                                            # Requested route
     request: Request,                                         # FastAPI request object
     db: Session = Depends(get_db),                            # Database session
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     report_data = attendance_generator.school_route_runs_summary(
         db=db,                                                # Pass DB session
         school_id=school_id,                                  # Requested school
         route_id=route_id,                                    # Requested route
-        company_id=company.id,
+        operator_id=operator.id,
     )                                                         # Route runs payload
 
     if "error" in report_data:                                # Reject unknown route requests
@@ -652,13 +652,13 @@ def get_school_mobile_single_run(
     run_id: int,                                              # Requested run
     request: Request,                                         # FastAPI request object
     db: Session = Depends(get_db),                            # Database session
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     report_data = attendance_generator.school_single_run_summary(
         db=db,                                                # Pass DB session
         school_id=school_id,                                  # Requested school
         run_id=run_id,                                        # Requested run
-        company_id=company.id,
+        operator_id=operator.id,
     )                                                         # Single run payload
 
     if "error" in report_data:                                # Reject unknown run requests
@@ -696,7 +696,7 @@ class StudentStatusUpdate(BaseModel):                      # Pydantic model for 
 def update_school_status(                                  # Handler function
     payload: StudentStatusUpdate,                          # Typed JSON body
     db: Session = Depends(get_db),                         # Database session dependency
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     if payload.status not in ["present", "absent"]:        # Validate allowed values
         raise HTTPException(                               # Reject bad request
@@ -719,7 +719,7 @@ def update_school_status(                                  # Handler function
             status_code=404,
             detail="Assignment not found"
         )
-    if not assignment.student or assignment.student.company_id != company.id:
+    if not assignment.student or assignment.student.operator_id != operator.id:
         raise HTTPException(status_code=404, detail="Assignment not found")
 
     school_id = assignment.student.school_id if assignment.student else None   # Resolve owning school
@@ -755,3 +755,4 @@ def update_school_status(                                  # Handler function
 student_bus_absence_router = student_bus_absence.router  # Keep absence under attendance module ownership
 
 __all__ = ["router", "student_bus_absence_router"]  # Export attendance router and absence compatibility router
+

@@ -33,7 +33,7 @@ class Route(Base):
     __tablename__ = "routes"                               # Database table name
 
     id = Column(Integer, primary_key=True, index=True)     # Unique route identifier
-    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    operator_id = Column(Integer, ForeignKey("operators.id", ondelete="CASCADE"), nullable=False, index=True)
     route_number = Column(String(50), nullable=False)      # Public route number (ex: "102A")
     bus_id = Column(Integer, ForeignKey("buses.id", ondelete="SET NULL"), nullable=True)  # Current assigned bus
     primary_bus_id = Column(Integer, ForeignKey("buses.id", ondelete="SET NULL"), nullable=True)  # Default/base route bus
@@ -41,8 +41,8 @@ class Route(Base):
     clearance_note = Column(Text, nullable=True)            # Optional dispatch note when restoring the primary bus
     num_runs = Column(Integer, nullable=True)              # Number of runs assigned to route
 
-    company = relationship(
-        "Company",
+    operator = relationship(
+        "Operator",
         back_populates="routes",
     )
 
@@ -86,9 +86,10 @@ class Route(Base):
         "Student",
         viewonly=True,                                     # Not used for runtime assignment
     )
-    company_access = relationship(
-        "CompanyRouteAccess",
+    operator_access = relationship(
+        "OperatorRouteAccess",
         back_populates="route",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+

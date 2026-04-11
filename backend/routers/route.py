@@ -8,7 +8,7 @@ from database import get_db
 from backend import schemas
 from backend.models.associations import RouteDriverAssignment
 from backend.models.bus import Bus
-from backend.models.company import Company, CompanyRouteAccess
+from backend.models.operator import Operator, OperatorRouteAccess
 from backend.models.driver import Driver
 from backend.models.route import Route
 from backend.models.school import School
@@ -34,12 +34,12 @@ from backend.utils.route_driver_assignment import (
     resolve_primary_route_driver_assignment,
     resolve_route_driver_assignment,
 )
-from backend.utils.company_scope import create_company_route_access
-from backend.utils.company_scope import ensure_route_owner
-from backend.utils.company_scope import get_company_context
-from backend.utils.company_scope import get_company_scoped_record_or_404
-from backend.utils.company_scope import get_company_scoped_route_or_404
-from backend.utils.company_scope import get_route_access_level
+from backend.utils.operator_scope import create_operator_route_access
+from backend.utils.operator_scope import ensure_route_owner
+from backend.utils.operator_scope import get_operator_context
+from backend.utils.operator_scope import get_operator_scoped_record_or_404
+from backend.utils.operator_scope import get_operator_scoped_route_or_404
+from backend.utils.operator_scope import get_route_access_level
 from datetime import datetime, timezone
 
 router = APIRouter(prefix="/routes", tags=["Routes"])
@@ -276,7 +276,7 @@ def _serialize_route_detail(route: Route) -> RouteDetailOut:
 def create_route(
     route: RouteCreate,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     payload = route.model_dump(exclude_unset=True)               # Read validated route payload
     school_ids = payload.pop("school_ids", [])                   # Separate school assignment ids
@@ -284,7 +284,7 @@ def create_route(
     existing_route = (
         db.query(Route)
         .filter(Route.route_number == payload["route_number"])   # Enforce unique route number only
-        .filter(Route.company_id == company.id)
+        .filter(Route.operator_id == operator.id)
         .first()
     )
     if existing_route:
@@ -293,14 +293,14 @@ def create_route(
             detail="Route number already exists",
         )
 
-    db_route = Route(**payload, company_id=company.id)           # Create route after uniqueness check
+    db_route = Route(**payload, operator_id=operator.id)           # Create route after uniqueness check
     db.add(db_route)                                             # Add route to session
     db.flush()                                                   # Allocate route id before school linking
 
     if school_ids:
         schools = (
             db.query(School)
-            .filter(School.company_id == company.id)
+            .filter(School.operator_id == operator.id)
             .filter(School.id.in_(school_ids))
             .all()
         )
@@ -326,7 +326,7 @@ def create_route(
 )
 def get_routes(
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     routes = (
         db.query(Route)
@@ -337,8 +337,8 @@ def get_routes(
             selectinload(Route.runs).selectinload(run_model.Run.student_assignments),  # Load runtime student counts
         )
         .filter(
-            (Route.company_id == company.id)
-            | Route.company_access.any(CompanyRouteAccess.company_id == company.id)
+            (Route.operator_id == operator.id)
+            | Route.operator_access.any(OperatorRouteAccess.operator_id == operator.id)
         )
         .order_by(Route.route_number.asc(), Route.id.asc())      # Keep route list stable
         .all()
@@ -359,12 +359,12 @@ def get_routes(
 def get_route(
     route_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    route = get_company_scoped_route_or_404(
+    route = get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
         options=[
             selectinload(Route.schools),
@@ -397,19 +397,19 @@ def update_route(
     route_id: int,
     route_in: RouteCreate,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    route = get_company_scoped_route_or_404(
+    route = get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
         options=[
             joinedload(Route.schools),
             joinedload(Route.driver_assignments).joinedload(RouteDriverAssignment.driver),
         ],
     )
-    ensure_route_owner(route, company.id)
+    ensure_route_owner(route, operator.id)
 
     update_data = route_in.model_dump(exclude_unset=True)
     school_ids = update_data.pop("school_ids", None)
@@ -423,7 +423,7 @@ def update_route(
         existing_route = (
             db.query(Route)
             .filter(Route.route_number == new_route_number)                         # Find matching route number
-            .filter(Route.company_id == company.id)
+            .filter(Route.operator_id == operator.id)
             .filter(Route.id != route_id)                                           # Exclude current route
             .first()
         )
@@ -439,7 +439,7 @@ def update_route(
     if school_ids is not None:
         schools = (
             db.query(School)
-            .filter(School.company_id == company.id)
+            .filter(School.operator_id == operator.id)
             .filter(School.id.in_(school_ids))
             .all()
         )
@@ -473,18 +473,18 @@ def create_route_run(
     route_id: int,
     payload: RouteRunCreate,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     from backend.routers import run as run_router  # Local import avoids circular import at module load time
 
-    route = get_company_scoped_route_or_404(
+    route = get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
         options=[joinedload(Route.driver_assignments).joinedload(RouteDriverAssignment.driver)],
     )
-    ensure_route_owner(route, company.id)
+    ensure_route_owner(route, operator.id)
 
     new_run = run_router._create_planned_run(                   # Reuse shared run creation rules
         route=route,                                            # Parent route context
@@ -506,15 +506,15 @@ def create_route_run(
 def delete_route(
     route_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    route = get_company_scoped_route_or_404(
+    route = get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
     )
-    ensure_route_owner(route, company.id)
+    ensure_route_owner(route, operator.id)
     db.delete(route)
     db.commit()
     return None
@@ -528,12 +528,12 @@ def delete_route(
 def get_route_schools(
     route_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    route = get_company_scoped_route_or_404(
+    route = get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
     )
 
@@ -555,20 +555,20 @@ def assign_bus_to_route(
     route_id: int,
     bus_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    route = get_company_scoped_route_or_404(
+    route = get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
     )
-    ensure_route_owner(route, company.id)
+    ensure_route_owner(route, operator.id)
 
     bus = db.get(Bus, bus_id)
     if not bus:
         raise HTTPException(status_code=404, detail="Bus not found")
-    if bus.company_id != route.company_id and get_route_access_level(route, bus.company_id) != "operate":
+    if bus.operator_id != route.operator_id and get_route_access_level(route, bus.operator_id) != "operate":
         raise HTTPException(status_code=400, detail="Bus is not allowed for this route")
 
     route.active_bus_id = bus.id                               # Assign the active operational bus
@@ -595,20 +595,20 @@ def set_primary_bus_for_route(
     route_id: int,
     bus_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    route = get_company_scoped_route_or_404(
+    route = get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
     )
-    ensure_route_owner(route, company.id)
+    ensure_route_owner(route, operator.id)
 
     bus = db.get(Bus, bus_id)
     if not bus:
         raise HTTPException(status_code=404, detail="Bus not found")
-    if bus.company_id != route.company_id and get_route_access_level(route, bus.company_id) != "operate":
+    if bus.operator_id != route.operator_id and get_route_access_level(route, bus.operator_id) != "operate":
         raise HTTPException(status_code=400, detail="Bus is not allowed for this route")
 
     route.primary_bus_id = bus.id                              # Set the default/base route bus
@@ -636,20 +636,20 @@ def set_active_bus_for_route(
     route_id: int,
     bus_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    route = get_company_scoped_route_or_404(
+    route = get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
     )
-    ensure_route_owner(route, company.id)
+    ensure_route_owner(route, operator.id)
 
     bus = db.get(Bus, bus_id)
     if not bus:
         raise HTTPException(status_code=404, detail="Bus not found")
-    if bus.company_id != route.company_id and get_route_access_level(route, bus.company_id) != "operate":
+    if bus.operator_id != route.operator_id and get_route_access_level(route, bus.operator_id) != "operate":
         raise HTTPException(status_code=400, detail="Bus is not allowed for this route")
 
     route.active_bus_id = bus.id                               # Set the current operational bus
@@ -675,15 +675,15 @@ def restore_primary_bus_for_route(
     route_id: int,
     payload: RouteRestorePrimaryBus | None = None,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    route = get_company_scoped_route_or_404(
+    route = get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
     )
-    ensure_route_owner(route, company.id)
+    ensure_route_owner(route, operator.id)
 
     if route.primary_bus_id is None:
         raise HTTPException(status_code=400, detail="Route has no primary bus to restore")
@@ -711,15 +711,15 @@ def restore_primary_bus_for_route(
 def unassign_bus_from_route(
     route_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    route = get_company_scoped_route_or_404(
+    route = get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
     )
-    ensure_route_owner(route, company.id)
+    ensure_route_owner(route, operator.id)
 
     route.active_bus_id = None                                 # Clear active operational bus
     route.bus_id = None                                        # Clear compatibility-facing bus pointer
@@ -769,7 +769,7 @@ def _assign_driver_to_route(
     driver = db.get(Driver, driver_id)                           # Validate driver exists
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
-    if driver.company_id != route.company_id and get_route_access_level(route, driver.company_id) != "operate":
+    if driver.operator_id != route.operator_id and get_route_access_level(route, driver.operator_id) != "operate":
         raise HTTPException(status_code=400, detail="Driver is not allowed for this route")
 
     _assert_route_driver_assignment_integrity(route)             # Fail safely on invalid legacy active/primary state
@@ -834,17 +834,17 @@ def assign_driver_to_route(
     route_id: int,
     driver_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
 
-    route = get_company_scoped_route_or_404(
+    route = get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
         options=[joinedload(Route.driver_assignments).joinedload(RouteDriverAssignment.driver)],
     )
-    ensure_route_owner(route, company.id)
+    ensure_route_owner(route, operator.id)
 
     assignment = _assign_driver_to_route(route, driver_id, db)
 
@@ -879,12 +879,12 @@ def assign_driver_to_route(
 def get_route_drivers(
     route_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    route = get_company_scoped_route_or_404(
+    route = get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
         options=[joinedload(Route.driver_assignments).joinedload(RouteDriverAssignment.driver)],
     )
@@ -925,16 +925,16 @@ def unassign_driver_from_route(
     route_id: int,
     driver_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    route = get_company_scoped_route_or_404(
+    route = get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
         options=[joinedload(Route.driver_assignments).joinedload(RouteDriverAssignment.driver)],
     )
-    ensure_route_owner(route, company.id)
+    ensure_route_owner(route, operator.id)
 
     _assert_route_driver_assignment_integrity(route)             # Fail safely on invalid legacy active/primary state
 
@@ -961,46 +961,46 @@ def unassign_driver_from_route(
 
 
 @router.post(
-    "/{route_id}/share/{target_company_id}",
+    "/{route_id}/share/{target_operator_id}",
     summary="Grant shared route access",
-    description="Owner-only endpoint that grants explicit read or operate access for a route to another company.",
+    description="Owner-only endpoint that grants explicit read or operate access for a route to another operator.",
 )
-def share_route_with_company(
+def share_route_with_operator(
     route_id: int,
-    target_company_id: int,
+    target_operator_id: int,
     payload: dict = Body(...),
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    route = get_company_scoped_route_or_404(
+    route = get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
     )
-    ensure_route_owner(route, company.id)
+    ensure_route_owner(route, operator.id)
 
-    if target_company_id == route.company_id:
-        raise HTTPException(status_code=400, detail="Owner company already has access")
+    if target_operator_id == route.operator_id:
+        raise HTTPException(status_code=400, detail="Owner operator already has access")
 
-    target_company = db.get(Company, target_company_id)
-    if not target_company:
-        raise HTTPException(status_code=404, detail="Company not found")
+    target_operator = db.get(Operator, target_operator_id)
+    if not target_operator:
+        raise HTTPException(status_code=404, detail="Operator not found")
 
     access_level = str(payload.get("access_level", "read")).strip().lower()
     if access_level not in {"read", "operate"}:
         raise HTTPException(status_code=400, detail="Invalid access level")
 
     grant = (
-        db.query(CompanyRouteAccess)
-        .filter(CompanyRouteAccess.route_id == route_id)
-        .filter(CompanyRouteAccess.company_id == target_company_id)
+        db.query(OperatorRouteAccess)
+        .filter(OperatorRouteAccess.route_id == route_id)
+        .filter(OperatorRouteAccess.operator_id == target_operator_id)
         .first()
     )
     if grant is None:
-        grant = create_company_route_access(
+        grant = create_operator_route_access(
             route_id=route_id,
-            company_id=target_company_id,
+            operator_id=target_operator_id,
             access_level=access_level,
         )
         db.add(grant)
@@ -1011,35 +1011,35 @@ def share_route_with_company(
     db.refresh(grant)
     return {
         "route_id": route_id,
-        "company_id": target_company_id,
+        "operator_id": target_operator_id,
         "access_level": grant.access_level,
     }
 
 
 @router.delete(
-    "/{route_id}/share/{target_company_id}",
+    "/{route_id}/share/{target_operator_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Remove shared route access",
     description="Owner-only endpoint that removes explicit shared access for a route.",
 )
-def unshare_route_with_company(
+def unshare_route_with_operator(
     route_id: int,
-    target_company_id: int,
+    target_operator_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    route = get_company_scoped_route_or_404(
+    route = get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
     )
-    ensure_route_owner(route, company.id)
+    ensure_route_owner(route, operator.id)
 
     grant = (
-        db.query(CompanyRouteAccess)
-        .filter(CompanyRouteAccess.route_id == route_id)
-        .filter(CompanyRouteAccess.company_id == target_company_id)
+        db.query(OperatorRouteAccess)
+        .filter(OperatorRouteAccess.route_id == route_id)
+        .filter(OperatorRouteAccess.operator_id == target_operator_id)
         .first()
     )
     if grant is None:
@@ -1048,3 +1048,4 @@ def unshare_route_with_company(
     db.delete(grant)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+

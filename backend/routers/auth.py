@@ -28,7 +28,7 @@ def login(payload: dict = Body(...), request: Request = None, db: Session = Depe
     return {
         "message": "Logged in",
         "driver_id": driver.id,
-        "company_id": driver.company_id,
+        "operator_id": driver.operator_id,
     }
 
 
@@ -37,3 +37,4 @@ def logout(request: Request):
     """Clears current driver session."""
     logout_driver(request)
     return {"message": "Logged out"}
+

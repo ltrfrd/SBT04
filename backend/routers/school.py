@@ -10,13 +10,13 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from backend import schemas
-from backend.models.company import Company
+from backend.models.operator import Operator
 from backend.models import route as route_model
 from backend.models import school as school_model
-from backend.utils.company_scope import ensure_route_owner
-from backend.utils.company_scope import ensure_same_company
-from backend.utils.company_scope import get_company_context
-from backend.utils.company_scope import get_company_scoped_record_or_404
+from backend.utils.operator_scope import ensure_route_owner
+from backend.utils.operator_scope import ensure_same_operator
+from backend.utils.operator_scope import get_operator_context
+from backend.utils.operator_scope import get_operator_scoped_record_or_404
 
 
 router = APIRouter(
@@ -36,11 +36,11 @@ router = APIRouter(
 def create_school(
     school: schemas.SchoolCreate,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     new_school = school_model.School(
         **school.model_dump(),
-        company_id=company.id,
+        operator_id=operator.id,
     )
     db.add(new_school)
     db.commit()
@@ -57,11 +57,11 @@ def create_school(
 )
 def get_schools(
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     return (
         db.query(school_model.School)
-        .filter(school_model.School.company_id == company.id)
+        .filter(school_model.School.operator_id == operator.id)
         .all()
     )
 
@@ -76,13 +76,13 @@ def get_schools(
 def get_school(
     school_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    return get_company_scoped_record_or_404(
+    return get_operator_scoped_record_or_404(
         db=db,
         model=school_model.School,
         record_id=school_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="School not found",
     )
 
@@ -98,13 +98,13 @@ def update_school(
     school_id: int,
     school_in: schemas.SchoolCreate,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    school = get_company_scoped_record_or_404(
+    school = get_operator_scoped_record_or_404(
         db=db,
         model=school_model.School,
         record_id=school_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="School not found",
     )
 
@@ -127,13 +127,13 @@ def update_school(
 def delete_school(
     school_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    school = get_company_scoped_record_or_404(
+    school = get_operator_scoped_record_or_404(
         db=db,
         model=school_model.School,
         record_id=school_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="School not found",
     )
     db.delete(school)
@@ -152,21 +152,21 @@ def assign_route_to_school(
     school_id: int,
     route_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    school = get_company_scoped_record_or_404(
+    school = get_operator_scoped_record_or_404(
         db=db,
         model=school_model.School,
         record_id=school_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="School or Route not found",
     )
     route = db.get(route_model.Route, route_id)
     if not route:
         raise HTTPException(status_code=404, detail="School or Route not found")
 
-    ensure_route_owner(route, company.id)
-    ensure_same_company(school, route)
+    ensure_route_owner(route, operator.id)
+    ensure_same_operator(school, route)
 
     if route not in school.routes:
         school.routes.append(route)
@@ -187,20 +187,20 @@ def unassign_route_from_school(
     school_id: int,
     route_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    school = get_company_scoped_record_or_404(
+    school = get_operator_scoped_record_or_404(
         db=db,
         model=school_model.School,
         record_id=school_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="School or Route not found",
     )
     route = db.get(route_model.Route, route_id)
     if not route:
         raise HTTPException(status_code=404, detail="School or Route not found")
 
-    ensure_route_owner(route, company.id)
+    ensure_route_owner(route, operator.id)
 
     if route in school.routes:
         school.routes.remove(route)
@@ -208,3 +208,4 @@ def unassign_route_from_school(
         db.refresh(school)
 
     return school
+

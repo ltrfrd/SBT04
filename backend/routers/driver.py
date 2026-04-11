@@ -14,11 +14,11 @@ from backend.models.route import Route
 from backend.schemas.driver import DriverUpdate
 from backend.schemas.route import RouteOut
 from backend.routers.route import _serialize_route
-from backend.models.company import Company
+from backend.models.operator import Operator
 from backend.utils.auth import hash_driver_pin
-from backend.utils.company_scope import get_company_context
-from backend.utils.company_scope import get_company_scoped_record_or_404
-from backend.utils.company_scope import get_route_access_level
+from backend.utils.operator_scope import get_operator_context
+from backend.utils.operator_scope import get_operator_scoped_record_or_404
+from backend.utils.operator_scope import get_route_access_level
 
 # -----------------------------------------------------------
 # Router setup
@@ -41,13 +41,13 @@ router = APIRouter(prefix="/drivers", tags=["Drivers"])
 def create_driver(
     driver: schemas.DriverCreate,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     payload = driver.model_dump()
     pin = payload.pop("pin")
     new_driver = driver_model.Driver(
         **payload,
-        company_id=company.id,
+        operator_id=operator.id,
         pin_hash=hash_driver_pin(pin),
     )
     db.add(new_driver)
@@ -69,11 +69,11 @@ def create_driver(
 )
 def get_drivers(
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     return (
         db.query(driver_model.Driver)
-        .filter(driver_model.Driver.company_id == company.id)
+        .filter(driver_model.Driver.operator_id == operator.id)
         .all()
     )
 
@@ -91,13 +91,13 @@ def get_drivers(
 def get_driver(
     driver_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    driver = get_company_scoped_record_or_404(
+    driver = get_operator_scoped_record_or_404(
         db=db,
         model=driver_model.Driver,
         record_id=driver_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="Driver not found",
     )
     return driver                                                           # Return one driver object
@@ -122,13 +122,13 @@ def get_driver(
 def get_driver_routes(
     driver_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    driver = get_company_scoped_record_or_404(
+    driver = get_operator_scoped_record_or_404(
         db=db,
         model=driver_model.Driver,
         record_id=driver_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="Driver not found",
     )
 
@@ -144,7 +144,7 @@ def get_driver_routes(
     routes = [
         route
         for route in candidate_routes
-        if get_route_access_level(route, driver.company_id) is not None
+        if get_route_access_level(route, driver.operator_id) is not None
     ]
     return [_serialize_route(route) for route in routes]
 
@@ -164,13 +164,13 @@ def update_driver(
     driver_id: int,
     driver_in: DriverUpdate,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    driver = get_company_scoped_record_or_404(
+    driver = get_operator_scoped_record_or_404(
         db=db,
         model=driver_model.Driver,
         record_id=driver_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="Driver not found",
     )
 
@@ -199,15 +199,16 @@ def update_driver(
 def delete_driver(
     driver_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    driver = get_company_scoped_record_or_404(
+    driver = get_operator_scoped_record_or_404(
         db=db,
         model=driver_model.Driver,
         record_id=driver_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="Driver not found",
     )
     db.delete(driver)
     db.commit()
     return None
+

@@ -16,13 +16,13 @@ from backend.models import bus as bus_model
 from backend.models.associations import RouteDriverAssignment, StudentRunAssignment
 from backend.models import run as run_model
 from backend.models import student as student_model
-from backend.models.company import Company
+from backend.models.operator import Operator
 from backend.models.route import Route
 from backend.schemas.bus import BusUpdate
 from backend.routers.route import _serialize_route_detail
-from backend.utils.company_scope import get_company_context
-from backend.utils.company_scope import get_company_scoped_record_or_404
-from backend.utils.company_scope import get_route_access_level
+from backend.utils.operator_scope import get_operator_context
+from backend.utils.operator_scope import get_operator_scoped_record_or_404
+from backend.utils.operator_scope import get_route_access_level
 
 
 router = APIRouter(prefix="/buses", tags=["Buses"])
@@ -35,7 +35,7 @@ router = APIRouter(prefix="/buses", tags=["Buses"])
 def _validate_bus_uniqueness(
     *,
     db: Session,
-    company_id: int,
+    operator_id: int,
     unit_number: str | None = None,
     license_plate: str | None = None,
     exclude_bus_id: int | None = None,
@@ -44,7 +44,7 @@ def _validate_bus_uniqueness(
         query = (
             db.query(bus_model.Bus)
             .filter(bus_model.Bus.unit_number == unit_number)
-            .filter(bus_model.Bus.company_id == company_id)
+            .filter(bus_model.Bus.operator_id == operator_id)
         )
         if exclude_bus_id is not None:
             query = query.filter(bus_model.Bus.id != exclude_bus_id)
@@ -56,7 +56,7 @@ def _validate_bus_uniqueness(
         query = (
             db.query(bus_model.Bus)
             .filter(bus_model.Bus.license_plate == license_plate)
-            .filter(bus_model.Bus.company_id == company_id)
+            .filter(bus_model.Bus.operator_id == operator_id)
         )
         if exclude_bus_id is not None:
             query = query.filter(bus_model.Bus.id != exclude_bus_id)
@@ -80,18 +80,18 @@ def _validate_bus_uniqueness(
 def create_bus(
     bus: schemas.BusCreate,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     payload = bus.model_dump()
     _validate_bus_uniqueness(
         db=db,
-        company_id=company.id,
+        operator_id=operator.id,
         unit_number=payload["bus_number"],
         license_plate=payload["license_plate"],
     )
 
     new_bus = bus_model.Bus(
-        company_id=company.id,
+        operator_id=operator.id,
         unit_number=payload["bus_number"],
         license_plate=payload["license_plate"],
         capacity=payload["capacity"],
@@ -116,11 +116,11 @@ def create_bus(
 )
 def get_buses(
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     return (
         db.query(bus_model.Bus)
-        .filter(bus_model.Bus.company_id == company.id)
+        .filter(bus_model.Bus.operator_id == operator.id)
         .order_by(bus_model.Bus.unit_number.asc(), bus_model.Bus.id.asc())
         .all()
     )
@@ -140,7 +140,7 @@ def get_buses(
 def get_bus(
     bus_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     bus = (
         db.query(bus_model.Bus)
@@ -153,7 +153,7 @@ def get_bus(
             selectinload(bus_model.Bus.routes).selectinload(Route.runs).selectinload(run_model.Run.student_assignments).selectinload(StudentRunAssignment.student).selectinload(student_model.Student.school),  # Include assigned students and schools
         )
         .filter(bus_model.Bus.id == bus_id)
-        .filter(bus_model.Bus.company_id == company.id)
+        .filter(bus_model.Bus.operator_id == operator.id)
         .first()
     )
     if not bus:
@@ -168,7 +168,7 @@ def get_bus(
         assigned_routes=[
             _serialize_route_detail(route)
             for route in sorted(bus.routes, key=lambda route: (route.route_number, route.id))
-            if get_route_access_level(route, company.id) is not None
+            if get_route_access_level(route, operator.id) is not None
         ],
     )
 
@@ -188,20 +188,20 @@ def update_bus(
     bus_id: int,
     bus_in: BusUpdate,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    bus = get_company_scoped_record_or_404(
+    bus = get_operator_scoped_record_or_404(
         db=db,
         model=bus_model.Bus,
         record_id=bus_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="Bus not found",
     )
 
     update_data = bus_in.model_dump(exclude_unset=True)
     _validate_bus_uniqueness(
         db=db,
-        company_id=company.id,
+        operator_id=operator.id,
         unit_number=update_data.get("bus_number"),
         license_plate=update_data.get("license_plate"),
         exclude_bus_id=bus_id,
@@ -233,16 +233,17 @@ def update_bus(
 def delete_bus(
     bus_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    bus = get_company_scoped_record_or_404(
+    bus = get_operator_scoped_record_or_404(
         db=db,
         model=bus_model.Bus,
         record_id=bus_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="Bus not found",
     )
 
     db.delete(bus)
     db.commit()
     return None
+

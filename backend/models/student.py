@@ -7,7 +7,7 @@ class Student(Base):
     __tablename__ = "students"
 
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    operator_id = Column(Integer, ForeignKey("operators.id", ondelete="CASCADE"), nullable=False, index=True)
     name = Column(String(100), nullable=False)
     grade = Column(String(10))
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False)
@@ -17,7 +17,7 @@ class Student(Base):
     stop_id = Column(Integer, ForeignKey("stops.id", ondelete="SET NULL"), nullable=True)
     notification_distance_meters = Column(Integer, default=500)
 
-    company = relationship("Company", back_populates="students")
+    operator = relationship("Operator", back_populates="students")
     school = relationship("School", back_populates="students")
     route = relationship("Route", foreign_keys=[route_id])
     stop = relationship("Stop", foreign_keys=[stop_id])
@@ -37,3 +37,4 @@ class Student(Base):
     @property
     def school_name(self) -> str | None:
         return self.school.name if self.school else None
+

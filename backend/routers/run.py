@@ -19,7 +19,7 @@ from backend.models import school as school_model
 from backend.models import stop as stop_model
 from backend.models import pretrip as pretrip_model
 from backend.models import posttrip as posttrip_model
-from backend.models.company import Company
+from backend.models.operator import Operator
 from backend.models.run import Run                            # Run model
 from backend.models.student import Student                      # Student model
 from backend.models.stop import Stop                            # Stop model
@@ -40,10 +40,10 @@ from backend.utils.student_bus_absence import apply_run_absence_filter
 from backend.utils.route_driver_assignment import resolve_route_driver_assignment
 from backend.utils.db_errors import raise_conflict_if_unique
 from backend.utils.pretrip_alerts import create_missing_pretrip_alert_if_needed
-from backend.utils.company_scope import get_company_context
-from backend.utils.company_scope import get_company_scoped_record_or_404
-from backend.utils.company_scope import get_company_scoped_route_or_404
-from backend.utils.company_scope import get_route_access_level
+from backend.utils.operator_scope import get_operator_context
+from backend.utils.operator_scope import get_operator_scoped_record_or_404
+from backend.utils.operator_scope import get_operator_scoped_route_or_404
+from backend.utils.operator_scope import get_route_access_level
 from backend.utils.run_setup import ensure_run_is_planned_for_setup, get_run_stop_context_or_404
 from backend.schemas.run import (
     PickupStudentRequest,
@@ -73,10 +73,10 @@ def _get_run_or_404(run_id: int, db: Session) -> Run:
     return run
 
 
-def _get_company_scoped_run_or_404(
+def _get_operator_scoped_run_or_404(
     run_id: int,
     db: Session,
-    company_id: int,
+    operator_id: int,
     required_access: str = "read",
     options: list | None = None,
 ) -> Run:
@@ -91,10 +91,10 @@ def _get_company_scoped_run_or_404(
             detail="Run not found",
         )
 
-    get_company_scoped_route_or_404(
+    get_operator_scoped_route_or_404(
         db=db,
         route_id=run.route_id,
-        company_id=company_id,
+        operator_id=operator_id,
         required_access=required_access,
     )
     return run
@@ -388,21 +388,21 @@ def _create_stop_context_student(
     run: run_model.Run,
     stop: stop_model.Stop,
     payload: schemas.StopStudentCreate,
-    company_id: int,
+    operator_id: int,
     db: Session,
 ) -> Student:
-    school = get_company_scoped_record_or_404(
+    school = get_operator_scoped_record_or_404(
         db=db,
         model=school_model.School,
         record_id=payload.school_id,
-        company_id=company_id,
+        operator_id=operator_id,
         detail="School not found",
     )
 
-    route = get_company_scoped_route_or_404(
+    route = get_operator_scoped_route_or_404(
         db=db,
         route_id=run.route_id,
-        company_id=company_id,
+        operator_id=operator_id,
         required_access="read",
         options=[selectinload(route_model.Route.schools)],
     )
@@ -414,7 +414,7 @@ def _create_stop_context_student(
     student = Student(
         name=payload.name,
         grade=payload.grade,
-        company_id=company_id,
+        operator_id=operator_id,
         school_id=payload.school_id,
         route_id=run.route_id,
         stop_id=stop.id,
@@ -726,22 +726,22 @@ def _serialize_run_list_item(run: run_model.Run) -> RunListOut:
 def create_run(
     run: RunCreateLegacy,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     # -----------------------------------------------------------
     # - Validate route exists
     # - Load route context and optional active driver assignment
     # -----------------------------------------------------------
-    route = get_company_scoped_route_or_404(
+    route = get_operator_scoped_route_or_404(
         db=db,
         route_id=run.route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
         options=[
             joinedload(route_model.Route.driver_assignments).joinedload(RouteDriverAssignment.driver),
         ],
     )
-    if route.company_id != company.id:
+    if route.operator_id != operator.id:
         raise HTTPException(status_code=404, detail="Route not found")
 
     new_run = _create_planned_run(                               # Reuse normalized planned run workflow
@@ -775,12 +775,12 @@ def create_run(
 def start_run(
     run_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    target_run = _get_company_scoped_run_or_404(
+    target_run = _get_operator_scoped_run_or_404(
         run_id,
         db,
-        company.id,
+        operator.id,
         "operate",
         options=[
             joinedload(run_model.Run.driver),
@@ -791,10 +791,10 @@ def start_run(
     if target_run.start_time is not None:
         raise HTTPException(status_code=400, detail="Run already started")
 
-    route = get_company_scoped_route_or_404(
+    route = get_operator_scoped_route_or_404(
         db=db,
         route_id=target_run.route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="operate",
         options=[joinedload(route_model.Route.driver_assignments).joinedload(RouteDriverAssignment.driver)],
     )
@@ -909,9 +909,9 @@ def start_run(
 def end_run(
     run_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    run = _get_company_scoped_run_or_404(run_id, db, company.id, "operate")
+    run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "operate")
     if run.start_time is None:
         raise HTTPException(status_code=400, detail="Run is not active")
     if run.end_time:
@@ -938,17 +938,17 @@ def end_run(
 def end_run_by_driver(
     driver_id: int,                         # Driver whose active run should be ended
     db: Session = Depends(get_db),          # Database session dependency
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
 
     # -------------------------------------------------------------------------
     # Validate driver exists
     # -------------------------------------------------------------------------
-    driver = get_company_scoped_record_or_404(
+    driver = get_operator_scoped_record_or_404(
         db=db,
         model=driver_model.Driver,
         record_id=driver_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="Driver not found",
     )
 
@@ -996,7 +996,7 @@ def end_run_by_driver(
 def get_all_runs(
     route_id: int | None = Query(None),    # Required route filter
     db: Session = Depends(get_db),          # Database session dependency
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
 
     # -------------------------------------------------------------------------
@@ -1005,10 +1005,10 @@ def get_all_runs(
     if route_id is None:
         raise HTTPException(status_code=400, detail="route_id is required")  # Require route-scoped listing
 
-    get_company_scoped_route_or_404(
+    get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
     )
 
@@ -1052,17 +1052,17 @@ def get_all_runs(
 def get_active_run(
     driver_id: int,                         # Driver to check for active run
     db: Session = Depends(get_db),          # Database session dependency
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
 
     # -------------------------------------------------------------------------
     # Validate driver exists
     # -------------------------------------------------------------------------
-    get_company_scoped_record_or_404(
+    get_operator_scoped_record_or_404(
         db=db,
         model=driver_model.Driver,
         record_id=driver_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="Driver not found",
     )
 
@@ -1104,12 +1104,12 @@ def get_active_run(
 def get_run_stops(
     run_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     # -------------------------------------------------------------------------
     # Validate run exists
     # -------------------------------------------------------------------------
-    _get_company_scoped_run_or_404(run_id, db, company.id, "read")
+    _get_operator_scoped_run_or_404(run_id, db, operator.id, "read")
 
     # -------------------------------------------------------------------------
     # Load stops in stable order
@@ -1143,11 +1143,11 @@ def create_stop_inside_run(
     run_id: int,
     payload: RunStopCreate,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     from backend.routers import stop as stop_router  # Local import avoids circular import at module load time
-    owner_run = _get_company_scoped_run_or_404(run_id, db, company.id, "read", options=[joinedload(run_model.Run.route)])
-    if owner_run.route and owner_run.route.company_id != company.id:
+    owner_run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read", options=[joinedload(run_model.Run.route)])
+    if owner_run.route and owner_run.route.operator_id != operator.id:
         raise HTTPException(status_code=404, detail="Run not found")
 
     return stop_router.create_run_stop(                          # Reuse shared stop workflow rules
@@ -1173,11 +1173,11 @@ def update_stop_inside_run(
     stop_id: int,
     payload: RunStopUpdate,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     from backend.routers import stop as stop_router  # Local import avoids circular import at module load time
-    owner_run = _get_company_scoped_run_or_404(run_id, db, company.id, "read", options=[joinedload(run_model.Run.route)])
-    if owner_run.route and owner_run.route.company_id != company.id:
+    owner_run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read", options=[joinedload(run_model.Run.route)])
+    if owner_run.route and owner_run.route.operator_id != operator.id:
         raise HTTPException(status_code=404, detail="Run not found")
 
     return stop_router.update_run_stop(
@@ -1205,10 +1205,10 @@ def create_run_stop_student(
     stop_id: int,
     payload: schemas.StopStudentCreate,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    owner_run = _get_company_scoped_run_or_404(run_id, db, company.id, "read", options=[joinedload(run_model.Run.route)])
-    if owner_run.route and owner_run.route.company_id != company.id:
+    owner_run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read", options=[joinedload(run_model.Run.route)])
+    if owner_run.route and owner_run.route.operator_id != operator.id:
         raise HTTPException(status_code=404, detail="Run not found")
     run, stop = _get_run_stop_or_404(run_id, stop_id, db)  # Validate stop context once
 
@@ -1217,7 +1217,7 @@ def create_run_stop_student(
             run=run,
             stop=stop,
             payload=payload,
-            company_id=company.id,
+            operator_id=operator.id,
             db=db,
         )
         db.commit()
@@ -1252,11 +1252,11 @@ def update_run_stop_student(
     student_id: int,
     payload: schemas.StopStudentUpdate,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     from backend.routers import student as student_router  # Local import avoids circular import at module load time
-    owner_run = _get_company_scoped_run_or_404(run_id, db, company.id, "read", options=[joinedload(run_model.Run.route)])
-    if owner_run.route and owner_run.route.company_id != company.id:
+    owner_run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read", options=[joinedload(run_model.Run.route)])
+    if owner_run.route and owner_run.route.operator_id != operator.id:
         raise HTTPException(status_code=404, detail="Run not found")
 
     run, stop, student, assignment = _get_run_stop_student_context_or_404(
@@ -1269,7 +1269,7 @@ def update_run_stop_student(
     student = student_router._update_student_record(
         student=student,                                         # Existing routed student
         payload=payload,                                         # Context-safe update payload
-        company_id=company.id,
+        operator_id=operator.id,
         db=db,                                                   # Shared DB session
         authoritative_route_id=run.route_id,                     # Keep student on the run route
         authoritative_stop=stop,                                 # Keep planning stop aligned with path context
@@ -1296,10 +1296,10 @@ def delete_run_stop_student(
     stop_id: int,
     student_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    owner_run = _get_company_scoped_run_or_404(run_id, db, company.id, "read", options=[joinedload(run_model.Run.route)])
-    if owner_run.route and owner_run.route.company_id != company.id:
+    owner_run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read", options=[joinedload(run_model.Run.route)])
+    if owner_run.route and owner_run.route.operator_id != operator.id:
         raise HTTPException(status_code=404, detail="Run not found")
     run, stop, student, assignment = _get_run_stop_student_context_or_404(
         run_id=run_id,
@@ -1337,10 +1337,10 @@ def bulk_create_run_stop_students(
     stop_id: int,
     payload: schemas.StopStudentBulkCreate,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    owner_run = _get_company_scoped_run_or_404(run_id, db, company.id, "read", options=[joinedload(run_model.Run.route)])
-    if owner_run.route and owner_run.route.company_id != company.id:
+    owner_run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read", options=[joinedload(run_model.Run.route)])
+    if owner_run.route and owner_run.route.operator_id != operator.id:
         raise HTTPException(status_code=404, detail="Run not found")
     run, stop = _get_run_stop_or_404(run_id, stop_id, db)  # Validate stop context once
 
@@ -1354,7 +1354,7 @@ def bulk_create_run_stop_students(
                     run=run,
                     stop=stop,
                     payload=student_payload,
-                    company_id=company.id,
+                    operator_id=operator.id,
                     db=db,
                 )
                 created_students.append(student)
@@ -1412,9 +1412,9 @@ def arrive_at_stop(
     stop_sequence: int | None = Query(None, ge=1),  # Compatibility stop-sequence target
     stop_id: int | None = Query(None, ge=1),        # Optional explicit stop target for flexible movement
     db: Session = Depends(get_db),                  # Database session dependency
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    _get_company_scoped_run_or_404(run_id, db, company.id, "operate")
+    _get_operator_scoped_run_or_404(run_id, db, operator.id, "operate")
     run = _require_active_runtime_run(_get_runtime_run_or_404(run_id, db))
     stop = _resolve_runtime_stop_target_or_404(
         run_id=run_id,
@@ -1447,9 +1447,9 @@ def arrive_at_stop(
 def advance_to_next_stop(
     run_id: int,
     db: Session = Depends(get_db),                  # Database session dependency
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    _get_company_scoped_run_or_404(run_id, db, company.id, "operate")
+    _get_operator_scoped_run_or_404(run_id, db, operator.id, "operate")
     run = _require_active_runtime_run(_get_runtime_run_or_404(run_id, db))
     stops = _get_ordered_run_stops(run_id, db)      # Stable ordered list for convenience-only navigation
 
@@ -1501,9 +1501,9 @@ def pickup_student(
     run_id: int,
     payload: PickupStudentRequest,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    _get_company_scoped_run_or_404(run_id, db, company.id, "operate")
+    _get_operator_scoped_run_or_404(run_id, db, operator.id, "operate")
     run = _require_active_runtime_run(_get_runtime_run_or_404(run_id, db))
     current_stop = _require_current_runtime_stop(run, db)  # Pickup must happen at the actual current stop
     assignment = _get_runtime_assignment_or_404(
@@ -1575,9 +1575,9 @@ def dropoff_student(
     run_id: int,
     payload: DropoffStudentRequest,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    _get_company_scoped_run_or_404(run_id, db, company.id, "operate")
+    _get_operator_scoped_run_or_404(run_id, db, operator.id, "operate")
     run = _require_active_runtime_run(_get_runtime_run_or_404(run_id, db))
     current_stop = _require_current_runtime_stop(run, db)  # Dropoff must happen at the actual current stop
     assignment = _get_runtime_assignment_or_404(
@@ -1648,12 +1648,12 @@ def dropoff_student(
 def complete_run(
     run_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     # -------------------------------------------------------------------------
     # Load run
     # -------------------------------------------------------------------------
-    run = _get_company_scoped_run_or_404(run_id, db, company.id, "operate")
+    run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "operate")
 
     if not _is_run_active(run):  # Only active runs can be completed
         raise HTTPException(
@@ -1751,12 +1751,12 @@ def complete_run(
 def get_run_state(
     run_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     # -------------------------------------------------------------------------
     # Validate run exists
     # -------------------------------------------------------------------------
-    run = _get_company_scoped_run_or_404(run_id, db, company.id, "read")
+    run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read")
 
     # -------------------------------------------------------------------------
     # Load stops in stable order for current-stop and progress context
@@ -1854,9 +1854,9 @@ def get_run_state(
 def get_onboard_students(
     run_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    _get_company_scoped_run_or_404(run_id, db, company.id, "read")
+    _get_operator_scoped_run_or_404(run_id, db, operator.id, "read")
     # -------------------------------------------------------------------------
     # Load run
     # -------------------------------------------------------------------------
@@ -1956,12 +1956,12 @@ def get_onboard_students(
 def get_run_occupancy_summary(
     run_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     # -------------------------------------------------------------------------
     # Validate run exists
     # -------------------------------------------------------------------------
-    run = _get_company_scoped_run_or_404(run_id, db, company.id, "read")
+    run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read")
 
     # -------------------------------------------------------------------------
     # Load all runtime student assignments for this run
@@ -2007,9 +2007,9 @@ def get_run_occupancy_summary(
 def get_run_timeline(
     run_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    run = _get_company_scoped_run_or_404(run_id, db, company.id, "read")
+    run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read")
 
     events = (
         db.query(RunEvent)                                                # Query run events
@@ -2048,12 +2048,12 @@ def get_run_timeline(
 def get_run_replay(
     run_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     # -------------------------------------------------------------------------
     # Validate run exists
     # -------------------------------------------------------------------------
-    run = _get_company_scoped_run_or_404(run_id, db, company.id, "read")
+    run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read")
 
     # -------------------------------------------------------------------------
     # Load all run events in stable chronological order
@@ -2179,16 +2179,16 @@ def get_run_replay(
 def get_run(
     run_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
 
     # -------------------------------------------------------------------------
     # Load run with linked route, stops, and student assignments
     # -------------------------------------------------------------------------
-    run = _get_company_scoped_run_or_404(
+    run = _get_operator_scoped_run_or_404(
         run_id,
         db,
-        company.id,
+        operator.id,
         "read",
         options=[
             joinedload(run_model.Run.driver),
@@ -2220,23 +2220,23 @@ def update_run(
     run_id: int,
     payload: RunUpdate,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
 
     # -------------------------------------------------------------------------
     # Load run with linked driver and route
     # -------------------------------------------------------------------------
-    run = _get_company_scoped_run_or_404(
+    run = _get_operator_scoped_run_or_404(
         run_id,
         db,
-        company.id,
+        operator.id,
         "read",
         options=[
             joinedload(run_model.Run.driver),
             joinedload(run_model.Run.route),
         ],
     )
-    if run.route and run.route.company_id != company.id:
+    if run.route and run.route.operator_id != operator.id:
         raise HTTPException(status_code=404, detail="Run not found")
 
     # -------------------------------------------------------------------------
@@ -2276,14 +2276,14 @@ def update_run(
 def delete_run(
     run_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
 
     # -------------------------------------------------------------------------
     # Load run
     # -------------------------------------------------------------------------
-    run = _get_company_scoped_run_or_404(run_id, db, company.id, "read")
-    if run.route and run.route.company_id != company.id:
+    run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read")
+    if run.route and run.route.operator_id != operator.id:
         raise HTTPException(status_code=404, detail="Run not found")
 
     # -------------------------------------------------------------------------
@@ -2311,13 +2311,13 @@ def delete_run(
 def get_running_board(
     run_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
 
     # -------------------------------------------------------------------------
     # Load the run
     # -------------------------------------------------------------------------
-    run = _get_company_scoped_run_or_404(run_id, db, company.id, "read")
+    run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read")
 
     # -------------------------------------------------------------------------
     # Load run stops ordered by sequence
@@ -2370,13 +2370,13 @@ def get_running_board(
 def get_run_assignments(
     run_id: int,                         # Run identifier
     db: Session = Depends(get_db),        # Database session dependency
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
 
     # -------------------------------------------------------------------------
     # Validate run exists
     # -------------------------------------------------------------------------
-    run = _get_company_scoped_run_or_404(run_id, db, company.id, "read")
+    run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read")
 
     # -------------------------------------------------------------------------
     # Load assignments with student and stop
@@ -2431,16 +2431,16 @@ def get_run_assignments(
 def get_run_summary(
     run_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
 
     # -------------------------------------------------------------------------
     # Load run with driver and route
     # -------------------------------------------------------------------------
-    run = _get_company_scoped_run_or_404(
+    run = _get_operator_scoped_run_or_404(
         run_id,
         db,
-        company.id,
+        operator.id,
         "read",
         options=[
             joinedload(run_model.Run.driver),
@@ -2500,3 +2500,4 @@ def get_run_summary(
         total_assigned_students=len(assignments),
         current_load=current_load,
     )
+

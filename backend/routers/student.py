@@ -11,16 +11,16 @@ from sqlalchemy.orm import selectinload
 
 from database import get_db
 from backend import schemas
-from backend.models.company import Company
+from backend.models.operator import Operator
 from backend.models import associations as assoc_model
 from backend.models import route as route_model
 from backend.models import run as run_model
 from backend.models import school as school_model
 from backend.models import stop as stop_model
 from backend.models import student as student_model
-from backend.utils.company_scope import get_company_context
-from backend.utils.company_scope import get_company_scoped_record_or_404
-from backend.utils.company_scope import get_company_scoped_route_or_404
+from backend.utils.operator_scope import get_operator_context
+from backend.utils.operator_scope import get_operator_scoped_record_or_404
+from backend.utils.operator_scope import get_operator_scoped_route_or_404
 from backend.utils.run_setup import (
     ensure_run_is_planned_for_setup,
     get_run_stop_context_or_404,
@@ -37,13 +37,13 @@ router = APIRouter(
 def _get_route_with_schools(
     route_id: int,
     db: Session,
-    company_id: int,
+    operator_id: int,
     required_access: str = "owner",
 ) -> route_model.Route:
-    return get_company_scoped_route_or_404(
+    return get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
-        company_id=company_id,
+        operator_id=operator_id,
         required_access=required_access,
         options=[selectinload(route_model.Route.schools)],
     )
@@ -60,11 +60,11 @@ def _validate_compatibility_student_create_target(
     school_id: int,
     route_id: int | None,
     stop_id: int | None,
-    company_id: int,
+    operator_id: int,
     db: Session,
 ) -> tuple[route_model.Route | None, stop_model.Stop | None]:
     route = (
-        _get_route_with_schools(route_id, db, company_id, "owner")
+        _get_route_with_schools(route_id, db, operator_id, "owner")
         if route_id is not None else None
     )
     stop = get_stop_or_404(stop_id, db) if stop_id is not None else None
@@ -75,7 +75,7 @@ def _validate_compatibility_student_create_target(
             raise HTTPException(status_code=400, detail="Stop does not belong to route")
         if run.route is None:
             raise HTTPException(status_code=404, detail="Route not found")
-        if run.route.company_id != company_id:
+        if run.route.operator_id != operator_id:
             raise HTTPException(status_code=404, detail="Route not found")
         ensure_run_is_planned_for_setup(run)
 
@@ -83,7 +83,7 @@ def _validate_compatibility_student_create_target(
             raise HTTPException(status_code=400, detail="Stop does not belong to route")
 
         if route is None:
-            route = _get_route_with_schools(run.route_id, db, company_id, "owner")
+            route = _get_route_with_schools(run.route_id, db, operator_id, "owner")
 
     return route, stop
 
@@ -94,10 +94,10 @@ def _validate_student_assignment_target(
     route_id: int,
     run_id: int,
     stop_id: int,
-    company_id: int,
+    operator_id: int,
     db: Session,
 ) -> tuple[route_model.Route, run_model.Run, stop_model.Stop]:
-    route = _get_route_with_schools(route_id, db, company_id, "owner")
+    route = _get_route_with_schools(route_id, db, operator_id, "owner")
     run, stop = get_run_stop_context_or_404(
         run_id=run_id,
         stop_id=stop_id,
@@ -160,7 +160,7 @@ def _update_student_record(
     *,
     student: student_model.Student,
     payload: schemas.StopStudentUpdate,
-    company_id: int,
+    operator_id: int,
     db: Session,
     authoritative_route_id: int | None = None,
     authoritative_stop: stop_model.Stop | None = None,
@@ -174,13 +174,13 @@ def _update_student_record(
 
     route = None
     if target_route_id is not None:
-        route = _get_route_with_schools(target_route_id, db, company_id, "owner")
+        route = _get_route_with_schools(target_route_id, db, operator_id, "owner")
 
-    school = get_company_scoped_record_or_404(
+    school = get_operator_scoped_record_or_404(
         db=db,
         model=school_model.School,
         record_id=target_school_id,
-        company_id=company_id,
+        operator_id=operator_id,
         detail="School not found",
     )
 
@@ -230,13 +230,13 @@ def _update_student_record(
 def create_student(
     student: schemas.StudentCompatibilityCreate,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    school = get_company_scoped_record_or_404(
+    school = get_operator_scoped_record_or_404(
         db=db,
         model=school_model.School,
         record_id=student.school_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="School not found",
     )
 
@@ -244,7 +244,7 @@ def create_student(
         school_id=student.school_id,
         route_id=student.route_id,
         stop_id=student.stop_id,
-        company_id=company.id,
+        operator_id=operator.id,
         db=db,
     )
 
@@ -252,7 +252,7 @@ def create_student(
     payload["school_id"] = school.id
     new_student = student_model.Student(
         **payload,
-        company_id=company.id,
+        operator_id=operator.id,
     )
     db.add(new_student)
     db.commit()
@@ -269,11 +269,11 @@ def create_student(
 )
 def get_students(
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     return (
         db.query(student_model.Student)
-        .filter(student_model.Student.company_id == company.id)
+        .filter(student_model.Student.operator_id == operator.id)
         .all()
     )
 
@@ -288,13 +288,13 @@ def get_students(
 def get_student(
     student_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    return get_company_scoped_record_or_404(
+    return get_operator_scoped_record_or_404(
         db=db,
         model=student_model.Student,
         record_id=student_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="Student not found",
     )
 
@@ -315,13 +315,13 @@ def update_student_assignment(
     student_id: int,
     assignment_in: schemas.StudentAssignmentUpdate,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    student = get_company_scoped_record_or_404(
+    student = get_operator_scoped_record_or_404(
         db=db,
         model=student_model.Student,
         record_id=student_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="Student not found",
     )
 
@@ -330,7 +330,7 @@ def update_student_assignment(
         route_id=assignment_in.route_id,
         run_id=assignment_in.run_id,
         stop_id=assignment_in.stop_id,
-        company_id=company.id,
+        operator_id=operator.id,
         db=db,
     )
 
@@ -363,13 +363,13 @@ def update_student_assignment(
 def delete_student(
     student_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    student = get_company_scoped_record_or_404(
+    student = get_operator_scoped_record_or_404(
         db=db,
         model=student_model.Student,
         record_id=student_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="Student not found",
     )
     db.delete(student)
@@ -387,19 +387,19 @@ def delete_student(
 def get_students_by_school(
     school_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    get_company_scoped_record_or_404(
+    get_operator_scoped_record_or_404(
         db=db,
         model=school_model.School,
         record_id=school_id,
-        company_id=company.id,
+        operator_id=operator.id,
         detail="School not found",
     )
 
     return (
         db.query(student_model.Student)
-        .filter(student_model.Student.company_id == company.id)
+        .filter(student_model.Student.operator_id == operator.id)
         .filter(student_model.Student.school_id == school_id)
         .all()
     )
@@ -415,12 +415,12 @@ def get_students_by_school(
 def get_students_by_route(
     route_id: int,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
-    get_company_scoped_route_or_404(
+    get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
     )
 
@@ -434,8 +434,9 @@ def get_students_by_route(
             run_model.Run,
             run_model.Run.id == assoc_model.StudentRunAssignment.run_id,
         )
-        .filter(student_model.Student.company_id == company.id)
+        .filter(student_model.Student.operator_id == operator.id)
         .filter(run_model.Run.route_id == route_id)
         .distinct()
         .all()
     )
+

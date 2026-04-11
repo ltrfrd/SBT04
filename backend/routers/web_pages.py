@@ -23,12 +23,12 @@ from backend.models import (
     school as school_model,
     student as student_model,
 )
-from backend.models.company import Company, CompanyRouteAccess
+from backend.models.operator import Operator, OperatorRouteAccess
 from backend.models.associations import RouteDriverAssignment, StudentRunAssignment
 from backend.utils import attendance_generator
 from backend.utils.auth import get_current_driver
-from backend.utils.company_scope import get_company_context
-from backend.utils.company_scope import get_company_scoped_route_or_404
+from backend.utils.operator_scope import get_operator_context
+from backend.utils.operator_scope import get_operator_scoped_route_or_404
 from backend.utils.driver_workspace import _build_route_workspace
 from backend.utils.route_driver_assignment import get_route_driver_name
 
@@ -44,15 +44,15 @@ router = APIRouter()
 def dashboard(
     request: Request,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     """Renders admin dashboard summary with record counts."""
     counts = {
-        "driver_count": db.query(driver_model.Driver).filter(driver_model.Driver.company_id == company.id).count(),
-        "school_count": db.query(school_model.School).filter(school_model.School.company_id == company.id).count(),
-        "route_count": db.query(route_model.Route).filter(route_model.Route.company_id == company.id).count(),
-        "student_count": db.query(student_model.Student).filter(student_model.Student.company_id == company.id).count(),
-        "run_count": db.query(run_model.Run).join(route_model.Route, route_model.Route.id == run_model.Run.route_id).filter(route_model.Route.company_id == company.id).filter(run_model.Run.end_time.is_(None)).count(),
+        "driver_count": db.query(driver_model.Driver).filter(driver_model.Driver.operator_id == operator.id).count(),
+        "school_count": db.query(school_model.School).filter(school_model.School.operator_id == operator.id).count(),
+        "route_count": db.query(route_model.Route).filter(route_model.Route.operator_id == operator.id).count(),
+        "student_count": db.query(student_model.Student).filter(student_model.Student.operator_id == operator.id).count(),
+        "run_count": db.query(run_model.Run).join(route_model.Route, route_model.Route.id == run_model.Run.route_id).filter(route_model.Route.operator_id == operator.id).filter(run_model.Run.end_time.is_(None)).count(),
     }
     return templates.TemplateResponse(
         request,                                              # Request first (prevents deprecation warning)
@@ -69,17 +69,17 @@ def route_report(
     route_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     """Shows route-specific attendance summary including driver name and route details."""
-    route_data = attendance_generator.route_summary(db, route_id, company_id=company.id)
+    route_data = attendance_generator.route_summary(db, route_id, operator_id=operator.id)
     if "error" in route_data:
         raise HTTPException(status_code=404, detail=route_data["error"])
 
-    route = get_company_scoped_route_or_404(
+    route = get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
-        company_id=company.id,
+        operator_id=operator.id,
         required_access="read",
     )
     driver_name = get_route_driver_name(route) if route else None
@@ -128,7 +128,7 @@ def driver_run_view(
         .options(joinedload(run_model.Run.route))
         .filter(run_model.Run.driver_id == driver_id)
         .join(route_model.Route, route_model.Route.id == run_model.Run.route_id)
-        .filter(route_model.Route.company_id == current_driver.company_id)
+        .filter(route_model.Route.operator_id == current_driver.operator_id)
         .filter(run_model.Run.start_time.is_not(None))
         .filter(run_model.Run.end_time.is_(None))
         .first()
@@ -154,8 +154,8 @@ def driver_run_view(
             RouteDriverAssignment.active.is_(True),
         )))
         .filter(
-            (route_model.Route.company_id == current_driver.company_id)
-            | route_model.Route.company_access.any(CompanyRouteAccess.company_id == current_driver.company_id)
+            (route_model.Route.operator_id == current_driver.operator_id)
+            | route_model.Route.operator_access.any(OperatorRouteAccess.operator_id == current_driver.operator_id)
         )
         .order_by(route_model.Route.route_number.asc(), route_model.Route.id.asc())
         .all()
@@ -254,7 +254,7 @@ def summary_report(
     start: date = None,
     end: date = None,
     db: Session = Depends(get_db),
-    company: Company = Depends(get_company_context),
+    operator: Operator = Depends(get_operator_context),
 ):
     """Shows payroll attendance summary between given dates."""
     end = end or date.today()
@@ -262,7 +262,7 @@ def summary_report(
     records = (
         db.query(dispatch_model.Payroll)
         .join(driver_model.Driver, driver_model.Driver.id == dispatch_model.Payroll.driver_id)
-        .filter(driver_model.Driver.company_id == company.id)
+        .filter(driver_model.Driver.operator_id == operator.id)
         .filter(dispatch_model.Payroll.work_date.between(start, end))
         .all()
     )
@@ -285,3 +285,4 @@ def summary_report(
             "total_charter_hours": round(total_charter_hours, 2),
         },
     )
+

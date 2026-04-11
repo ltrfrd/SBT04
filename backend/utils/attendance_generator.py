@@ -19,12 +19,12 @@ from backend.models.associations import StudentRunAssignment  # Runtime assignme
 from backend.utils.student_bus_absence import has_student_bus_absence  # Absence check
 from backend.models import school as school_model  # School model
 from backend.models.school_attendance_verification import SchoolAttendanceVerification  # Read confirmation state
-from backend.utils.company_scope import get_route_access_level
+from backend.utils.operator_scope import get_route_access_level
 from backend.utils.route_driver_assignment import get_route_driver_name, resolve_route_driver_assignment
 
-def driver_summary(db: Session, driver_id: int, company_id: int | None = None) -> dict:
+def driver_summary(db: Session, driver_id: int, operator_id: int | None = None) -> dict:
     drv = db.get(driver_model.Driver, driver_id)  # Load driver
-    if not drv or (company_id is not None and drv.company_id != company_id):
+    if not drv or (operator_id is not None and drv.operator_id != operator_id):
         return {"error": "Driver not found"}  # Return stable missing-driver payload
 
     total_runs = (
@@ -68,9 +68,9 @@ def driver_summary(db: Session, driver_id: int, company_id: int | None = None) -
     }  # Preserve existing payload shape
 
 
-def route_summary(db: Session, route_id: int, company_id: int | None = None) -> dict:
+def route_summary(db: Session, route_id: int, operator_id: int | None = None) -> dict:
     r = db.get(route_model.Route, route_id)  # Load route
-    if not r or (company_id is not None and get_route_access_level(r, company_id) is None):
+    if not r or (operator_id is not None and get_route_access_level(r, operator_id) is None):
         return {"error": "Route not found"}  # Return stable missing-route payload
     assigned_bus = r.bus  # Current assigned bus when present
 
@@ -138,7 +138,7 @@ def route_summary(db: Session, route_id: int, company_id: int | None = None) -> 
     }  # Preserve existing payload shape
 
 
-def payroll_summary(db: Session, start: date, end: date, company_id: int | None = None) -> list:
+def payroll_summary(db: Session, start: date, end: date, operator_id: int | None = None) -> list:
     query = (
         db.query(dispatch_model.Payroll)
         .filter(
@@ -146,11 +146,11 @@ def payroll_summary(db: Session, start: date, end: date, company_id: int | None 
             dispatch_model.Payroll.work_date <= end,
         )
     )
-    if company_id is not None:
+    if operator_id is not None:
         query = (
             query
             .join(driver_model.Driver, driver_model.Driver.id == dispatch_model.Payroll.driver_id)
-            .filter(driver_model.Driver.company_id == company_id)
+            .filter(driver_model.Driver.operator_id == operator_id)
         )
     records = query.all()  # Load payroll rows inside the requested range
 
@@ -173,14 +173,14 @@ def generate_attendance(
     ref_id: int = None,
     start: date = None,
     end: date = None,
-    company_id: int | None = None,
+    operator_id: int | None = None,
 ):
     if attendance_type == "driver" and ref_id:
-        return driver_summary(db, ref_id, company_id=company_id)  # Return driver attendance summary
+        return driver_summary(db, ref_id, operator_id=operator_id)  # Return driver attendance summary
     if attendance_type == "route" and ref_id:
-        return route_summary(db, ref_id, company_id=company_id)  # Return route attendance summary
+        return route_summary(db, ref_id, operator_id=operator_id)  # Return route attendance summary
     if attendance_type == "payroll" and start and end:
-        return payroll_summary(db, start, end, company_id=company_id)  # Return payroll attendance summary
+        return payroll_summary(db, start, end, operator_id=operator_id)  # Return payroll attendance summary
     if attendance_type == "run" and ref_id:
         run = db.get(Run, ref_id)  # Load run for run-level attendance
         if not run:
@@ -214,9 +214,9 @@ def generate_attendance(
             absence_lookup,
         )  # Return run attendance summary
     if attendance_type == "date" and start and end:               # Date-based attendance request
-        return date_summary(db, start, end, company_id=company_id)                       # Generate daily attendance summary
+        return date_summary(db, start, end, operator_id=operator_id)                       # Generate daily attendance summary
     if attendance_type == "school" and ref_id:                   # School-based attendance request
-        return school_summary(db, ref_id, company_id=company_id)                        # Generate school attendance summary
+        return school_summary(db, ref_id, operator_id=operator_id)                        # Generate school attendance summary
     return {"error": "Invalid attendance type or parameters"}  # Preserve error-style contract
     
 
@@ -315,7 +315,7 @@ def run_attendance_summary(db, run, assignments, events, absence_lookup):
 # - Date attendance summary
 # - Build attendance output for one requested date window
 # -----------------------------------------------------------
-def date_summary(db: Session, start: date, end: date, company_id: int | None = None):        # Build attendance for a specific date
+def date_summary(db: Session, start: date, end: date, operator_id: int | None = None):        # Build attendance for a specific date
     day_start = datetime.combine(start, time.min)             # Start of requested day
     day_end = datetime.combine(end, time.max)                 # End of requested day
 
@@ -325,10 +325,10 @@ def date_summary(db: Session, start: date, end: date, company_id: int | None = N
         .filter(Run.start_time <= day_end)                    # Upper datetime boundary
         .all()                                                # Execute query
     )
-    if company_id is not None:
+    if operator_id is not None:
         runs = [
             run for run in runs
-            if run.route and get_route_access_level(run.route, company_id) is not None
+            if run.route and get_route_access_level(run.route, operator_id) is not None
         ]
 
     results = []                                              # Collect run attendance summaries
@@ -385,13 +385,13 @@ def normalize_school_status(status: str) -> str:
 # - School attendance summary
 # - Build school-facing attendance grouped by route and run
 # -----------------------------------------------------------
-def school_summary(db: Session, school_id: int, company_id: int | None = None):  # Build attendance for a school
+def school_summary(db: Session, school_id: int, operator_id: int | None = None):  # Build attendance for a school
     school = (  # Load school once for final payload
         db.query(school_model.School)
         .filter(school_model.School.id == school_id)
         .first()
     )
-    if not school or (company_id is not None and school.company_id != company_id):
+    if not school or (operator_id is not None and school.operator_id != operator_id):
         return {"error": "School not found"}
 
     routes = (  # Load routes serving the school
@@ -400,10 +400,10 @@ def school_summary(db: Session, school_id: int, company_id: int | None = None): 
         .filter(route_model.route_schools.c.school_id == school_id)  # Keep only this school's routes
         .all()  # Execute query
     )
-    if company_id is not None:
+    if operator_id is not None:
         routes = [
             route for route in routes
-            if get_route_access_level(route, company_id) is not None
+            if get_route_access_level(route, operator_id) is not None
         ]
 
     results = []  # Collect run attendance summaries
@@ -584,8 +584,8 @@ def school_summary(db: Session, school_id: int, company_id: int | None = None): 
 # - School route navigation summary
 # - Returns routes assigned to one school
 # -----------------------------------------------------------
-def school_routes_summary(db: Session, school_id: int, company_id: int | None = None):
-    school_data = school_summary(db, school_id, company_id=company_id)  # Reuse existing school attendance payload
+def school_routes_summary(db: Session, school_id: int, operator_id: int | None = None):
+    school_data = school_summary(db, school_id, operator_id=operator_id)  # Reuse existing school attendance payload
 
     if school_data.get("school_name") is None:  # Guard unknown school requests
         return {"error": "School not found"}
@@ -602,8 +602,8 @@ def school_routes_summary(db: Session, school_id: int, company_id: int | None = 
 # - School route run summary
 # - Returns runs for one selected school route
 # -----------------------------------------------------------
-def school_route_runs_summary(db: Session, school_id: int, route_id: int, company_id: int | None = None):
-    school_data = school_summary(db, school_id, company_id=company_id)  # Reuse existing grouped payload
+def school_route_runs_summary(db: Session, school_id: int, route_id: int, operator_id: int | None = None):
+    school_data = school_summary(db, school_id, operator_id=operator_id)  # Reuse existing grouped payload
 
     if school_data.get("school_name") is None:  # Guard unknown school requests
         return {"error": "School not found"}
@@ -628,8 +628,8 @@ def school_route_runs_summary(db: Session, school_id: int, route_id: int, compan
 # - School single run summary
 # - Returns one selected run for one school
 # -----------------------------------------------------------
-def school_single_run_summary(db: Session, school_id: int, run_id: int, company_id: int | None = None):
-    school_data = school_summary(db, school_id, company_id=company_id)  # Reuse existing grouped payload
+def school_single_run_summary(db: Session, school_id: int, run_id: int, operator_id: int | None = None):
+    school_data = school_summary(db, school_id, operator_id=operator_id)  # Reuse existing grouped payload
 
     if school_data.get("school_name") is None:  # Guard unknown school requests
         return {"error": "School not found"}
@@ -649,3 +649,4 @@ def school_single_run_summary(db: Session, school_id: int, run_id: int, company_
             }
 
     return {"error": "Run not found for school"}  # Reject unrelated runs
+

@@ -151,7 +151,7 @@ def test_login_logout(client):
 
     r = client.post("/login", json={"driver_id": 1, "pin": "1234"})
     assert r.status_code == 200
-    assert r.json()["company_id"] == 1
+    assert r.json()["operator_id"] == 1
 
     r = client.get("/driver_run/1")
     assert r.status_code == 200
@@ -4340,4 +4340,5 @@ def test_student_assignment_update_endpoint_moves_planning_state_safely(client, 
         assert assignments_by_run[target_run.json()["id"]].stop_id == target_stop.json()["id"]
         assert assignments_by_run[completed_run.json()["id"]].stop_id == completed_stop.json()["id"]
      
+
 
