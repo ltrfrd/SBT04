@@ -334,6 +334,71 @@ def test_create_route_under_district_context_ignores_payload_district_id(client,
         assert route.district_id != payload_district_id
 
 
+def test_route_duplicate_within_same_district_fails(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "Duplicate District Route")
+
+    first = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "DISTRICT-DUP-ROUTE"},
+    )
+    assert first.status_code == 201
+
+    duplicate = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "DISTRICT-DUP-ROUTE"},
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"] == "Route number already exists"
+
+
+def test_same_route_number_across_different_districts_succeeds(client, db_engine):
+    district_one_id = _create_district_in_db(db_engine, "Route District One")
+    district_two_id = _create_district_in_db(db_engine, "Route District Two")
+
+    first = client.post(
+        f"/districts/{district_one_id}/routes",
+        json={"route_number": "CROSS-DISTRICT-ROUTE"},
+    )
+    assert first.status_code == 201
+
+    second = client.post(
+        f"/districts/{district_two_id}/routes",
+        json={"route_number": "CROSS-DISTRICT-ROUTE"},
+    )
+    assert second.status_code == 201
+
+
+def test_legacy_route_duplicate_fallback_still_works_without_district(client):
+    first = client.post(
+        "/routes/",
+        json={"route_number": "LEGACY-DUP-ROUTE"},
+    )
+    assert first.status_code in (200, 201)
+
+    duplicate = client.post(
+        "/routes/",
+        json={"route_number": "LEGACY-DUP-ROUTE"},
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"] == "Route number already exists"
+
+
+def test_district_route_and_legacy_route_can_share_route_number(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "Mixed Scope Route District")
+
+    district_route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "MIXED-SCOPE-ROUTE"},
+    )
+    assert district_route.status_code == 201
+
+    legacy_route = client.post(
+        "/routes/",
+        json={"route_number": "MIXED-SCOPE-ROUTE"},
+    )
+    assert legacy_route.status_code in (200, 201)
+
+
 def test_create_route_with_matching_school_district_succeeds(client, db_engine):
     district_id = _create_district_in_db(db_engine, "Route School Match District")
 

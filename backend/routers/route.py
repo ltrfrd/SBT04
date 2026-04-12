@@ -48,6 +48,19 @@ router = APIRouter(prefix="/routes", tags=["Routes"])
 district_router = APIRouter(prefix="/districts", tags=["Routes"])
 
 
+def _route_identity_query(
+    *,
+    db: Session,
+    route_number: str,
+    district_id: int | None,
+    operator_id: int,
+):
+    query = db.query(Route).filter(Route.route_number == route_number)
+    if district_id is not None:
+        return query.filter(Route.district_id == district_id)
+    return query.filter(Route.district_id.is_(None)).filter(Route.operator_id == operator_id)
+
+
 def _planning_relationship_matches(
     *,
     primary_district_id: int | None,
@@ -87,6 +100,25 @@ def _validate_route_school_links(
             route_operator_id=route_operator_id,
             school=school,
         )
+
+
+def _get_conflicting_route_or_none(
+    *,
+    db: Session,
+    route_number: str,
+    district_id: int | None,
+    operator_id: int,
+    exclude_route_id: int | None = None,
+) -> Route | None:
+    query = _route_identity_query(
+        db=db,
+        route_number=route_number,
+        district_id=district_id,
+        operator_id=operator_id,
+    )
+    if exclude_route_id is not None:
+        query = query.filter(Route.id != exclude_route_id)
+    return query.first()
 
 
 # -----------------------------------------------------------
@@ -325,11 +357,11 @@ def create_route(
     payload = route.model_dump(exclude_unset=True)               # Read validated route payload
     school_ids = payload.pop("school_ids", [])                   # Separate school assignment ids
 
-    existing_route = (
-        db.query(Route)
-        .filter(Route.route_number == payload["route_number"])   # Enforce unique route number only
-        .filter(Route.operator_id == operator.id)
-        .first()
+    existing_route = _get_conflicting_route_or_none(
+        db=db,
+        route_number=payload["route_number"],
+        district_id=payload.get("district_id"),
+        operator_id=operator.id,
     )
     if existing_route:
         raise HTTPException(
@@ -396,11 +428,11 @@ def create_route_for_district(
     payload = route.model_dump(exclude_unset=True, exclude={"district_id"})
     school_ids = payload.pop("school_ids", [])
 
-    existing_route = (
-        db.query(Route)
-        .filter(Route.route_number == payload["route_number"])
-        .filter(Route.operator_id == operator.id)
-        .first()
+    existing_route = _get_conflicting_route_or_none(
+        db=db,
+        route_number=payload["route_number"],
+        district_id=district_id,
+        operator_id=operator.id,
     )
     if existing_route:
         raise HTTPException(
@@ -551,15 +583,19 @@ def update_route(
     # - Protect route_number uniqueness on update
     # - Exclude current route from duplicate detection
     # -----------------------------------------------------------
-    new_route_number = update_data.get("route_number")                              # Proposed route number from request
+    new_route_number = update_data.get("route_number", route.route_number)          # Proposed route number from request
+    target_district_id = update_data.get("district_id", route.district_id)
 
-    if new_route_number and new_route_number != route.route_number:                 # Check only when route number changes
-        existing_route = (
-            db.query(Route)
-            .filter(Route.route_number == new_route_number)                         # Find matching route number
-            .filter(Route.operator_id == operator.id)
-            .filter(Route.id != route_id)                                           # Exclude current route
-            .first()
+    if (
+        new_route_number != route.route_number
+        or target_district_id != route.district_id
+    ):
+        existing_route = _get_conflicting_route_or_none(
+            db=db,
+            route_number=new_route_number,
+            district_id=target_district_id,
+            operator_id=operator.id,
+            exclude_route_id=route_id,
         )
 
         if existing_route:                                                          # Duplicate route number found
@@ -581,7 +617,7 @@ def update_route(
             raise HTTPException(status_code=404, detail="School not found")
 
     _validate_route_school_links(
-        route_district_id=update_data.get("district_id", route.district_id),
+        route_district_id=target_district_id,
         route_operator_id=route.operator_id,
         schools=schools if schools is not None else list(route.schools),
     )
