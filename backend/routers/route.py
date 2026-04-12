@@ -8,6 +8,7 @@ from database import get_db
 from backend import schemas
 from backend.models.associations import RouteDriverAssignment
 from backend.models.bus import Bus
+from backend.models.district import District
 from backend.models.operator import Operator, OperatorRouteAccess
 from backend.models.driver import Driver
 from backend.models.route import Route
@@ -43,6 +44,7 @@ from backend.utils.operator_scope import get_route_access_level
 from datetime import datetime, timezone
 
 router = APIRouter(prefix="/routes", tags=["Routes"])
+district_router = APIRouter(prefix="/districts", tags=["Routes"])
 
 
 # -----------------------------------------------------------
@@ -311,6 +313,76 @@ def create_route(
     db.commit()                                                  # Persist route and optional schools
     db.refresh(db_route)                                         # Reload committed route
     return _serialize_route(db_route)                            # Return route summary
+
+
+@district_router.post(
+    "/{district_id}/routes",
+    response_model=RouteOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create route under district",
+    description=(
+        "Create a route under the selected district context. "
+        "The path district_id is authoritative and operator context is preserved for compatibility."
+    ),
+    response_description="Created route",
+    responses={
+        409: {
+            "description": "Route number already exists",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Route number already exists"}
+                }
+            },
+        }
+    },
+)
+def create_route_for_district(
+    district_id: int,
+    route: RouteCreate,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    district = db.get(District, district_id)
+    if not district:
+        raise HTTPException(status_code=404, detail="District not found")
+
+    payload = route.model_dump(exclude_unset=True, exclude={"district_id"})
+    school_ids = payload.pop("school_ids", [])
+
+    existing_route = (
+        db.query(Route)
+        .filter(Route.route_number == payload["route_number"])
+        .filter(Route.operator_id == operator.id)
+        .first()
+    )
+    if existing_route:
+        raise HTTPException(
+            status_code=409,
+            detail="Route number already exists",
+        )
+
+    db_route = Route(
+        **payload,
+        district_id=district_id,
+        operator_id=operator.id,
+    )
+    db.add(db_route)
+    db.flush()
+
+    if school_ids:
+        schools = (
+            db.query(School)
+            .filter(School.operator_id == operator.id)
+            .filter(School.id.in_(school_ids))
+            .all()
+        )
+        if len(schools) != len(set(school_ids)):
+            raise HTTPException(status_code=404, detail="School not found")
+        db_route.schools = schools
+
+    db.commit()
+    db.refresh(db_route)
+    return _serialize_route(db_route)
 
 
 # -----------------------------------------------------------

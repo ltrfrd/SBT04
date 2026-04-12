@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.district import District
 from backend.models.driver import Driver
+from backend.models.route import Route
 from backend.models.school import School
 from tests.conftest import TEST_DRIVER_PIN, _create_operator_in_db, _create_driver_in_db
 
@@ -274,6 +275,53 @@ def test_create_school_under_district_context_ignores_payload_district_id(client
         assert school is not None
         assert school.district_id == path_district_id
         assert school.district_id != payload_district_id
+
+
+def test_create_route_under_district_context_sets_district_and_operator(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "Route District Alpha")
+
+    response = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "DISTRICT-ROUTE-1"},
+    )
+    assert response.status_code == 201
+
+    route_id = response.json()["id"]
+    with Session(db_engine) as db:
+        route = db.get(Route, route_id)
+        assert route is not None
+        assert route.district_id == district_id
+        assert route.operator_id == 1
+
+
+def test_create_route_under_district_context_returns_404_for_missing_district(client):
+    response = client.post(
+        "/districts/999999/routes",
+        json={"route_number": "MISSING-DISTRICT-ROUTE"},
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "District not found"
+
+
+def test_create_route_under_district_context_ignores_payload_district_id(client, db_engine):
+    path_district_id = _create_district_in_db(db_engine, "Route Path District")
+    payload_district_id = _create_district_in_db(db_engine, "Route Payload District")
+
+    response = client.post(
+        f"/districts/{path_district_id}/routes",
+        json={
+            "route_number": "PATH-WINS-ROUTE",
+            "district_id": payload_district_id,
+        },
+    )
+    assert response.status_code == 201
+
+    route_id = response.json()["id"]
+    with Session(db_engine) as db:
+        route = db.get(Route, route_id)
+        assert route is not None
+        assert route.district_id == path_district_id
+        assert route.district_id != payload_district_id
 
 
 # ---------------------------------------------------------------------------
