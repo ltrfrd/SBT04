@@ -193,31 +193,39 @@ def get_run_reports(
 
 
 # -----------------------------------------------------------
-# - Driver work summary
+# - Driver dispatch summary
 # - Return dispatch work summary for a date range
 # -----------------------------------------------------------
 @attendance_router.get(
     "/payroll",
     status_code=status.HTTP_200_OK,
-    summary="Driver work summary",
-    description="Return driver work summary for the selected date range.",
-    response_description="Driver work summary",
+    summary="Driver dispatch summary",
+    description="Return driver dispatch summary for the selected date range.",
+    response_description="Driver dispatch summary",
     deprecated=True,
 )
 @router.get(
-    "/payroll",                                                # Endpoint path
+    "/payroll",                                                # Deprecated endpoint path
     status_code=status.HTTP_200_OK,                            # HTTP 200 on success
-    summary="Driver work summary",                             # Swagger title
-    description="Return driver work summary for the selected date range.",  # Swagger description
-    response_description="Driver work summary",                # Swagger response text
+    summary="Driver dispatch summary",                         # Swagger title
+    description="Deprecated alias. Return driver dispatch summary for the selected date range.",  # Swagger description
+    response_description="Driver dispatch summary",            # Swagger response text
+    deprecated=True,
 )
-def get_driver_work_summary(
+@router.get(
+    "/dispatch-summary",                                       # Canonical endpoint path
+    status_code=status.HTTP_200_OK,                            # HTTP 200 on success
+    summary="Driver dispatch summary",                         # Swagger title
+    description="Return driver dispatch summary for the selected date range.",  # Swagger description
+    response_description="Driver dispatch summary",            # Swagger response text
+)
+def get_driver_dispatch_summary(
     start: date,
     end: date,
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    """Return dispatch summary for all drivers within the given date range."""  # Internal docstring
+    """Return dispatch summary for all drivers within the given date range."""
     reports_data = reports_generator.dispatch_summary(db, start, end, operator_id=operator.id)
     if not reports_data:
         raise HTTPException(status_code=404, detail="No dispatch records found in range")  # Preserve empty-range behavior
@@ -570,21 +578,20 @@ def get_absences_by_run(
 # - Return present or absent status for school students
 # -----------------------------------------------------------
 @attendance_router.get(
-    "/school/{school_id}/reports/{target_date}",
-    status_code=status.HTTP_200_OK,
-    summary="School reports by date",
-    description="Return present or absent status for school students on one date.",
-    response_description="School reports by date",
-    deprecated=True,
-)
-@router.get(
     "/school/{school_id}/attendance/{target_date}",
     status_code=status.HTTP_200_OK,
     summary="School reports by date",
     description="Return present or absent status for school students on one date.",
     response_description="School reports by date",
     deprecated=True,
-    include_in_schema=False,
+)
+@attendance_router.get(
+    "/school/{school_id}/reports/{target_date}",
+    status_code=status.HTTP_200_OK,
+    summary="School reports by date",
+    description="Return present or absent status for school students on one date.",
+    response_description="School reports by date",
+    deprecated=True,
 )
 @router.get(
     "/school/{school_id}/reports/{target_date}",
@@ -873,6 +880,7 @@ def update_school_status(                                  # Handler function
         "school_status": payload.status
     }    
 
+get_driver_work_summary = get_driver_dispatch_summary
 get_driver_attendance = get_driver_reports
 get_route_attendance = get_route_reports
 get_run_attendance = get_run_reports

@@ -22,7 +22,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)  # Ensure repo root is importable
 
 TEST_DRIVER_PIN = "1234"
-TEST_DEFAULT_DRIVER_EMAIL = "default-driver@sbt-tests.internal"
+TEST_DEFAULT_DRIVER_EMAIL = "default-driver@fleetos-tests.internal"
 
 
 # =============================================================================
@@ -150,7 +150,7 @@ def pytest_ignore_collect(collection_path, config):
     name = getattr(collection_path, "name", None) or os.path.basename(str(collection_path))
 
     if str(collection_path).startswith(os.path.join(PROJECT_ROOT, "tests")):
-        if name.startswith("sbt04-tests-") or name.startswith("pytest_"):
+        if "-tests-" in name or name.startswith("pytest_"):
             return True
 
     return False
@@ -162,9 +162,9 @@ def pytest_ignore_collect(collection_path, config):
 
 @pytest.fixture()
 def db_engine():
-    """Create a temporary SQLite engine for this test (isolated from sbt.db)."""
+    """Create a temporary SQLite engine for this test (isolated from fleetos.db)."""
 
-    fd, test_db_path = tempfile.mkstemp(prefix="sbt04-tests-", suffix=".db", dir=PROJECT_ROOT)  # Stable per-test DB file without pytest tmp_path
+    fd, test_db_path = tempfile.mkstemp(prefix="fleetos-tests-", suffix=".db", dir=PROJECT_ROOT)  # Stable per-test DB file without pytest tmp_path
     os.close(fd)
 
     engine = create_engine(

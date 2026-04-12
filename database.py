@@ -36,7 +36,7 @@ load_dotenv()                                               # Read .env and popu
 # Database URL
 # -----------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Project root directory
-DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{os.path.join(BASE_DIR, 'sbt.db')}")
+DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{os.path.join(BASE_DIR, 'fleetos.db')}")
 
 # -----------------------------------------------------------
 # Engine

@@ -11,8 +11,9 @@ from .reports_generator import (
     run_reports_summary,
     run_attendance_summary,
     school_reports_summary,
-    school_summary,
 )
+
+school_summary = school_reports_summary  # Deprecated: use school_reports_summary.
 
 
 __all__ = [

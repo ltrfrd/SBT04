@@ -220,14 +220,14 @@ def generate_reports(
     return {"error": "Invalid reports type or parameters"}  # Preserve error-style contract
 
 
-generate_attendance = generate_reports  # Backward-compatible alias during the rename phase
+generate_attendance = generate_reports  # Deprecated: use generate_reports.
 
 # -----------------------------------------------------------
 # Student Reports Status
 # - Derive unified reports state from run events and absence
 # -----------------------------------------------------------
 
-def classify_student_attendance(assignment, events, absence_lookup):
+def classify_student_status(assignment, events, absence_lookup):
     """Return reports status for a student assignment."""  # Unified reports state
 
     student_id = assignment.student_id  # Student identifier
@@ -259,7 +259,7 @@ def run_reports_summary(db, run, assignments, events, absence_lookup):
     results = []  # Output list
 
     for assignment in assignments:
-        status = classify_student_attendance(assignment, events, absence_lookup)  # Determine status
+        status = classify_student_status(assignment, events, absence_lookup)  # Determine status
 
         results.append(
             {
@@ -474,7 +474,7 @@ def school_reports_summary(db: Session, school_id: int, operator_id: int | None 
                 assignment = assignment_by_student_id.get(student.id)            # Runtime assignment if present
 
                 if assignment:                                                   # Use runtime state when assigned
-                    operational_status = classify_student_attendance(
+                    operational_status = classify_student_status(
                         assignment,                                              # Runtime assignment
                         events,                                                  # Run event history
                         absence_lookup,                                          # Planned absence lookup
@@ -651,6 +651,6 @@ def school_single_run_summary(db: Session, school_id: int, run_id: int, operator
     return {"error": "Run not found for school"}  # Reject unrelated runs
 
 
+# Deprecated: legacy attendance imports should use backend.utils.attendance_generator.run_attendance_summary.
 run_attendance_summary = run_reports_summary
-school_summary = school_reports_summary
 

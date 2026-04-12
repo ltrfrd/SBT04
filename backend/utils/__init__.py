@@ -1,5 +1,5 @@
 # ===========================================================
-# backend/utils/__init__.py — BST Utils Index
+# backend/utils/__init__.py - FleetOS Utils Index
 # -----------------------------------------------------------
 # Re-exports utility modules for clean imports
 # ===========================================================
@@ -9,7 +9,6 @@ from .reports_generator import (
     route_summary,
     dispatch_summary,
     generate_reports,
-    generate_attendance,
 )
 
 # Optional: Add future utils here
@@ -21,5 +20,4 @@ __all__ = [
     "route_summary",
     "dispatch_summary",
     "generate_reports",
-    "generate_attendance",
 ]

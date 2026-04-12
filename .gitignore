@@ -74,7 +74,7 @@ tests/pytest_tmp_api_one/
 tests/pytest_tmp_progress_one/
 tests/pytest_tmp_runfix/
 tests/pytest_tmp_run_2/
-tests/sbt04-tests-*/
+tests/*-tests-*/
 tatus
 
 # Logs / temp
