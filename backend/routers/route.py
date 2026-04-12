@@ -1,6 +1,7 @@
 from typing import List
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Response, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from database import get_db
@@ -409,8 +410,10 @@ def get_routes(
             selectinload(Route.runs).selectinload(run_model.Run.student_assignments),  # Load runtime student counts
         )
         .filter(
-            (Route.operator_id == operator.id)
-            | Route.operator_access.any(OperatorRouteAccess.operator_id == operator.id)
+            or_(
+                Route.operator_id == operator.id,
+                Route.district_id.is_not(None),
+            )
         )
         .order_by(Route.route_number.asc(), Route.id.asc())      # Keep route list stable
         .all()

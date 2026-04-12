@@ -447,6 +447,58 @@ def test_school_list_returns_combined_operator_and_district_owned_schools(client
     assert district_school.json()["id"] in school_ids
 
 
+def test_route_list_still_returns_operator_owned_routes(client):
+    owned_route = client.post(
+        "/routes/",
+        json={"route_number": "OWNED-ROUTE-VISIBLE"},
+    )
+    assert owned_route.status_code in (200, 201)
+
+    routes = client.get("/routes/")
+    assert routes.status_code == 200
+
+    route_ids = {route["id"] for route in routes.json()}
+    assert owned_route.json()["id"] in route_ids
+
+
+def test_route_list_returns_district_owned_routes(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "Visible District Route")
+
+    district_route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "DISTRICT-ROUTE-VISIBLE"},
+    )
+    assert district_route.status_code == 201
+
+    routes = client.get("/routes/")
+    assert routes.status_code == 200
+
+    route_ids = {route["id"] for route in routes.json()}
+    assert district_route.json()["id"] in route_ids
+
+
+def test_route_list_returns_combined_operator_and_district_owned_routes(client, db_engine):
+    owned_route = client.post(
+        "/routes/",
+        json={"route_number": "COMBINED-OWNED-ROUTE"},
+    )
+    assert owned_route.status_code in (200, 201)
+
+    district_id = _create_district_in_db(db_engine, "Combined District Route")
+    district_route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "COMBINED-DISTRICT-ROUTE"},
+    )
+    assert district_route.status_code == 201
+
+    routes = client.get("/routes/")
+    assert routes.status_code == 200
+
+    route_ids = {route["id"] for route in routes.json()}
+    assert owned_route.json()["id"] in route_ids
+    assert district_route.json()["id"] in route_ids
+
+
 # ---------------------------------------------------------------------------
 # C1: Pretrip endpoints are operator-scoped
 # ---------------------------------------------------------------------------
