@@ -36,7 +36,7 @@ from backend.models.school import School                        # School model
 from backend.models.student_bus_absence import StudentBusAbsence  # Planned absence model
 from backend.models.associations import StudentRunAssignment       # Runtime student assignments
 from backend.models.route import Route                                    # Route model
-from backend.models.school_attendance_verification import SchoolAttendanceVerification  # Confirmation model
+from backend.models import SchoolAttendanceVerification  # Confirmation model
 from backend.models.operator import Operator
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_operator_scoped_record_or_404

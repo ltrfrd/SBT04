@@ -18,7 +18,7 @@ from backend.models.run_event import RunEvent  # Run event history
 from backend.models.associations import StudentRunAssignment  # Runtime assignments
 from backend.utils.student_bus_absence import has_student_bus_absence  # Absence check
 from backend.models import school as school_model  # School model
-from backend.models.school_attendance_verification import SchoolAttendanceVerification  # Read confirmation state
+from backend.models import SchoolAttendanceVerification  # School confirmation state
 from backend.utils.operator_scope import get_route_access_level
 from backend.utils.route_driver_assignment import get_route_driver_name, resolve_route_driver_assignment
 
@@ -179,8 +179,8 @@ def generate_reports(
         return driver_summary(db, ref_id, operator_id=operator_id)  # Return driver reports summary
     if reports_type == "route" and ref_id:
         return route_summary(db, ref_id, operator_id=operator_id)  # Return route reports summary
-    if reports_type == "payroll" and start and end:
-        return dispatch_summary(db, start, end, operator_id=operator_id)  # Compatibility path for deprecated attendance type
+    if reports_type == "dispatch" and start and end:
+        return dispatch_summary(db, start, end, operator_id=operator_id)  # Return dispatch summary
     if reports_type == "run" and ref_id:
         run = db.get(Run, ref_id)  # Load run for run-level reports
         if not run:
@@ -218,9 +218,6 @@ def generate_reports(
     if reports_type == "school" and ref_id:
         return school_reports_summary(db, ref_id, operator_id=operator_id)
     return {"error": "Invalid reports type or parameters"}  # Preserve error-style contract
-
-
-generate_attendance = generate_reports  # Deprecated: use generate_reports.
 
 # -----------------------------------------------------------
 # Student Reports Status
@@ -650,7 +647,4 @@ def school_single_run_summary(db: Session, school_id: int, run_id: int, operator
 
     return {"error": "Run not found for school"}  # Reject unrelated runs
 
-
-# Deprecated: legacy attendance imports should use backend.utils.attendance_generator.run_attendance_summary.
-run_attendance_summary = run_reports_summary
 
