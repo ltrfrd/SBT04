@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from database import get_db
 from backend import schemas
+from backend.models.district import District
 from backend.models.operator import Operator
 from backend.models import associations as assoc_model
 from backend.models import route as route_model
@@ -30,6 +31,10 @@ from backend.utils.run_setup import (
 
 router = APIRouter(
     prefix="/students",
+    tags=["Students"],
+)
+district_router = APIRouter(
+    prefix="/districts",
     tags=["Students"],
 )
 
@@ -252,6 +257,56 @@ def create_student(
     payload["school_id"] = school.id
     new_student = student_model.Student(
         **payload,
+        operator_id=operator.id,
+    )
+    db.add(new_student)
+    db.commit()
+    db.refresh(new_student)
+    return new_student
+
+
+@district_router.post(
+    "/{district_id}/students",
+    response_model=schemas.StudentOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create student under district",
+    description=(
+        "Create a student under the selected district context. "
+        "The path district_id is authoritative and operator context is preserved for compatibility."
+    ),
+    response_description="Created student",
+)
+def create_student_for_district(
+    district_id: int,
+    student: schemas.StudentCompatibilityCreate,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    district = db.get(District, district_id)
+    if not district:
+        raise HTTPException(status_code=404, detail="District not found")
+
+    school = get_operator_scoped_record_or_404(
+        db=db,
+        model=school_model.School,
+        record_id=student.school_id,
+        operator_id=operator.id,
+        detail="School not found",
+    )
+
+    _validate_compatibility_student_create_target(
+        school_id=student.school_id,
+        route_id=student.route_id,
+        stop_id=student.stop_id,
+        operator_id=operator.id,
+        db=db,
+    )
+
+    payload = student.model_dump(exclude={"district_id"})
+    payload["school_id"] = school.id
+    new_student = student_model.Student(
+        **payload,
+        district_id=district_id,
         operator_id=operator.id,
     )
     db.add(new_student)

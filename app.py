@@ -70,6 +70,7 @@ app.include_router(bus.router)  # Register bus endpoints
 app.include_router(school.router)  # Register school endpoints
 app.include_router(school.district_router)  # Register district-scoped school creation endpoint
 app.include_router(student.router)  # Register student endpoints
+app.include_router(student.district_router)  # Register district-scoped student creation endpoint
 app.include_router(route.router)  # Register route endpoints
 app.include_router(route.district_router)  # Register district-scoped route creation endpoint
 app.include_router(stop.router)  # Register stop endpoints

@@ -13,6 +13,7 @@ from backend.models.district import District
 from backend.models.driver import Driver
 from backend.models.route import Route
 from backend.models.school import School
+from backend.models.student import Student
 from tests.conftest import TEST_DRIVER_PIN, _create_operator_in_db, _create_driver_in_db
 
 
@@ -322,6 +323,76 @@ def test_create_route_under_district_context_ignores_payload_district_id(client,
         assert route is not None
         assert route.district_id == path_district_id
         assert route.district_id != payload_district_id
+
+
+def test_create_student_under_district_context_sets_district_and_operator(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "Student District Alpha")
+
+    school_response = client.post(
+        "/schools/",
+        json={"name": "Student District School", "address": "10 Student Way"},
+    )
+    assert school_response.status_code == 201
+    school_id = school_response.json()["id"]
+
+    response = client.post(
+        f"/districts/{district_id}/students",
+        json={"name": "District Student", "grade": "4", "school_id": school_id},
+    )
+    assert response.status_code == 201
+
+    student_id = response.json()["id"]
+    with Session(db_engine) as db:
+        student = db.get(Student, student_id)
+        assert student is not None
+        assert student.district_id == district_id
+        assert student.operator_id == 1
+
+
+def test_create_student_under_district_context_returns_404_for_missing_district(client):
+    school_response = client.post(
+        "/schools/",
+        json={"name": "Missing District Student School", "address": "11 Student Way"},
+    )
+    assert school_response.status_code == 201
+    school_id = school_response.json()["id"]
+
+    response = client.post(
+        "/districts/999999/students",
+        json={"name": "Missing District Student", "grade": "5", "school_id": school_id},
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "District not found"
+
+
+def test_create_student_under_district_context_ignores_payload_district_id(client, db_engine):
+    path_district_id = _create_district_in_db(db_engine, "Student Path District")
+    payload_district_id = _create_district_in_db(db_engine, "Student Payload District")
+
+    school_response = client.post(
+        "/schools/",
+        json={"name": "Student Path School", "address": "12 Student Way"},
+    )
+    assert school_response.status_code == 201
+    school_id = school_response.json()["id"]
+
+    response = client.post(
+        f"/districts/{path_district_id}/students",
+        json={
+            "name": "Path Wins Student",
+            "grade": "6",
+            "school_id": school_id,
+            "district_id": payload_district_id,
+        },
+    )
+    assert response.status_code == 201
+
+    student_id = response.json()["id"]
+    with Session(db_engine) as db:
+        student = db.get(Student, student_id)
+        assert student is not None
+        assert student.district_id == path_district_id
+        assert student.district_id != payload_district_id
 
 
 # ---------------------------------------------------------------------------
