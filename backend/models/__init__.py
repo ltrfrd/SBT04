@@ -1,3 +1,4 @@
+from .district import District
 from .operator import Operator, OperatorRouteAccess
 from .driver import Driver
 from .bus import Bus
@@ -16,6 +17,7 @@ from .posttrip import PostTripInspection
 from .dispatch_alert import DispatchAlert
 __all__ = [
     "Driver",
+    "District",
     "Operator",
     "OperatorRouteAccess",
     "Bus",

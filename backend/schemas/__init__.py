@@ -24,6 +24,12 @@ from .driver import DriverCreate, DriverOut  # Driver creation and response sche
 
 
 # -------------------------------------------------------------------------
+# District schemas
+# -------------------------------------------------------------------------
+from .district import DistrictCreate, DistrictOut  # District creation and response schemas
+
+
+# -------------------------------------------------------------------------
 # School schemas
 # -------------------------------------------------------------------------
 from .school import SchoolCreate, SchoolOut  # School creation and response schemas
@@ -130,6 +136,9 @@ __all__ = [
 
     "DriverCreate",
     "DriverOut",
+
+    "DistrictCreate",
+    "DistrictOut",
 
     "SchoolCreate",
     "SchoolOut",

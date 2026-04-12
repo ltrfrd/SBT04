@@ -7,6 +7,7 @@ class Student(Base):
     __tablename__ = "students"
 
     id = Column(Integer, primary_key=True, index=True)
+    district_id = Column(Integer, ForeignKey("districts.id", ondelete="SET NULL"), nullable=True, index=True)
     operator_id = Column(Integer, ForeignKey("operators.id", ondelete="CASCADE"), nullable=False, index=True)
     name = Column(String(100), nullable=False)
     grade = Column(String(10))
@@ -17,6 +18,7 @@ class Student(Base):
     stop_id = Column(Integer, ForeignKey("stops.id", ondelete="SET NULL"), nullable=True)
     notification_distance_meters = Column(Integer, default=500)
 
+    district = relationship("District", back_populates="students")
     operator = relationship("Operator", back_populates="students")
     school = relationship("School", back_populates="students")
     route = relationship("Route", foreign_keys=[route_id])
