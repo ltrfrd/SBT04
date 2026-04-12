@@ -119,13 +119,20 @@ def get_school(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    return get_operator_scoped_record_or_404(
-        db=db,
-        model=school_model.School,
-        record_id=school_id,
-        operator_id=operator.id,
-        detail="School not found",
+    school = (
+        db.query(school_model.School)
+        .filter(school_model.School.id == school_id)
+        .filter(
+            or_(
+                school_model.School.operator_id == operator.id,
+                school_model.School.district_id.is_not(None),
+            )
+        )
+        .first()
     )
+    if not school:
+        raise HTTPException(status_code=404, detail="School not found")
+    return school
 
 
 @router.put(

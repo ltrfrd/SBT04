@@ -447,6 +447,38 @@ def test_school_list_returns_combined_operator_and_district_owned_schools(client
     assert district_school.json()["id"] in school_ids
 
 
+def test_school_detail_still_returns_operator_owned_school(client):
+    owned_school = client.post(
+        "/schools/",
+        json={"name": "Owned School Detail", "address": "24 School Way"},
+    )
+    assert owned_school.status_code == 201
+
+    school = client.get(f"/schools/{owned_school.json()['id']}")
+    assert school.status_code == 200
+    assert school.json()["id"] == owned_school.json()["id"]
+
+
+def test_school_detail_returns_district_owned_school(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "Detail District School")
+
+    district_school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "District School Detail", "address": "25 School Way"},
+    )
+    assert district_school.status_code == 201
+
+    school = client.get(f"/schools/{district_school.json()['id']}")
+    assert school.status_code == 200
+    assert school.json()["id"] == district_school.json()["id"]
+
+
+def test_school_detail_returns_404_for_missing_school(client):
+    school = client.get("/schools/999999")
+    assert school.status_code == 404
+    assert school.json()["detail"] == "School not found"
+
+
 def test_route_list_still_returns_operator_owned_routes(client):
     owned_route = client.post(
         "/routes/",
