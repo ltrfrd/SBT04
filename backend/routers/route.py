@@ -48,6 +48,47 @@ router = APIRouter(prefix="/routes", tags=["Routes"])
 district_router = APIRouter(prefix="/districts", tags=["Routes"])
 
 
+def _planning_relationship_matches(
+    *,
+    primary_district_id: int | None,
+    primary_operator_id: int,
+    secondary_district_id: int | None,
+    secondary_operator_id: int,
+) -> bool:
+    if primary_district_id is not None and secondary_district_id is not None:
+        return primary_district_id == secondary_district_id
+    return primary_operator_id == secondary_operator_id
+
+
+def _validate_route_school_planning_alignment(
+    *,
+    route_district_id: int | None,
+    route_operator_id: int,
+    school: School,
+) -> None:
+    if not _planning_relationship_matches(
+        primary_district_id=route_district_id,
+        primary_operator_id=route_operator_id,
+        secondary_district_id=school.district_id,
+        secondary_operator_id=school.operator_id,
+    ):
+        raise HTTPException(status_code=400, detail="School does not match route district")
+
+
+def _validate_route_school_links(
+    *,
+    route_district_id: int | None,
+    route_operator_id: int,
+    schools: list[School],
+) -> None:
+    for school in schools:
+        _validate_route_school_planning_alignment(
+            route_district_id=route_district_id,
+            route_operator_id=route_operator_id,
+            school=school,
+        )
+
+
 # -----------------------------------------------------------
 # - Route serializer
 # - Return stable route summary payloads with assignment context
@@ -309,6 +350,11 @@ def create_route(
         )
         if len(schools) != len(set(school_ids)):
             raise HTTPException(status_code=404, detail="School not found")
+        _validate_route_school_links(
+            route_district_id=payload.get("district_id"),
+            route_operator_id=operator.id,
+            schools=schools,
+        )
         db_route.schools = schools  # Attach requested schools
 
     db.commit()                                                  # Persist route and optional schools
@@ -379,6 +425,11 @@ def create_route_for_district(
         )
         if len(schools) != len(set(school_ids)):
             raise HTTPException(status_code=404, detail="School not found")
+        _validate_route_school_links(
+            route_district_id=district_id,
+            route_operator_id=operator.id,
+            schools=schools,
+        )
         db_route.schools = schools
 
     db.commit()
@@ -495,6 +546,7 @@ def update_route(
 
     update_data = route_in.model_dump(exclude_unset=True)
     school_ids = update_data.pop("school_ids", None)
+    schools = None
     # -----------------------------------------------------------
     # - Protect route_number uniqueness on update
     # - Exclude current route from duplicate detection
@@ -527,6 +579,14 @@ def update_route(
         )
         if len(schools) != len(set(school_ids)):
             raise HTTPException(status_code=404, detail="School not found")
+
+    _validate_route_school_links(
+        route_district_id=update_data.get("district_id", route.district_id),
+        route_operator_id=route.operator_id,
+        schools=schools if schools is not None else list(route.schools),
+    )
+
+    if school_ids is not None:
         route.schools = schools
 
     db.commit()

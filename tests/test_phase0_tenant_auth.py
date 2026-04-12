@@ -334,6 +334,62 @@ def test_create_route_under_district_context_ignores_payload_district_id(client,
         assert route.district_id != payload_district_id
 
 
+def test_create_route_with_matching_school_district_succeeds(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "Route School Match District")
+
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "Matched Route School", "address": "300 Match Way"},
+    )
+    assert school.status_code == 201
+
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "DISTRICT-MATCH-ROUTE", "school_ids": [school.json()["id"]]},
+    )
+    assert route.status_code == 201
+    assert school.json()["id"] in route.json()["school_ids"]
+
+
+def test_create_route_with_mismatched_school_district_fails(client, db_engine):
+    school_district_id = _create_district_in_db(db_engine, "Route School Mismatch A")
+    route_district_id = _create_district_in_db(db_engine, "Route School Mismatch B")
+
+    school = client.post(
+        f"/districts/{school_district_id}/schools",
+        json={"name": "Mismatched Route School", "address": "301 Mismatch Way"},
+    )
+    assert school.status_code == 201
+
+    route = client.post(
+        f"/districts/{route_district_id}/routes",
+        json={"route_number": "DISTRICT-MISMATCH-ROUTE", "school_ids": [school.json()["id"]]},
+    )
+    assert route.status_code == 400
+    assert route.json()["detail"] == "School does not match route district"
+
+
+def test_assign_route_to_school_with_mismatched_district_fails(client, db_engine):
+    school_district_id = _create_district_in_db(db_engine, "Assign Mismatch School District")
+    route_district_id = _create_district_in_db(db_engine, "Assign Mismatch Route District")
+
+    school = client.post(
+        f"/districts/{school_district_id}/schools",
+        json={"name": "Assign Mismatch School", "address": "302 Assign Way"},
+    )
+    assert school.status_code == 201
+
+    route = client.post(
+        f"/districts/{route_district_id}/routes",
+        json={"route_number": "ASSIGN-MISMATCH-ROUTE"},
+    )
+    assert route.status_code == 201
+
+    assign = client.post(f"/schools/{school.json()['id']}/assign_route/{route.json()['id']}")
+    assert assign.status_code == 400
+    assert assign.json()["detail"] == "School does not match route district"
+
+
 def test_create_student_under_district_context_sets_district_and_operator(client, db_engine):
     district_id = _create_district_in_db(db_engine, "Student District Alpha")
 
@@ -402,6 +458,115 @@ def test_create_student_under_district_context_ignores_payload_district_id(clien
         assert student is not None
         assert student.district_id == path_district_id
         assert student.district_id != payload_district_id
+
+
+def test_create_student_with_matching_school_district_succeeds(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "Student School Match District")
+
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "Matched Student School", "address": "303 Student Match Way"},
+    )
+    assert school.status_code == 201
+
+    student = client.post(
+        f"/districts/{district_id}/students",
+        json={"name": "Matched Student", "grade": "5", "school_id": school.json()["id"]},
+    )
+    assert student.status_code == 201
+
+
+def test_create_student_with_mismatched_school_district_fails(client, db_engine):
+    school_district_id = _create_district_in_db(db_engine, "Student School Mismatch A")
+    student_district_id = _create_district_in_db(db_engine, "Student School Mismatch B")
+
+    school = client.post(
+        f"/districts/{school_district_id}/schools",
+        json={"name": "Mismatched Student School", "address": "304 Student Mismatch Way"},
+    )
+    assert school.status_code == 201
+
+    student = client.post(
+        f"/districts/{student_district_id}/students",
+        json={"name": "Mismatched Student", "grade": "6", "school_id": school.json()["id"]},
+    )
+    assert student.status_code == 400
+    assert student.json()["detail"] == "School does not match student district"
+
+
+def test_create_student_with_mismatched_route_district_fails(client, db_engine):
+    school_district_id = _create_district_in_db(db_engine, "Student Route Mismatch School District")
+    route_district_id = _create_district_in_db(db_engine, "Student Route Mismatch Route District")
+
+    school = client.post(
+        f"/districts/{school_district_id}/schools",
+        json={"name": "Student Route Mismatch School", "address": "305 Route Mismatch Way"},
+    )
+    assert school.status_code == 201
+
+    route = client.post(
+        f"/districts/{route_district_id}/routes",
+        json={"route_number": "STUDENT-ROUTE-MISMATCH"},
+    )
+    assert route.status_code == 201
+
+    student = client.post(
+        "/students/",
+        json={
+            "name": "Student Route Mismatch",
+            "grade": "7",
+            "school_id": school.json()["id"],
+            "route_id": route.json()["id"],
+            "district_id": school_district_id,
+        },
+    )
+    assert student.status_code == 400
+    assert student.json()["detail"] == "Student does not match route district"
+
+
+def test_legacy_route_school_assignment_still_works_without_district_ids(client):
+    school = client.post(
+        "/schools/",
+        json={"name": "Legacy Route School", "address": "306 Legacy Way"},
+    )
+    assert school.status_code == 201
+
+    route = client.post(
+        "/routes/",
+        json={"route_number": "LEGACY-ROUTE-SCHOOL"},
+    )
+    assert route.status_code in (200, 201)
+
+    assign = client.post(f"/schools/{school.json()['id']}/assign_route/{route.json()['id']}")
+    assert assign.status_code == 200
+
+
+def test_legacy_student_route_link_still_works_without_district_ids(client):
+    school = client.post(
+        "/schools/",
+        json={"name": "Legacy Student School", "address": "307 Legacy Student Way"},
+    )
+    assert school.status_code == 201
+
+    route = client.post(
+        "/routes/",
+        json={"route_number": "LEGACY-STUDENT-ROUTE"},
+    )
+    assert route.status_code in (200, 201)
+
+    assign = client.post(f"/schools/{school.json()['id']}/assign_route/{route.json()['id']}")
+    assert assign.status_code == 200
+
+    student = client.post(
+        "/students/",
+        json={
+            "name": "Legacy Student",
+            "grade": "8",
+            "school_id": school.json()["id"],
+            "route_id": route.json()["id"],
+        },
+    )
+    assert student.status_code == 201
 
 
 def test_school_list_still_returns_operator_owned_schools(client):

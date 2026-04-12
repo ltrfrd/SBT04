@@ -17,7 +17,6 @@ from backend.models.operator import OperatorRouteAccess
 from backend.models import route as route_model
 from backend.models import school as school_model
 from backend.utils.operator_scope import ensure_route_owner
-from backend.utils.operator_scope import ensure_same_operator
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_operator_scoped_record_or_404
 
@@ -31,6 +30,33 @@ district_router = APIRouter(
     prefix="/districts",
     tags=["Schools"],
 )
+
+
+def _planning_relationship_matches(
+    *,
+    primary_district_id: int | None,
+    primary_operator_id: int,
+    secondary_district_id: int | None,
+    secondary_operator_id: int,
+) -> bool:
+    if primary_district_id is not None and secondary_district_id is not None:
+        return primary_district_id == secondary_district_id
+    return primary_operator_id == secondary_operator_id
+
+
+def _validate_route_school_planning_alignment(
+    *,
+    route: route_model.Route,
+    school_district_id: int | None,
+    school_operator_id: int,
+) -> None:
+    if not _planning_relationship_matches(
+        primary_district_id=route.district_id,
+        primary_operator_id=route.operator_id,
+        secondary_district_id=school_district_id,
+        secondary_operator_id=school_operator_id,
+    ):
+        raise HTTPException(status_code=400, detail="School does not match route district")
 
 
 def _school_access_filter(operator_id: int):
@@ -160,6 +186,13 @@ def update_school(
     )
 
     update_data = school_in.model_dump(exclude_unset=True)
+    target_district_id = update_data.get("district_id", school.district_id)
+    for route in school.routes:
+        _validate_route_school_planning_alignment(
+            route=route,
+            school_district_id=target_district_id,
+            school_operator_id=school.operator_id,
+        )
     for key, value in update_data.items():
         setattr(school, key, value)
 
@@ -217,7 +250,11 @@ def assign_route_to_school(
         raise HTTPException(status_code=404, detail="School or Route not found")
 
     ensure_route_owner(route, operator.id)
-    ensure_same_operator(school, route)
+    _validate_route_school_planning_alignment(
+        route=route,
+        school_district_id=school.district_id,
+        school_operator_id=school.operator_id,
+    )
 
     if route not in school.routes:
         school.routes.append(route)
