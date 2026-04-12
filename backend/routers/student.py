@@ -14,6 +14,7 @@ from database import get_db
 from backend import schemas
 from backend.models.district import District
 from backend.models.operator import Operator
+from backend.models.operator import OperatorRouteAccess
 from backend.models import associations as assoc_model
 from backend.models import route as route_model
 from backend.models import run as run_model
@@ -38,6 +39,28 @@ district_router = APIRouter(
     prefix="/districts",
     tags=["Students"],
 )
+
+
+def _accessible_route_filter(operator_id: int):
+    return or_(
+        route_model.Route.operator_id == operator_id,
+        route_model.Route.operator_access.any(OperatorRouteAccess.operator_id == operator_id),
+    )
+
+
+def _accessible_school_filter(operator_id: int):
+    return or_(
+        school_model.School.operator_id == operator_id,
+        school_model.School.routes.any(_accessible_route_filter(operator_id)),
+    )
+
+
+def _accessible_student_filter(operator_id: int):
+    return or_(
+        student_model.Student.operator_id == operator_id,
+        student_model.Student.route.has(_accessible_route_filter(operator_id)),
+        student_model.Student.school.has(_accessible_school_filter(operator_id)),
+    )
 
 
 def _get_route_with_schools(
@@ -329,12 +352,7 @@ def get_students(
 ):
     return (
         db.query(student_model.Student)
-        .filter(
-            or_(
-                student_model.Student.operator_id == operator.id,
-                student_model.Student.district_id.is_not(None),
-            )
-        )
+        .filter(_accessible_student_filter(operator.id))
         .all()
     )
 
@@ -351,13 +369,15 @@ def get_student(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    return get_operator_scoped_record_or_404(
-        db=db,
-        model=student_model.Student,
-        record_id=student_id,
-        operator_id=operator.id,
-        detail="Student not found",
+    student = (
+        db.query(student_model.Student)
+        .filter(student_model.Student.id == student_id)
+        .filter(_accessible_student_filter(operator.id))
+        .first()
     )
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    return student
 
 
 @router.put(

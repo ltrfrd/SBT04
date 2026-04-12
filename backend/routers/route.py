@@ -412,7 +412,7 @@ def get_routes(
         .filter(
             or_(
                 Route.operator_id == operator.id,
-                Route.district_id.is_not(None),
+                Route.operator_access.any(OperatorRouteAccess.operator_id == operator.id),
             )
         )
         .order_by(Route.route_number.asc(), Route.id.asc())      # Keep route list stable
@@ -450,7 +450,6 @@ def get_route(
         .filter(
             or_(
                 Route.operator_id == operator.id,
-                Route.district_id.is_not(None),
                 Route.operator_access.any(OperatorRouteAccess.operator_id == operator.id),
             )
         )

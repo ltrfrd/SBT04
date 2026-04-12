@@ -40,6 +40,15 @@ def _create_district_in_db(db_engine, name: str, contact_info: str | None = None
         return district.id
 
 
+def _share_route(client, route_id: int, target_operator_id: int, access_level: str = "read") -> None:
+    response = client.post(
+        f"/routes/{route_id}/share/{target_operator_id}",
+        json={"access_level": access_level},
+    )
+    assert response.status_code == 200
+    assert response.json()["access_level"] == access_level
+
+
 # ---------------------------------------------------------------------------
 # AUTH: login / logout behaviour
 # ---------------------------------------------------------------------------
@@ -563,6 +572,53 @@ def test_route_detail_returns_404_for_missing_route(client):
     assert route.json()["detail"] == "Route not found"
 
 
+def test_district_owned_route_is_not_automatically_visible_to_other_operator(client, db_engine):
+    owner_operator_id = _create_operator_in_db(db_engine, "District Route Owner")
+    other_operator_id = _create_operator_in_db(db_engine, "District Route Other")
+    owner_driver_id = _create_driver_in_db(db_engine, owner_operator_id, "District Route Owner Driver", "district-route-owner@test.com")
+    other_driver_id = _create_driver_in_db(db_engine, other_operator_id, "District Route Other Driver", "district-route-other@test.com")
+    district_id = _create_district_in_db(db_engine, "District Route Hidden")
+
+    _logout(client)
+    _login(client, owner_driver_id)
+    route = client.post(f"/districts/{district_id}/routes", json={"route_number": "DISTRICT-HIDDEN-ROUTE"})
+    assert route.status_code == 201
+    route_id = route.json()["id"]
+
+    _logout(client)
+    _login(client, other_driver_id)
+
+    route_list = client.get("/routes/")
+    assert route_list.status_code == 200
+    route_ids = {item["id"] for item in route_list.json()}
+    assert route_id not in route_ids
+
+    route_detail = client.get(f"/routes/{route_id}")
+    assert route_detail.status_code == 404
+
+
+def test_shared_route_remains_visible_in_route_list(client, db_engine):
+    owner_operator_id = _create_operator_in_db(db_engine, "Shared Route List Owner")
+    shared_operator_id = _create_operator_in_db(db_engine, "Shared Route List Reader")
+    owner_driver_id = _create_driver_in_db(db_engine, owner_operator_id, "Shared Route List Owner Driver", "shared-route-list-owner@test.com")
+    shared_driver_id = _create_driver_in_db(db_engine, shared_operator_id, "Shared Route List Reader Driver", "shared-route-list-reader@test.com")
+
+    _logout(client)
+    _login(client, owner_driver_id)
+    route = client.post("/routes/", json={"route_number": "SHARED-ROUTE-LIST"})
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+    _share_route(client, route_id, shared_operator_id)
+
+    _logout(client)
+    _login(client, shared_driver_id)
+
+    route_list = client.get("/routes/")
+    assert route_list.status_code == 200
+    route_ids = {item["id"] for item in route_list.json()}
+    assert route_id in route_ids
+
+
 def test_student_list_still_returns_operator_owned_students(client):
     school = client.post(
         "/schools/",
@@ -631,6 +687,151 @@ def test_student_list_returns_combined_operator_and_district_owned_students(clie
     student_ids = {student["id"] for student in students.json()}
     assert owned_student.json()["id"] in student_ids
     assert district_student.json()["id"] in student_ids
+
+
+def test_district_owned_school_requires_route_access_for_other_operator(client, db_engine):
+    owner_operator_id = _create_operator_in_db(db_engine, "District School Owner")
+    other_operator_id = _create_operator_in_db(db_engine, "District School Other")
+    owner_driver_id = _create_driver_in_db(db_engine, owner_operator_id, "District School Owner Driver", "district-school-owner@test.com")
+    other_driver_id = _create_driver_in_db(db_engine, other_operator_id, "District School Other Driver", "district-school-other@test.com")
+    district_id = _create_district_in_db(db_engine, "District School Hidden")
+
+    _logout(client)
+    _login(client, owner_driver_id)
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "District Hidden School", "address": "40 Hidden School Way"},
+    )
+    assert school.status_code == 201
+    school_id = school.json()["id"]
+
+    _logout(client)
+    _login(client, other_driver_id)
+
+    school_list = client.get("/schools/")
+    assert school_list.status_code == 200
+    school_ids = {item["id"] for item in school_list.json()}
+    assert school_id not in school_ids
+
+    school_detail = client.get(f"/schools/{school_id}")
+    assert school_detail.status_code == 404
+
+
+def test_school_becomes_visible_when_linked_to_shared_route(client, db_engine):
+    owner_operator_id = _create_operator_in_db(db_engine, "Shared School Owner")
+    shared_operator_id = _create_operator_in_db(db_engine, "Shared School Reader")
+    owner_driver_id = _create_driver_in_db(db_engine, owner_operator_id, "Shared School Owner Driver", "shared-school-owner@test.com")
+    shared_driver_id = _create_driver_in_db(db_engine, shared_operator_id, "Shared School Reader Driver", "shared-school-reader@test.com")
+
+    _logout(client)
+    _login(client, owner_driver_id)
+
+    school = client.post(
+        "/schools/",
+        json={"name": "Shared Route School", "address": "41 Shared School Way"},
+    )
+    assert school.status_code == 201
+    school_id = school.json()["id"]
+
+    route = client.post("/routes/", json={"route_number": "SHARED-SCHOOL-ROUTE"})
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    assign = client.post(f"/schools/{school_id}/assign_route/{route_id}")
+    assert assign.status_code == 200
+    _share_route(client, route_id, shared_operator_id)
+
+    _logout(client)
+    _login(client, shared_driver_id)
+
+    school_list = client.get("/schools/")
+    assert school_list.status_code == 200
+    school_ids = {item["id"] for item in school_list.json()}
+    assert school_id in school_ids
+
+    school_detail = client.get(f"/schools/{school_id}")
+    assert school_detail.status_code == 200
+    assert school_detail.json()["id"] == school_id
+
+
+def test_district_owned_student_requires_accessible_school_or_route_for_other_operator(client, db_engine):
+    owner_operator_id = _create_operator_in_db(db_engine, "District Student Owner")
+    other_operator_id = _create_operator_in_db(db_engine, "District Student Other")
+    owner_driver_id = _create_driver_in_db(db_engine, owner_operator_id, "District Student Owner Driver", "district-student-owner@test.com")
+    other_driver_id = _create_driver_in_db(db_engine, other_operator_id, "District Student Other Driver", "district-student-other@test.com")
+    district_id = _create_district_in_db(db_engine, "District Student Hidden")
+
+    _logout(client)
+    _login(client, owner_driver_id)
+
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "District Student Hidden School", "address": "42 Hidden Student Way"},
+    )
+    assert school.status_code == 201
+
+    student = client.post(
+        f"/districts/{district_id}/students",
+        json={"name": "District Hidden Student", "grade": "7", "school_id": school.json()["id"]},
+    )
+    assert student.status_code == 201
+    student_id = student.json()["id"]
+
+    _logout(client)
+    _login(client, other_driver_id)
+
+    student_list = client.get("/students/")
+    assert student_list.status_code == 200
+    student_ids = {item["id"] for item in student_list.json()}
+    assert student_id not in student_ids
+
+    student_detail = client.get(f"/students/{student_id}")
+    assert student_detail.status_code == 404
+
+
+def test_student_becomes_visible_through_shared_route_school_access(client, db_engine):
+    owner_operator_id = _create_operator_in_db(db_engine, "Shared Student Owner")
+    shared_operator_id = _create_operator_in_db(db_engine, "Shared Student Reader")
+    owner_driver_id = _create_driver_in_db(db_engine, owner_operator_id, "Shared Student Owner Driver", "shared-student-owner@test.com")
+    shared_driver_id = _create_driver_in_db(db_engine, shared_operator_id, "Shared Student Reader Driver", "shared-student-reader@test.com")
+
+    _logout(client)
+    _login(client, owner_driver_id)
+
+    school = client.post(
+        "/schools/",
+        json={"name": "Shared Student School", "address": "43 Shared Student Way"},
+    )
+    assert school.status_code == 201
+    school_id = school.json()["id"]
+
+    route = client.post("/routes/", json={"route_number": "SHARED-STUDENT-ROUTE"})
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    assign = client.post(f"/schools/{school_id}/assign_route/{route_id}")
+    assert assign.status_code == 200
+
+    student = client.post(
+        "/students/",
+        json={"name": "Shared Student Visible", "grade": "8", "school_id": school_id},
+    )
+    assert student.status_code == 201
+    student_id = student.json()["id"]
+
+    _share_route(client, route_id, shared_operator_id)
+
+    _logout(client)
+    _login(client, shared_driver_id)
+
+    student_list = client.get("/students/")
+    assert student_list.status_code == 200
+    student_ids = {item["id"] for item in student_list.json()}
+    assert student_id in student_ids
+
+    student_detail = client.get(f"/students/{student_id}")
+    assert student_detail.status_code == 200
+    assert student_detail.json()["id"] == student_id
 
 
 # ---------------------------------------------------------------------------

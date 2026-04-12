@@ -13,6 +13,7 @@ from database import get_db
 from backend import schemas
 from backend.models.district import District
 from backend.models.operator import Operator
+from backend.models.operator import OperatorRouteAccess
 from backend.models import route as route_model
 from backend.models import school as school_model
 from backend.utils.operator_scope import ensure_route_owner
@@ -30,6 +31,18 @@ district_router = APIRouter(
     prefix="/districts",
     tags=["Schools"],
 )
+
+
+def _school_access_filter(operator_id: int):
+    return or_(
+        school_model.School.operator_id == operator_id,
+        school_model.School.routes.any(
+            or_(
+                route_model.Route.operator_id == operator_id,
+                route_model.Route.operator_access.any(OperatorRouteAccess.operator_id == operator_id),
+            )
+        ),
+    )
 
 
 @router.post(
@@ -97,12 +110,7 @@ def get_schools(
 ):
     return (
         db.query(school_model.School)
-        .filter(
-            or_(
-                school_model.School.operator_id == operator.id,
-                school_model.School.district_id.is_not(None),
-            )
-        )
+        .filter(_school_access_filter(operator.id))
         .all()
     )
 
@@ -122,12 +130,7 @@ def get_school(
     school = (
         db.query(school_model.School)
         .filter(school_model.School.id == school_id)
-        .filter(
-            or_(
-                school_model.School.operator_id == operator.id,
-                school_model.School.district_id.is_not(None),
-            )
-        )
+        .filter(_school_access_filter(operator.id))
         .first()
     )
     if not school:
