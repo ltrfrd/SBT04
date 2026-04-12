@@ -395,6 +395,58 @@ def test_create_student_under_district_context_ignores_payload_district_id(clien
         assert student.district_id != payload_district_id
 
 
+def test_school_list_still_returns_operator_owned_schools(client):
+    owned_school = client.post(
+        "/schools/",
+        json={"name": "Owned School Visible", "address": "20 School Way"},
+    )
+    assert owned_school.status_code == 201
+
+    schools = client.get("/schools/")
+    assert schools.status_code == 200
+
+    school_ids = {school["id"] for school in schools.json()}
+    assert owned_school.json()["id"] in school_ids
+
+
+def test_school_list_returns_district_owned_schools(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "Visible District School")
+
+    district_school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "District Visible School", "address": "21 School Way"},
+    )
+    assert district_school.status_code == 201
+
+    schools = client.get("/schools/")
+    assert schools.status_code == 200
+
+    school_ids = {school["id"] for school in schools.json()}
+    assert district_school.json()["id"] in school_ids
+
+
+def test_school_list_returns_combined_operator_and_district_owned_schools(client, db_engine):
+    owned_school = client.post(
+        "/schools/",
+        json={"name": "Combined Owned School", "address": "22 School Way"},
+    )
+    assert owned_school.status_code == 201
+
+    district_id = _create_district_in_db(db_engine, "Combined District")
+    district_school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "Combined District School", "address": "23 School Way"},
+    )
+    assert district_school.status_code == 201
+
+    schools = client.get("/schools/")
+    assert schools.status_code == 200
+
+    school_ids = {school["id"] for school in schools.json()}
+    assert owned_school.json()["id"] in school_ids
+    assert district_school.json()["id"] in school_ids
+
+
 # ---------------------------------------------------------------------------
 # C1: Pretrip endpoints are operator-scoped
 # ---------------------------------------------------------------------------
