@@ -99,3 +99,7 @@ class Route(Base):
         passive_deletes=True,
     )
 
+    @property
+    def planning_owner(self) -> int:
+        return self.district_id if self.district_id is not None else self.operator_id
+

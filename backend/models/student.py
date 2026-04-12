@@ -37,6 +37,10 @@ class Student(Base):
     )
 
     @property
+    def planning_owner(self) -> int:
+        return self.district_id if self.district_id is not None else self.operator_id
+
+    @property
     def school_name(self) -> str | None:
         return self.school.name if self.school else None
 

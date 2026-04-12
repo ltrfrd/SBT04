@@ -24,3 +24,7 @@ class School(Base):
     students = relationship("Student", back_populates="school")
     stops = relationship("Stop", back_populates="school")
 
+    @property
+    def planning_owner(self) -> int:
+        return self.district_id if self.district_id is not None else self.operator_id
+
