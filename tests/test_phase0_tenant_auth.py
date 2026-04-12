@@ -499,6 +499,76 @@ def test_route_list_returns_combined_operator_and_district_owned_routes(client, 
     assert district_route.json()["id"] in route_ids
 
 
+def test_student_list_still_returns_operator_owned_students(client):
+    school = client.post(
+        "/schools/",
+        json={"name": "Owned Student School", "address": "30 Student Way"},
+    )
+    assert school.status_code == 201
+
+    owned_student = client.post(
+        "/students/",
+        json={"name": "Owned Student Visible", "grade": "3", "school_id": school.json()["id"]},
+    )
+    assert owned_student.status_code == 201
+
+    students = client.get("/students/")
+    assert students.status_code == 200
+
+    student_ids = {student["id"] for student in students.json()}
+    assert owned_student.json()["id"] in student_ids
+
+
+def test_student_list_returns_district_owned_students(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "Visible District Student")
+
+    school = client.post(
+        "/schools/",
+        json={"name": "District Student School", "address": "31 Student Way"},
+    )
+    assert school.status_code == 201
+
+    district_student = client.post(
+        f"/districts/{district_id}/students",
+        json={"name": "District Student Visible", "grade": "4", "school_id": school.json()["id"]},
+    )
+    assert district_student.status_code == 201
+
+    students = client.get("/students/")
+    assert students.status_code == 200
+
+    student_ids = {student["id"] for student in students.json()}
+    assert district_student.json()["id"] in student_ids
+
+
+def test_student_list_returns_combined_operator_and_district_owned_students(client, db_engine):
+    school = client.post(
+        "/schools/",
+        json={"name": "Combined Student School", "address": "32 Student Way"},
+    )
+    assert school.status_code == 201
+
+    owned_student = client.post(
+        "/students/",
+        json={"name": "Combined Owned Student", "grade": "5", "school_id": school.json()["id"]},
+    )
+    assert owned_student.status_code == 201
+
+    district_id = _create_district_in_db(db_engine, "Combined District Student")
+    district_student = client.post(
+        f"/districts/{district_id}/students",
+        json={"name": "Combined District Student", "grade": "6", "school_id": school.json()["id"]},
+    )
+    assert district_student.status_code == 201
+
+    students = client.get("/students/")
+    assert students.status_code == 200
+
+    student_ids = {student["id"] for student in students.json()}
+    assert owned_student.json()["id"] in student_ids
+    assert district_student.json()["id"] in student_ids
+
+
 # ---------------------------------------------------------------------------
 # C1: Pretrip endpoints are operator-scoped
 # ---------------------------------------------------------------------------

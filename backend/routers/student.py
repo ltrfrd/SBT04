@@ -6,6 +6,7 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
 
@@ -328,7 +329,12 @@ def get_students(
 ):
     return (
         db.query(student_model.Student)
-        .filter(student_model.Student.operator_id == operator.id)
+        .filter(
+            or_(
+                student_model.Student.operator_id == operator.id,
+                student_model.Student.district_id.is_not(None),
+            )
+        )
         .all()
     )
 
