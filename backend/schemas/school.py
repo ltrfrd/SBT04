@@ -24,7 +24,7 @@ class SchoolBase(BaseModel):
 class SchoolCreate(SchoolBase):
     """Schema used when creating a new school."""
 
-    pass
+    district_id: Optional[int] = None
 
 
 # -----------------------------------------------------------

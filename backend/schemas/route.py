@@ -49,6 +49,7 @@ class RouteCreate(BaseModel):
         ...,
         description="Required public route identifier used during normal route creation.",
     )
+    district_id: Optional[int] = None
     school_ids: Optional[List[int]] = []
 
     model_config = ConfigDict(extra="forbid")

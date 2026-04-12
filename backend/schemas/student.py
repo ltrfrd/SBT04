@@ -24,6 +24,7 @@ class StudentIdentityFields(BaseModel):
 # - Preserve legacy route/stop linkage fields only for /students/
 # -----------------------------------------------------------
 class StudentCompatibilityCreate(StudentIdentityFields):
+    district_id: Optional[int] = None
     route_id: Optional[int] = None  # Optional legacy planning route pointer
     stop_id: Optional[int] = None  # Optional legacy planning stop pointer
 
