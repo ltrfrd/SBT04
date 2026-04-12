@@ -9,7 +9,9 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
+from backend.models.district import District
 from backend.models.driver import Driver
+from backend.models.school import School
 from tests.conftest import TEST_DRIVER_PIN, _create_operator_in_db, _create_driver_in_db
 
 
@@ -25,6 +27,15 @@ def _login(client, driver_id: int, pin: str = TEST_DRIVER_PIN) -> None:
 def _logout(client) -> None:
     r = client.post("/logout")
     assert r.status_code == 200
+
+
+def _create_district_in_db(db_engine, name: str, contact_info: str | None = None) -> int:
+    with Session(db_engine) as db:
+        district = District(name=name, contact_info=contact_info)
+        db.add(district)
+        db.commit()
+        db.refresh(district)
+        return district.id
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +226,54 @@ def test_operator_lists_only_show_owned_records(client, db_engine):
     assert extra_driver_two.json()["id"] not in driver_ids_one
     assert route_one.json()["id"] in route_ids_one
     assert route_two.json()["id"] not in route_ids_one
+
+
+def test_create_school_under_district_context_sets_district_and_operator(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "District Alpha")
+
+    response = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "District School", "address": "100 District Way"},
+    )
+    assert response.status_code == 201
+
+    school_id = response.json()["id"]
+    with Session(db_engine) as db:
+        school = db.get(School, school_id)
+        assert school is not None
+        assert school.district_id == district_id
+        assert school.operator_id == 1
+
+
+def test_create_school_under_district_context_returns_404_for_missing_district(client):
+    response = client.post(
+        "/districts/999999/schools",
+        json={"name": "Missing District School", "address": "404 Way"},
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "District not found"
+
+
+def test_create_school_under_district_context_ignores_payload_district_id(client, db_engine):
+    path_district_id = _create_district_in_db(db_engine, "Path District")
+    payload_district_id = _create_district_in_db(db_engine, "Payload District")
+
+    response = client.post(
+        f"/districts/{path_district_id}/schools",
+        json={
+            "name": "Path Wins School",
+            "address": "200 Context Way",
+            "district_id": payload_district_id,
+        },
+    )
+    assert response.status_code == 201
+
+    school_id = response.json()["id"]
+    with Session(db_engine) as db:
+        school = db.get(School, school_id)
+        assert school is not None
+        assert school.district_id == path_district_id
+        assert school.district_id != payload_district_id
 
 
 # ---------------------------------------------------------------------------

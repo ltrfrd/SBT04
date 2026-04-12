@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from backend import schemas
+from backend.models.district import District
 from backend.models.operator import Operator
 from backend.models import route as route_model
 from backend.models import school as school_model
@@ -21,6 +22,11 @@ from backend.utils.operator_scope import get_operator_scoped_record_or_404
 
 router = APIRouter(
     prefix="/schools",
+    tags=["Schools"],
+)
+
+district_router = APIRouter(
+    prefix="/districts",
     tags=["Schools"],
 )
 
@@ -40,6 +46,35 @@ def create_school(
 ):
     new_school = school_model.School(
         **school.model_dump(),
+        operator_id=operator.id,
+    )
+    db.add(new_school)
+    db.commit()
+    db.refresh(new_school)
+    return new_school
+
+
+@district_router.post(
+    "/{district_id}/schools",
+    response_model=schemas.SchoolOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create school under district",
+    description="Create a new school record under the selected district context.",
+    response_description="Created school",
+)
+def create_school_for_district(
+    district_id: int,
+    school: schemas.SchoolCreate,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    district = db.get(District, district_id)
+    if not district:
+        raise HTTPException(status_code=404, detail="District not found")
+
+    new_school = school_model.School(
+        **school.model_dump(exclude={"district_id"}),
+        district_id=district_id,
         operator_id=operator.id,
     )
     db.add(new_school)
