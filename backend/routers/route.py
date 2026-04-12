@@ -436,20 +436,28 @@ def get_route(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    route = get_operator_scoped_route_or_404(
-        db=db,
-        route_id=route_id,
-        operator_id=operator.id,
-        required_access="read",
-        options=[
+    route = (
+        db.query(Route)
+        .options(
             selectinload(Route.schools),
             selectinload(Route.driver_assignments).selectinload(RouteDriverAssignment.driver),
             selectinload(Route.runs).selectinload(run_model.Run.driver),
             selectinload(Route.runs).selectinload(run_model.Run.stops),
             selectinload(Route.runs).selectinload(run_model.Run.student_assignments).selectinload(StudentRunAssignment.stop),
             selectinload(Route.runs).selectinload(run_model.Run.student_assignments).selectinload(StudentRunAssignment.student).selectinload(student_model.Student.school),
-        ],
+        )
+        .filter(Route.id == route_id)
+        .filter(
+            or_(
+                Route.operator_id == operator.id,
+                Route.district_id.is_not(None),
+                Route.operator_access.any(OperatorRouteAccess.operator_id == operator.id),
+            )
+        )
+        .first()
     )
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
     return _serialize_route_detail(route)                       # Return full route detail payload
 
 
