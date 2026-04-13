@@ -18,7 +18,6 @@ from backend.models import route as route_model
 from backend.models import school as school_model
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
-from backend.utils.operator_scope import get_operator_scoped_record_or_404
 
 
 router = APIRouter(
@@ -87,6 +86,33 @@ def _get_school_for_planning_mutation_or_404(
     if not school:
         raise HTTPException(status_code=404, detail=detail)
     return school
+
+
+def _get_school_route_link_context_or_404(
+    *,
+    db: Session,
+    school_id: int,
+    route_id: int,
+    operator_id: int,
+) -> tuple[school_model.School, route_model.Route]:
+    school = _get_school_for_planning_mutation_or_404(
+        db=db,
+        operator_id=operator_id,
+        detail="School or Route not found",
+        school_id=school_id,
+    )
+    route = get_operator_scoped_route_or_404(
+        db=db,
+        route_id=route_id,
+        operator_id=operator_id,
+        required_access="read",
+    )
+    _validate_route_school_planning_alignment(
+        route=route,
+        school_district_id=school.district_id,
+        school_operator_id=school.operator_id,
+    )
+    return school, route
 
 
 @router.post(
@@ -245,7 +271,7 @@ def delete_school(
     "/{school_id}/assign_route/{route_id}",
     response_model=schemas.SchoolOut,
     summary="Assign route to school",
-    description="Link a school to a route. Prevents duplicate assignments.",
+    description="Link a school to a route while keeping the route as the planning source of truth. Prevents duplicate assignments.",
     response_description="Updated school with route link",
 )
 def assign_route_to_school(
@@ -254,29 +280,17 @@ def assign_route_to_school(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    school = _get_school_for_planning_mutation_or_404(
+    school, route = _get_school_route_link_context_or_404(
         db=db,
-        operator_id=operator.id,
-        detail="School or Route not found",
         school_id=school_id,
-    )
-    route = get_operator_scoped_route_or_404(
-        db=db,
         route_id=route_id,
         operator_id=operator.id,
-        required_access="read",
-    )
-    _validate_route_school_planning_alignment(
-        route=route,
-        school_district_id=school.district_id,
-        school_operator_id=school.operator_id,
     )
 
-    if route not in school.routes:
-        school.routes.append(route)
+    if school not in route.schools:
+        route.schools.append(school)
         db.commit()
-        db.refresh(school)
-
+    db.refresh(school)
     return school
 
 
@@ -284,7 +298,7 @@ def assign_route_to_school(
     "/{school_id}/unassign_route/{route_id}",
     response_model=schemas.SchoolOut,
     summary="Unassign route from school",
-    description="Remove the link between a school and a route.",
+    description="Remove the link between a school and a route while keeping route context authoritative.",
     response_description="Updated school without route link",
 )
 def unassign_route_from_school(
@@ -293,28 +307,16 @@ def unassign_route_from_school(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    school = _get_school_for_planning_mutation_or_404(
+    school, route = _get_school_route_link_context_or_404(
         db=db,
-        operator_id=operator.id,
-        detail="School or Route not found",
         school_id=school_id,
-    )
-    route = get_operator_scoped_route_or_404(
-        db=db,
         route_id=route_id,
         operator_id=operator.id,
-        required_access="read",
-    )
-    _validate_route_school_planning_alignment(
-        route=route,
-        school_district_id=school.district_id,
-        school_operator_id=school.operator_id,
     )
 
-    if route in school.routes:
-        school.routes.remove(route)
+    if school in route.schools:
+        route.schools.remove(school)
         db.commit()
-        db.refresh(school)
-
+    db.refresh(school)
     return school
 

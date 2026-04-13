@@ -457,6 +457,103 @@ def test_assign_route_to_school_with_mismatched_district_fails(client, db_engine
     assert assign.json()["detail"] == "School does not match route district"
 
 
+def test_assign_route_to_school_with_matching_district_succeeds(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "Assign Match District")
+
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "Assign Match School", "address": "303 Assign Match Way"},
+    )
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "ASSIGN-MATCH-ROUTE"},
+    )
+    assert school.status_code == 201
+    assert route.status_code == 201
+
+    assign = client.post(f"/schools/{school.json()['id']}/assign_route/{route.json()['id']}")
+    assert assign.status_code == 200
+
+    detail = client.get(f"/routes/{route.json()['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["schools"] == [
+        {"school_id": school.json()["id"], "school_name": "Assign Match School"}
+    ]
+
+
+def test_assigning_same_route_to_school_twice_does_not_duplicate_link(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "Assign Duplicate District")
+
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "Assign Duplicate School", "address": "304 Duplicate Way"},
+    )
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "ASSIGN-DUPLICATE-ROUTE"},
+    )
+    assert school.status_code == 201
+    assert route.status_code == 201
+
+    first_assign = client.post(f"/schools/{school.json()['id']}/assign_route/{route.json()['id']}")
+    second_assign = client.post(f"/schools/{school.json()['id']}/assign_route/{route.json()['id']}")
+    assert first_assign.status_code == 200
+    assert second_assign.status_code == 200
+
+    detail = client.get(f"/routes/{route.json()['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["schools"] == [
+        {"school_id": school.json()["id"], "school_name": "Assign Duplicate School"}
+    ]
+
+
+def test_unassign_route_from_school_succeeds(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "Unassign District")
+
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "Unassign School", "address": "305 Unassign Way"},
+    )
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "UNASSIGN-ROUTE"},
+    )
+    assert school.status_code == 201
+    assert route.status_code == 201
+
+    assign = client.post(f"/schools/{school.json()['id']}/assign_route/{route.json()['id']}")
+    assert assign.status_code == 200
+
+    unassign = client.delete(f"/schools/{school.json()['id']}/unassign_route/{route.json()['id']}")
+    assert unassign.status_code == 200
+
+    detail = client.get(f"/routes/{route.json()['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["schools"] == []
+
+
+def test_unassigning_non_linked_route_from_school_is_safe_no_op(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "Unassign Noop District")
+
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "Unassign Noop School", "address": "306 Noop Way"},
+    )
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "UNASSIGN-NOOP-ROUTE"},
+    )
+    assert school.status_code == 201
+    assert route.status_code == 201
+
+    unassign = client.delete(f"/schools/{school.json()['id']}/unassign_route/{route.json()['id']}")
+    assert unassign.status_code == 200
+
+    detail = client.get(f"/routes/{route.json()['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["schools"] == []
+
+
 def test_create_student_under_district_context_sets_district_and_operator(client, db_engine):
     district_id = _create_district_in_db(db_engine, "Student District Alpha")
 
