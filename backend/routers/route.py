@@ -30,8 +30,8 @@ from backend.schemas.route import (
     RouteRestorePrimaryBus,
     RouteSchoolOut,
 )
-from backend.schemas.run import RouteRunCreate
-from backend.schemas.stop import StopCreate, StopOut
+from backend.schemas.run import RouteRunCreate, RunUpdate
+from backend.schemas.stop import StopCreate, StopOut, StopUpdate
 from backend.utils.route_driver_assignment import (
     get_active_route_driver_assignments,
     get_primary_route_driver_assignments,
@@ -121,6 +121,46 @@ def _get_conflicting_route_or_none(
     if exclude_route_id is not None:
         query = query.filter(Route.id != exclude_route_id)
     return query.first()
+
+
+def _get_route_run_or_404(*, route_id: int, run_id: int, db: Session) -> run_model.Run:
+    run = (
+        db.query(run_model.Run)
+        .options(joinedload(run_model.Run.route), joinedload(run_model.Run.driver))
+        .filter(run_model.Run.id == run_id)
+        .first()
+    )
+    if not run or run.route_id != route_id:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run
+
+
+def _get_route_stop_or_404(*, route_id: int, stop_id: int, db: Session) -> stop_model.Stop:
+    stop = (
+        db.query(stop_model.Stop)
+        .options(joinedload(stop_model.Stop.run))
+        .filter(stop_model.Stop.id == stop_id)
+        .first()
+    )
+    stop_route_id = None
+    if stop is not None:
+        stop_route_id = stop.route_id if stop.route_id is not None else stop.run.route_id if stop.run else None
+
+    if not stop or stop_route_id != route_id:
+        raise HTTPException(status_code=404, detail="Stop not found")
+    return stop
+
+
+def _get_route_student_or_404(*, route_id: int, student_id: int, db: Session) -> student_model.Student:
+    student = (
+        db.query(student_model.Student)
+        .options(joinedload(student_model.Student.school))
+        .filter(student_model.Student.id == student_id)
+        .first()
+    )
+    if not student or student.route_id != route_id:
+        raise HTTPException(status_code=404, detail="Student not found")
+    return student
 
 
 def _get_schools_for_route_attachment(
@@ -715,6 +755,87 @@ def get_route_runs(
 
 
 # -----------------------------------------------------------
+# - Update planned run inside route
+# - Modify one planned run while enforcing route path ownership
+# -----------------------------------------------------------
+@router.put(
+    "/{route_id}/runs/{run_id}",
+    response_model=schemas.RunOut,
+    summary="Update run inside route",
+    description="Update one planned run under the selected route context. The path route_id is authoritative.",
+    response_description="Updated run",
+)
+def update_route_run(
+    route_id: int,
+    run_id: int,
+    payload: RunUpdate,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    from backend.routers import run as run_router  # Local import avoids circular import at module load time
+
+    route = get_operator_scoped_route_or_404(
+        db=db,
+        route_id=route_id,
+        operator_id=operator.id,
+        required_access="read",
+    )
+    run = _get_route_run_or_404(route_id=route.id, run_id=run_id, db=db)
+
+    if run.start_time is not None:
+        raise HTTPException(status_code=400, detail="Only planned runs can be updated")
+
+    run_router._assert_unique_route_run_type(
+        route_id=route.id,
+        normalized_run_type=payload.run_type,
+        db=db,
+        exclude_run_id=run.id,
+    )
+    run.run_type = payload.run_type
+    if payload.scheduled_start_time is not None:
+        run.scheduled_start_time = payload.scheduled_start_time
+    if payload.scheduled_end_time is not None:
+        run.scheduled_end_time = payload.scheduled_end_time
+
+    db.commit()
+    db.refresh(run)
+    return run_router._serialize_run(run)
+
+
+# -----------------------------------------------------------
+# - Delete planned run inside route
+# - Remove one planned run while enforcing route path ownership
+# -----------------------------------------------------------
+@router.delete(
+    "/{route_id}/runs/{run_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete run inside route",
+    description="Delete one planned run under the selected route context. The path route_id is authoritative.",
+    response_description="Run deleted",
+)
+def delete_route_run(
+    route_id: int,
+    run_id: int,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    route = get_operator_scoped_route_or_404(
+        db=db,
+        route_id=route_id,
+        operator_id=operator.id,
+        required_access="read",
+    )
+    run = _get_route_run_or_404(route_id=route.id, run_id=run_id, db=db)
+
+    if run.start_time is not None:
+        raise HTTPException(status_code=400, detail="Only planned runs can be deleted")
+
+    db.delete(run)
+    db.commit()
+    return None
+
+
+# -----------------------------------------------------------
 # - Create stop inside route
 # - Attach one planned stop under a run that belongs to the route
 # -----------------------------------------------------------
@@ -793,6 +914,89 @@ def get_route_stops(
         .order_by(stop_model.Stop.run_id.asc(), stop_model.Stop.sequence.asc(), stop_model.Stop.id.asc())
         .all()
     )
+
+
+# -----------------------------------------------------------
+# - Update stop inside route
+# - Modify one planned stop while enforcing route path ownership
+# -----------------------------------------------------------
+@router.put(
+    "/{route_id}/stops/{stop_id}",
+    response_model=StopOut,
+    summary="Update stop inside route",
+    description="Update one planned stop under the selected route context. The stop may not be moved across runs through this route-level endpoint.",
+    response_description="Updated stop",
+)
+def update_route_stop(
+    route_id: int,
+    stop_id: int,
+    payload: StopUpdate,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    from backend.routers import stop as stop_router  # Local import avoids circular import at module load time
+
+    route = get_operator_scoped_route_or_404(
+        db=db,
+        route_id=route_id,
+        operator_id=operator.id,
+        required_access="read",
+    )
+    stop = _get_route_stop_or_404(route_id=route.id, stop_id=stop_id, db=db)
+
+    updated_stop = stop_router._update_stop_record(
+        stop=stop,
+        payload=schemas.RunStopUpdate(
+            sequence=payload.sequence,
+            type=payload.type,
+            name=payload.name,
+            school_id=payload.school_id,
+            address=payload.address,
+            planned_time=payload.planned_time,
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+        ),
+        db=db,
+        authoritative_run_id=stop.run_id,
+    )
+    db.commit()
+    db.refresh(updated_stop)
+    return updated_stop
+
+
+# -----------------------------------------------------------
+# - Delete stop inside route
+# - Remove one planned stop while enforcing route path ownership
+# -----------------------------------------------------------
+@router.delete(
+    "/{route_id}/stops/{stop_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete stop inside route",
+    description="Delete one planned stop under the selected route context and normalize the remaining run sequence order.",
+    response_description="Stop deleted",
+)
+def delete_route_stop(
+    route_id: int,
+    stop_id: int,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    from backend.routers import stop as stop_router  # Local import avoids circular import at module load time
+
+    route = get_operator_scoped_route_or_404(
+        db=db,
+        route_id=route_id,
+        operator_id=operator.id,
+        required_access="read",
+    )
+    stop = _get_route_stop_or_404(route_id=route.id, stop_id=stop_id, db=db)
+
+    run_id = stop.run_id
+    db.delete(stop)
+    db.flush()
+    stop_router.normalize_run_sequences(db, run_id)
+    db.commit()
+    return None
 
 
 # -----------------------------------------------------------
@@ -879,6 +1083,42 @@ def get_route_students(
         .order_by(student_model.Student.name.asc(), student_model.Student.id.asc())
         .all()
     )
+
+
+# -----------------------------------------------------------
+# - Remove student from route
+# - Clear direct route-planning linkage under route context
+# -----------------------------------------------------------
+@router.delete(
+    "/{route_id}/students/{student_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove student from route",
+    description="Remove one student from the selected route planning context without deleting the student record entirely.",
+    response_description="Student removed from route",
+)
+def delete_route_student(
+    route_id: int,
+    student_id: int,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    route = get_operator_scoped_route_or_404(
+        db=db,
+        route_id=route_id,
+        operator_id=operator.id,
+        required_access="read",
+    )
+    student = _get_route_student_or_404(route_id=route.id, student_id=student_id, db=db)
+
+    student.route_id = None
+    if student.stop_id is not None:
+        stop = db.get(stop_model.Stop, student.stop_id)
+        stop_route_id = stop.route_id if stop and stop.route_id is not None else stop.run.route_id if stop and stop.run else None
+        if stop_route_id == route.id:
+            student.stop_id = None
+
+    db.commit()
+    return None
 
 
 # -----------------------------------------------------------

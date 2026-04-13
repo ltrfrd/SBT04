@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from backend.models.district import District
 from backend.models.driver import Driver
 from backend.models.route import Route
+from backend.models.run import Run
 from backend.models.school import School
 from backend.models.stop import Stop
 from backend.models.student import Student
@@ -1444,6 +1445,200 @@ def test_route_cascade_endpoints_return_404_for_missing_route(client):
 
     for response in (create_run, list_runs, create_stop, list_stops, create_student, list_students):
         assert response.status_code == 404
+
+
+def test_update_route_run_under_correct_route_succeeds(client):
+    route = client.post("/routes/", json={"route_number": "CASCADE-RUN-UPDATE"})
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
+    assert run.status_code == 201
+    run_id = run.json()["id"]
+
+    update = client.put(
+        f"/routes/{route_id}/runs/{run_id}",
+        json={
+            "run_type": "PM",
+            "scheduled_start_time": "08:00:00",
+            "scheduled_end_time": "09:00:00",
+        },
+    )
+    assert update.status_code == 200
+    assert update.json()["id"] == run_id
+    assert update.json()["route_id"] == route_id
+    assert update.json()["run_type"] == "PM"
+
+
+def test_update_route_run_under_wrong_route_returns_404(client):
+    route_one = client.post("/routes/", json={"route_number": "CASCADE-RUN-WRONG-A"})
+    route_two = client.post("/routes/", json={"route_number": "CASCADE-RUN-WRONG-B"})
+    assert route_one.status_code in (200, 201)
+    assert route_two.status_code in (200, 201)
+
+    run = client.post(f"/routes/{route_one.json()['id']}/runs", json={"run_type": "AM"})
+    assert run.status_code == 201
+
+    update = client.put(
+        f"/routes/{route_two.json()['id']}/runs/{run.json()['id']}",
+        json={"run_type": "PM"},
+    )
+    assert update.status_code == 404
+
+
+def test_delete_route_run_under_correct_route_succeeds(client, db_engine):
+    route = client.post("/routes/", json={"route_number": "CASCADE-RUN-DELETE"})
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
+    assert run.status_code == 201
+    run_id = run.json()["id"]
+
+    delete = client.delete(f"/routes/{route_id}/runs/{run_id}")
+    assert delete.status_code == 204
+
+    with Session(db_engine) as db:
+        assert db.get(Run, run_id) is None
+
+
+def test_delete_route_run_under_wrong_route_returns_404(client):
+    route_one = client.post("/routes/", json={"route_number": "CASCADE-RUN-DEL-WRONG-A"})
+    route_two = client.post("/routes/", json={"route_number": "CASCADE-RUN-DEL-WRONG-B"})
+    assert route_one.status_code in (200, 201)
+    assert route_two.status_code in (200, 201)
+
+    run = client.post(f"/routes/{route_one.json()['id']}/runs", json={"run_type": "AM"})
+    assert run.status_code == 201
+
+    delete = client.delete(f"/routes/{route_two.json()['id']}/runs/{run.json()['id']}")
+    assert delete.status_code == 404
+
+
+def test_update_route_stop_under_correct_route_succeeds(client):
+    route = client.post("/routes/", json={"route_number": "CASCADE-STOP-UPDATE"})
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
+    assert run.status_code == 201
+    stop = client.post(
+        f"/routes/{route_id}/stops",
+        json={"run_id": run.json()["id"], "type": "pickup", "sequence": 1, "name": "Old Stop"},
+    )
+    assert stop.status_code == 201
+    stop_id = stop.json()["id"]
+
+    update = client.put(
+        f"/routes/{route_id}/stops/{stop_id}",
+        json={"name": "New Stop Name", "sequence": 1},
+    )
+    assert update.status_code == 200
+    assert update.json()["id"] == stop_id
+    assert update.json()["name"] == "New Stop Name"
+
+
+def test_update_route_stop_under_wrong_route_returns_404(client):
+    route_one = client.post("/routes/", json={"route_number": "CASCADE-STOP-UP-WRONG-A"})
+    route_two = client.post("/routes/", json={"route_number": "CASCADE-STOP-UP-WRONG-B"})
+    assert route_one.status_code in (200, 201)
+    assert route_two.status_code in (200, 201)
+
+    run = client.post(f"/routes/{route_one.json()['id']}/runs", json={"run_type": "AM"})
+    stop = client.post(
+        f"/routes/{route_one.json()['id']}/stops",
+        json={"run_id": run.json()["id"], "type": "pickup", "sequence": 1},
+    )
+    assert run.status_code == 201
+    assert stop.status_code == 201
+
+    update = client.put(
+        f"/routes/{route_two.json()['id']}/stops/{stop.json()['id']}",
+        json={"name": "Wrong Route Stop"},
+    )
+    assert update.status_code == 404
+
+
+def test_delete_route_stop_under_correct_route_succeeds(client, db_engine):
+    route = client.post("/routes/", json={"route_number": "CASCADE-STOP-DELETE"})
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
+    stop = client.post(
+        f"/routes/{route_id}/stops",
+        json={"run_id": run.json()["id"], "type": "pickup", "sequence": 1},
+    )
+    assert run.status_code == 201
+    assert stop.status_code == 201
+    stop_id = stop.json()["id"]
+
+    delete = client.delete(f"/routes/{route_id}/stops/{stop_id}")
+    assert delete.status_code == 204
+
+    with Session(db_engine) as db:
+        assert db.get(Stop, stop_id) is None
+
+
+def test_delete_route_stop_under_wrong_route_returns_404(client):
+    route_one = client.post("/routes/", json={"route_number": "CASCADE-STOP-DEL-WRONG-A"})
+    route_two = client.post("/routes/", json={"route_number": "CASCADE-STOP-DEL-WRONG-B"})
+    assert route_one.status_code in (200, 201)
+    assert route_two.status_code in (200, 201)
+
+    run = client.post(f"/routes/{route_one.json()['id']}/runs", json={"run_type": "AM"})
+    stop = client.post(
+        f"/routes/{route_one.json()['id']}/stops",
+        json={"run_id": run.json()["id"], "type": "pickup", "sequence": 1},
+    )
+    assert run.status_code == 201
+    assert stop.status_code == 201
+
+    delete = client.delete(f"/routes/{route_two.json()['id']}/stops/{stop.json()['id']}")
+    assert delete.status_code == 404
+
+
+def test_remove_student_from_route_succeeds(client, db_engine):
+    route = client.post("/routes/", json={"route_number": "CASCADE-STUDENT-REMOVE"})
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    school = client.post("/schools/", json={"name": "Route Student Remove School", "address": "1 Remove Way"})
+    assert school.status_code == 201
+
+    student = client.post(
+        f"/routes/{route_id}/students",
+        json={"name": "Route Student", "school_id": school.json()["id"]},
+    )
+    assert student.status_code == 201
+    student_id = student.json()["id"]
+
+    delete = client.delete(f"/routes/{route_id}/students/{student_id}")
+    assert delete.status_code == 204
+
+    with Session(db_engine) as db:
+        student_row = db.get(Student, student_id)
+        assert student_row is not None
+        assert student_row.route_id is None
+        assert student_row.stop_id is None
+
+
+def test_remove_student_from_wrong_route_returns_404(client):
+    route_one = client.post("/routes/", json={"route_number": "CASCADE-STUDENT-WRONG-A"})
+    route_two = client.post("/routes/", json={"route_number": "CASCADE-STUDENT-WRONG-B"})
+    school = client.post("/schools/", json={"name": "Route Student Wrong School", "address": "2 Wrong Way"})
+    assert route_one.status_code in (200, 201)
+    assert route_two.status_code in (200, 201)
+    assert school.status_code == 201
+
+    student = client.post(
+        f"/routes/{route_one.json()['id']}/students",
+        json={"name": "Wrong Route Student", "school_id": school.json()["id"]},
+    )
+    assert student.status_code == 201
+
+    delete = client.delete(f"/routes/{route_two.json()['id']}/students/{student.json()['id']}")
+    assert delete.status_code == 404
 
 
 # ---------------------------------------------------------------------------
