@@ -9,6 +9,7 @@ from typing import List
 from database import get_db
 from backend import schemas
 from backend.models import driver as driver_model
+from backend.models.yard import Yard
 from backend.models.associations import RouteDriverAssignment
 from backend.models.route import Route
 from backend.schemas.driver import DriverUpdate
@@ -17,13 +18,29 @@ from backend.routers.route import _serialize_route
 from backend.models.operator import Operator
 from backend.utils.auth import hash_driver_pin
 from backend.utils.operator_scope import get_operator_context
-from backend.utils.operator_scope import get_operator_scoped_record_or_404
+from backend.utils.operator_scope import get_operator_scoped_driver_or_404
 from backend.utils.operator_scope import get_route_access_level
 
 # -----------------------------------------------------------
 # Router setup
 # -----------------------------------------------------------
 router = APIRouter(prefix="/drivers", tags=["Drivers"])
+
+
+def _get_or_create_operator_yard(db: Session, operator_id: int) -> Yard:
+    yard = (
+        db.query(Yard)
+        .filter(Yard.operator_id == operator_id)
+        .order_by(Yard.id.asc())
+        .first()
+    )
+    if yard:
+        return yard
+
+    yard = Yard(name="Main Yard", operator_id=operator_id)
+    db.add(yard)
+    db.flush()
+    return yard
 
 
 # -----------------------------------------------------------
@@ -45,9 +62,11 @@ def create_driver(
 ):
     payload = driver.model_dump()
     pin = payload.pop("pin")
+    yard = _get_or_create_operator_yard(db, operator.id)
     new_driver = driver_model.Driver(
         **payload,
         operator_id=operator.id,
+        yard_id=yard.id,
         pin_hash=hash_driver_pin(pin),
     )
     db.add(new_driver)
@@ -73,7 +92,8 @@ def get_drivers(
 ):
     return (
         db.query(driver_model.Driver)
-        .filter(driver_model.Driver.operator_id == operator.id)
+        .join(driver_model.Driver.yard)
+        .filter(Yard.operator_id == operator.id)
         .all()
     )
 
@@ -93,10 +113,9 @@ def get_driver(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    driver = get_operator_scoped_record_or_404(
+    driver = get_operator_scoped_driver_or_404(
         db=db,
-        model=driver_model.Driver,
-        record_id=driver_id,
+        driver_id=driver_id,
         operator_id=operator.id,
         detail="Driver not found",
     )
@@ -124,10 +143,9 @@ def get_driver_routes(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    driver = get_operator_scoped_record_or_404(
+    driver = get_operator_scoped_driver_or_404(
         db=db,
-        model=driver_model.Driver,
-        record_id=driver_id,
+        driver_id=driver_id,
         operator_id=operator.id,
         detail="Driver not found",
     )
@@ -144,7 +162,7 @@ def get_driver_routes(
     routes = [
         route
         for route in candidate_routes
-        if get_route_access_level(route, driver.operator_id) is not None
+        if driver.yard and get_route_access_level(route, driver.yard.operator_id) is not None
     ]
     return [_serialize_route(route) for route in routes]
 
@@ -166,10 +184,9 @@ def update_driver(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    driver = get_operator_scoped_record_or_404(
+    driver = get_operator_scoped_driver_or_404(
         db=db,
-        model=driver_model.Driver,
-        record_id=driver_id,
+        driver_id=driver_id,
         operator_id=operator.id,
         detail="Driver not found",
     )
@@ -201,10 +218,9 @@ def delete_driver(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    driver = get_operator_scoped_record_or_404(
+    driver = get_operator_scoped_driver_or_404(
         db=db,
-        model=driver_model.Driver,
-        record_id=driver_id,
+        driver_id=driver_id,
         operator_id=operator.id,
         detail="Driver not found",
     )

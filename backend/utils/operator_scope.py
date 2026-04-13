@@ -2,9 +2,11 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session, selectinload
 
 from database import get_db
+from backend.models import driver as driver_model
 from backend.models.operator import Operator
 from backend.models.operator import OperatorRouteAccess
 from backend.models.route import Route
+from backend.models.yard import Yard
 
 
 DEFAULT_OPERATOR_NAME = "Default Operator"
@@ -63,6 +65,25 @@ def get_operator_scoped_record_or_404(
     if not record:
         raise HTTPException(status_code=404, detail=detail)
     return record
+
+
+def get_operator_scoped_driver_or_404(
+    *,
+    db: Session,
+    driver_id: int,
+    operator_id: int,
+    detail: str,
+):
+    driver = (
+        db.query(driver_model.Driver)
+        .join(driver_model.Driver.yard)
+        .filter(driver_model.Driver.id == driver_id)
+        .filter(Yard.operator_id == operator_id)
+        .first()
+    )
+    if not driver:
+        raise HTTPException(status_code=404, detail=detail)
+    return driver
 
 
 def _route_access_satisfies(access_level: str | None, required_access: str) -> bool:
