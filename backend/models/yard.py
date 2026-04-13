@@ -16,3 +16,4 @@ class Yard(Base):
     operator_id = Column(Integer, ForeignKey("operators.id"), nullable=False)
 
     operator = relationship("Operator", back_populates="yards")
+    drivers = relationship("Driver", back_populates="yard")
