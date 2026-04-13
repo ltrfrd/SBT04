@@ -331,12 +331,13 @@ def _update_student_record(
     status_code=status.HTTP_201_CREATED,
     summary="Create student (secondary compatibility)",
     description=(
-        "Secondary compatibility endpoint for creating a student record directly. "
+        "Deprecated compatibility endpoint for creating a student record directly. "
         "Preferred layered workflow is POST /runs/{run_id}/stops/{stop_id}/students so route and stop context are inherited automatically. "
         "Optional route_id and stop_id fields are legacy planning pointers for compatibility only. "
         "When stop context is supplied, only planned runs can be modified."
     ),
     response_description="Created student",
+    deprecated=True,
 )
 def create_student(
     student: schemas.StudentCompatibilityCreate,
@@ -375,12 +376,14 @@ def create_student(
     "/{district_id}/students",
     response_model=schemas.StudentOut,
     status_code=status.HTTP_201_CREATED,
-    summary="Create student under district",
+    summary="Create student under district (compatibility)",
     description=(
-        "Create a student under the selected district context. "
+        "Deprecated compatibility endpoint for creating a student under the selected district context. "
+        "Preferred layered workflow is POST /runs/{run_id}/stops/{stop_id}/students so route, run, and stop context are inherited automatically. "
         "The path district_id is authoritative and operator context is preserved for compatibility."
     ),
     response_description="Created student",
+    deprecated=True,
 )
 def create_student_for_district(
     district_id: int,

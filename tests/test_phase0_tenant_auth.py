@@ -190,6 +190,119 @@ def test_shared_route_access_requires_explicit_grant(client, db_engine):
     assert shared_write.status_code == 404
 
 
+def test_dashboard_counts_include_accessible_shared_planning_records(client, db_engine):
+    owner_operator_id = _create_operator_in_db(db_engine, "Dashboard Owner")
+    shared_operator_id = _create_operator_in_db(db_engine, "Dashboard Shared")
+
+    owner_driver_id = _create_driver_in_db(db_engine, owner_operator_id, "Dashboard Owner Driver", "dashboard-owner@test.com")
+    shared_driver_id = _create_driver_in_db(db_engine, shared_operator_id, "Dashboard Shared Driver", "dashboard-shared@test.com")
+
+    _login(client, owner_driver_id)
+
+    school = client.post(
+        "/schools/",
+        json={"name": "Dashboard Shared School", "address": "10 Dashboard Way"},
+    )
+    assert school.status_code == 201
+    school_id = school.json()["id"]
+
+    route = client.post("/routes/", json={"route_number": "DASH-SHARED-1", "school_ids": [school_id]})
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "Morning"})
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    stop = client.post(
+        f"/runs/{run_id}/stops",
+        json={"sequence": 1, "type": "pickup", "name": "Dashboard Shared Stop"},
+    )
+    assert stop.status_code in (200, 201)
+    stop_id = stop.json()["id"]
+
+    student = client.post(
+        f"/runs/{run_id}/stops/{stop_id}/students",
+        json={"name": "Dashboard Shared Student", "grade": "4", "school_id": school_id},
+    )
+    assert student.status_code == 201
+
+    grant = client.post(
+        f"/routes/{route_id}/share/{shared_operator_id}",
+        json={"access_level": "read"},
+    )
+    assert grant.status_code == 200
+
+    _logout(client)
+    _login(client, shared_driver_id)
+
+    response = client.get("/dashboard")
+    assert response.status_code == 200
+    body = response.text
+
+    assert "<strong>Routes:</strong> 1" in body
+    assert "<strong>Schools:</strong> 1" in body
+    assert "<strong>Students:</strong> 1" in body
+    assert "<strong>Active Runs:</strong> 1" in body
+
+
+def test_shared_operator_can_create_student_from_run_stop_context_on_shared_district_route(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "Shared Student District")
+    owner_operator_id = _create_operator_in_db(db_engine, "Shared Student Owner")
+    shared_operator_id = _create_operator_in_db(db_engine, "Shared Student Guest")
+
+    owner_driver_id = _create_driver_in_db(db_engine, owner_operator_id, "Shared Student Owner Driver", "shared-student-owner@test.com")
+    shared_driver_id = _create_driver_in_db(db_engine, shared_operator_id, "Shared Student Guest Driver", "shared-student-guest@test.com")
+
+    _login(client, owner_driver_id)
+
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "Shared Planning School", "address": "11 Shared Planning Way"},
+    )
+    assert school.status_code == 201
+    school_id = school.json()["id"]
+
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "SHARED-STUDENT-1", "school_ids": [school_id]},
+    )
+    assert route.status_code == 201
+    route_id = route.json()["id"]
+
+    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "Morning"})
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    stop = client.post(
+        f"/runs/{run_id}/stops",
+        json={"sequence": 1, "type": "pickup", "name": "Shared Planning Stop"},
+    )
+    assert stop.status_code in (200, 201)
+    stop_id = stop.json()["id"]
+
+    grant = client.post(
+        f"/routes/{route_id}/share/{shared_operator_id}",
+        json={"access_level": "read"},
+    )
+    assert grant.status_code == 200
+
+    _logout(client)
+    _login(client, shared_driver_id)
+
+    response = client.post(
+        f"/runs/{run_id}/stops/{stop_id}/students",
+        json={"name": "Shared Planning Student", "grade": "5", "school_id": school_id},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["name"] == "Shared Planning Student"
+    assert body["school_id"] == school_id
+    assert body["route_id"] == route_id
+    assert body["stop_id"] == stop_id
+
+
 # ---------------------------------------------------------------------------
 # List endpoints only return operator-owned records
 # ---------------------------------------------------------------------------

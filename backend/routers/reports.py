@@ -803,52 +803,57 @@ class StudentStatusUpdate(BaseModel):                      # Pydantic model for 
     status: str                                            # "present" or "absent"
 
 
+class SchoolStatusUpdate(BaseModel):                       # Canonical request body for path-driven school status updates
+    status: str                                            # "present" or "absent"
+
+
 # -------------------------------------------------------------------------
-# School updates student status (layered, non-driver)
+# School status update helper
+# Reuse one validation path across canonical and compatibility endpoints
 # -------------------------------------------------------------------------
-@attendance_router.post(
-    "/school/student-status",
-    status_code=status.HTTP_200_OK,
-    summary="Update school student status",
-    description="Update school-layer reports status for one assigned student.",
-    response_description="School student status updated",
-    deprecated=True,
-)
-@router.post(
-    "/school/student-status",                               # Endpoint for school-side status updates
-    status_code=status.HTTP_200_OK,                         # HTTP 200 on success
-    summary="Update school student status",                 # Swagger title
-    description="Update school-layer reports status for one assigned student.",  # Swagger description
-    response_description="School student status updated",   # Swagger response text
-)
-def update_school_status(                                  # Handler function
-    payload: StudentStatusUpdate,                          # Typed JSON body
-    db: Session = Depends(get_db),                         # Database session dependency
-    operator: Operator = Depends(get_operator_context),
+def update_school_status_for_assignment(
+    *,
+    run_id: int,
+    student_id: int,
+    status_value: str,
+    db: Session,
+    operator: Operator,
 ):
-    if payload.status not in ["present", "absent"]:        # Validate allowed values
-        raise HTTPException(                               # Reject bad request
+    if status_value not in ["present", "absent"]:          # Validate allowed values
+        raise HTTPException(
             status_code=400,
-            detail="Invalid payload"
+            detail="Invalid payload",
         )
 
     assignment = (
         db.query(StudentRunAssignment)                     # Query assignment record
-        .options(joinedload(StudentRunAssignment.student)) # Load student for school verification
+        .options(
+            joinedload(StudentRunAssignment.student),      # Load student for operator + school verification
+            joinedload(StudentRunAssignment.run).joinedload(Run.route),  # Load run route for shared access validation
+        )
         .filter(
-            StudentRunAssignment.student_id == payload.student_id,   # Match student
-            StudentRunAssignment.run_id == payload.run_id            # Match run
+            StudentRunAssignment.student_id == student_id, # Match student
+            StudentRunAssignment.run_id == run_id,         # Match run
         )
         .first()
-    )                                                     # Get first match
+    )
 
     if not assignment:                                     # If no record found
         raise HTTPException(
             status_code=404,
-            detail="Assignment not found"
+            detail="Assignment not found",
         )
     if not assignment.student or assignment.student.operator_id != operator.id:
         raise HTTPException(status_code=404, detail="Assignment not found")
+    if not assignment.run or not assignment.run.route:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    get_operator_scoped_route_or_404(
+        db=db,
+        route_id=assignment.run.route_id,
+        operator_id=operator.id,
+        required_access="read",
+    )                                                       # Enforce route-level operator visibility
 
     school_id = assignment.student.school_id if assignment.student else None   # Resolve owning school
     verification = None                                                        # Default no confirmation
@@ -858,7 +863,7 @@ def update_school_status(                                  # Handler function
             db.query(SchoolAttendanceVerification)
             .filter(
                 SchoolAttendanceVerification.school_id == school_id,            # Match school
-                SchoolAttendanceVerification.run_id == payload.run_id,          # Match run
+                SchoolAttendanceVerification.run_id == run_id,                  # Match run
             )
             .first()
         )
@@ -869,16 +874,49 @@ def update_school_status(                                  # Handler function
             detail="Reports already confirmed for this run",
         )
 
-    assignment.school_status = payload.status              # Save school-layer status
+    assignment.school_status = status_value                                    # Save school-layer status
 
-    db.commit()                                            # Persist change
+    db.commit()                                                                # Persist change
 
-    return {                                               # Response payload
+    return {
         "message": "Status updated",
-        "student_id": payload.student_id,
-        "run_id": payload.run_id,
-        "school_status": payload.status
-    }    
+        "student_id": student_id,
+        "run_id": run_id,
+        "school_status": status_value,
+    }
+
+
+# -------------------------------------------------------------------------
+# School updates student status (layered, non-driver)
+# -------------------------------------------------------------------------
+@attendance_router.post(
+    "/school/student-status",
+    status_code=status.HTTP_200_OK,
+    summary="Update school student status (compatibility)",
+    description="Compatibility endpoint for older clients that still send run_id and student_id in the body. Preferred workflow is POST /runs/{run_id}/students/{student_id}/school-status so run and student context stay in the path.",
+    response_description="School student status updated",
+    deprecated=True,
+)
+@router.post(
+    "/school/student-status",                               # Endpoint for school-side status updates
+    status_code=status.HTTP_200_OK,                         # HTTP 200 on success
+    summary="Update school student status (compatibility)", # Swagger title
+    description="Compatibility endpoint for older clients that still send run_id and student_id in the body. Preferred workflow is POST /runs/{run_id}/students/{student_id}/school-status so run and student context stay in the path.",  # Swagger description
+    response_description="School student status updated",   # Swagger response text
+    deprecated=True,
+)
+def update_school_status(                                  # Handler function
+    payload: StudentStatusUpdate,                          # Typed JSON body
+    db: Session = Depends(get_db),                         # Database session dependency
+    operator: Operator = Depends(get_operator_context),
+):
+    return update_school_status_for_assignment(
+        run_id=payload.run_id,
+        student_id=payload.student_id,
+        status_value=payload.status,
+        db=db,
+        operator=operator,
+    )
 
 get_driver_work_summary = get_driver_dispatch_summary
 get_driver_attendance = get_driver_reports

@@ -30,6 +30,7 @@ from backend.utils.auth import get_current_driver
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
 from backend.utils.driver_workspace import _build_route_workspace
+from backend.utils.planning_scope import accessible_route_filter, accessible_school_filter, accessible_student_filter
 from backend.utils.route_driver_assignment import get_route_driver_name
 
 
@@ -49,10 +50,10 @@ def dashboard(
     """Renders admin dashboard summary with record counts."""
     counts = {
         "driver_count": db.query(driver_model.Driver).filter(driver_model.Driver.operator_id == operator.id).count(),
-        "school_count": db.query(school_model.School).filter(school_model.School.operator_id == operator.id).count(),
-        "route_count": db.query(route_model.Route).filter(route_model.Route.operator_id == operator.id).count(),
-        "student_count": db.query(student_model.Student).filter(student_model.Student.operator_id == operator.id).count(),
-        "run_count": db.query(run_model.Run).join(route_model.Route, route_model.Route.id == run_model.Run.route_id).filter(route_model.Route.operator_id == operator.id).filter(run_model.Run.end_time.is_(None)).count(),
+        "school_count": db.query(school_model.School).filter(accessible_school_filter(operator.id)).count(),
+        "route_count": db.query(route_model.Route).filter(accessible_route_filter(operator.id)).count(),
+        "student_count": db.query(student_model.Student).filter(accessible_student_filter(operator.id)).count(),
+        "run_count": db.query(run_model.Run).join(route_model.Route, route_model.Route.id == run_model.Run.route_id).filter(accessible_route_filter(operator.id)).filter(run_model.Run.end_time.is_(None)).count(),
     }
     return templates.TemplateResponse(
         request,                                              # Request first (prevents deprecation warning)

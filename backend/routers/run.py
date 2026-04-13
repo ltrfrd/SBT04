@@ -37,6 +37,7 @@ from backend.schemas.run import (  # Running board response schemas
     RunningBoardStudent,
 )
 from backend.utils.student_bus_absence import apply_run_absence_filter
+from backend.utils.planning_scope import get_school_for_planning_or_404, validate_route_school_alignment
 from backend.utils.route_driver_assignment import resolve_route_driver_assignment
 from backend.utils.db_errors import raise_conflict_if_unique
 from backend.utils.pretrip_alerts import create_missing_pretrip_alert_if_needed
@@ -45,6 +46,7 @@ from backend.utils.operator_scope import get_operator_scoped_record_or_404
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
 from backend.utils.operator_scope import get_route_access_level
 from backend.utils.run_setup import ensure_run_is_planned_for_setup, get_run_stop_context_or_404
+from backend.routers.reports import SchoolStatusUpdate
 from backend.schemas.run import (
     PickupStudentRequest,
     PickupStudentResponse,
@@ -391,10 +393,9 @@ def _create_stop_context_student(
     operator_id: int,
     db: Session,
 ) -> Student:
-    school = get_operator_scoped_record_or_404(
+    school = get_school_for_planning_or_404(
         db=db,
-        model=school_model.School,
-        record_id=payload.school_id,
+        school_id=payload.school_id,
         operator_id=operator_id,
         detail="School not found",
     )
@@ -410,6 +411,11 @@ def _create_stop_context_student(
     route_school_ids = {school.id for school in route.schools}
     if payload.school_id not in route_school_ids:
         raise HTTPException(status_code=400, detail="School is not assigned to the run route")
+    validate_route_school_alignment(
+        route_district_id=route.district_id,
+        route_operator_id=route.operator_id,
+        school=school,
+    )
 
     student = Student(
         name=payload.name,
@@ -1148,9 +1154,7 @@ def create_stop_inside_run(
     operator: Operator = Depends(get_operator_context),
 ):
     from backend.routers import stop as stop_router  # Local import avoids circular import at module load time
-    owner_run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read", options=[joinedload(run_model.Run.route)])
-    if owner_run.route and owner_run.route.operator_id != operator.id:
-        raise HTTPException(status_code=404, detail="Run not found")
+    _get_operator_scoped_run_or_404(run_id, db, operator.id, "read", options=[joinedload(run_model.Run.route)])
 
     return stop_router.create_run_stop(                          # Reuse shared stop workflow rules
         run_id=run_id,                                          # Parent run context from path
@@ -1178,15 +1182,44 @@ def update_stop_inside_run(
     operator: Operator = Depends(get_operator_context),
 ):
     from backend.routers import stop as stop_router  # Local import avoids circular import at module load time
-    owner_run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read", options=[joinedload(run_model.Run.route)])
-    if owner_run.route and owner_run.route.operator_id != operator.id:
-        raise HTTPException(status_code=404, detail="Run not found")
+    _get_operator_scoped_run_or_404(run_id, db, operator.id, "read", options=[joinedload(run_model.Run.route)])
 
     return stop_router.update_run_stop(
         run_id=run_id,                                          # Parent run context from path
         stop_id=stop_id,                                        # Stop selected within that run
         payload=payload,                                        # Context payload without run_id
         db=db,                                                  # Shared DB session
+    )
+
+
+# -----------------------------------------------------------
+# - Run-context school status update
+# - Update school reports status from authoritative run and student path context
+# -----------------------------------------------------------
+@router.post(
+    "/{run_id}/students/{student_id}/school-status",
+    status_code=status.HTTP_200_OK,
+    summary="Update school status inside run",
+    description="Preferred workflow-first school status update endpoint. Update one assigned student's school status from run and student path context without sending internal IDs in the body.",
+    response_description="School student status updated",
+)
+def update_run_student_school_status(
+    run_id: int,
+    student_id: int,
+    payload: SchoolStatusUpdate,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    from backend.routers import reports as reports_router  # Local import avoids circular import at module load time
+
+    _get_operator_scoped_run_or_404(run_id, db, operator.id, "read", options=[joinedload(run_model.Run.route)])
+
+    return reports_router.update_school_status_for_assignment(
+        run_id=run_id,
+        student_id=student_id,
+        status_value=payload.status,
+        db=db,
+        operator=operator,
     )
 
 
@@ -1209,9 +1242,7 @@ def create_run_stop_student(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    owner_run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read", options=[joinedload(run_model.Run.route)])
-    if owner_run.route and owner_run.route.operator_id != operator.id:
-        raise HTTPException(status_code=404, detail="Run not found")
+    _get_operator_scoped_run_or_404(run_id, db, operator.id, "read", options=[joinedload(run_model.Run.route)])
     run, stop = _get_run_stop_or_404(run_id, stop_id, db)  # Validate stop context once
 
     try:
@@ -1257,9 +1288,7 @@ def update_run_stop_student(
     operator: Operator = Depends(get_operator_context),
 ):
     from backend.routers import student as student_router  # Local import avoids circular import at module load time
-    owner_run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read", options=[joinedload(run_model.Run.route)])
-    if owner_run.route and owner_run.route.operator_id != operator.id:
-        raise HTTPException(status_code=404, detail="Run not found")
+    _get_operator_scoped_run_or_404(run_id, db, operator.id, "read", options=[joinedload(run_model.Run.route)])
 
     run, stop, student, assignment = _get_run_stop_student_context_or_404(
         run_id=run_id,
@@ -1300,9 +1329,7 @@ def delete_run_stop_student(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    owner_run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read", options=[joinedload(run_model.Run.route)])
-    if owner_run.route and owner_run.route.operator_id != operator.id:
-        raise HTTPException(status_code=404, detail="Run not found")
+    _get_operator_scoped_run_or_404(run_id, db, operator.id, "read", options=[joinedload(run_model.Run.route)])
     run, stop, student, assignment = _get_run_stop_student_context_or_404(
         run_id=run_id,
         stop_id=stop_id,
@@ -1341,9 +1368,7 @@ def bulk_create_run_stop_students(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    owner_run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read", options=[joinedload(run_model.Run.route)])
-    if owner_run.route and owner_run.route.operator_id != operator.id:
-        raise HTTPException(status_code=404, detail="Run not found")
+    _get_operator_scoped_run_or_404(run_id, db, operator.id, "read", options=[joinedload(run_model.Run.route)])
     run, stop = _get_run_stop_or_404(run_id, stop_id, db)  # Validate stop context once
 
     created_students: list[Student] = []

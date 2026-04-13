@@ -30,7 +30,7 @@ from backend.schemas.route import (
     RouteSchoolOut,
 )
 from backend.schemas.run import RouteRunCreate, RunUpdate
-from backend.schemas.stop import StopCreate, StopOut, StopUpdate
+from backend.schemas.stop import RunStopCreate, StopCreate, StopOut, StopUpdate
 from backend.utils.planning_scope import (
     get_route_run_or_404,
     get_route_stop_or_404,
@@ -694,22 +694,16 @@ def delete_route_run(
 
 
 # -----------------------------------------------------------
-# - Create stop inside route
-# - Attach one planned stop under a run that belongs to the route
+# - Route-run stop creation helper
+# - Create a stop inside a selected route and run context pair
 # -----------------------------------------------------------
-@router.post(
-    "/{route_id}/stops",
-    response_model=StopOut,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create stop inside route",
-    description="Create a planned stop under the selected route context. The target run must already belong to the route.",
-    response_description="Created stop",
-)
-def create_route_stop(
+def _create_route_run_stop(
+    *,
     route_id: int,
-    payload: StopCreate,
-    db: Session = Depends(get_db),
-    operator: Operator = Depends(get_operator_context),
+    run_id: int,
+    payload: RunStopCreate,
+    db: Session,
+    operator: Operator,
 ):
     from backend.routers import stop as stop_router  # Local import avoids circular import at module load time
 
@@ -720,14 +714,69 @@ def create_route_stop(
         required_access="read",
     )
 
-    run = db.get(run_model.Run, payload.run_id)
+    run = db.get(run_model.Run, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     if run.route_id != route.id:
         raise HTTPException(status_code=400, detail="Run does not belong to route")
 
-    new_stop = stop_router.create_run_stop(
+    return stop_router.create_run_stop(
         run_id=run.id,
+        payload=payload,
+        db=db,
+    )
+
+
+# -----------------------------------------------------------
+# - Create stop inside route run
+# - Attach one planned stop under a route-owned run using path context only
+# -----------------------------------------------------------
+@router.post(
+    "/{route_id}/runs/{run_id}/stops",
+    response_model=StopOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create stop inside route run",
+    description="Preferred workflow-first stop creation endpoint. Create a planned stop under the selected route and run context without sending internal run_id in the body.",
+    response_description="Created stop",
+)
+def create_route_run_stop(
+    route_id: int,
+    run_id: int,
+    payload: RunStopCreate,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    return _create_route_run_stop(
+        route_id=route_id,
+        run_id=run_id,
+        payload=payload,
+        db=db,
+        operator=operator,
+    )
+
+
+# -----------------------------------------------------------
+# - Create stop inside route
+# - Attach one planned stop under a run that belongs to the route
+# -----------------------------------------------------------
+@router.post(
+    "/{route_id}/stops",
+    response_model=StopOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create stop inside route (compatibility)",
+    description="Compatibility endpoint for older clients that still send run_id in the body. Preferred workflow is POST /routes/{route_id}/runs/{run_id}/stops so route and run context stay in the path.",
+    response_description="Created stop",
+    deprecated=True,
+)
+def create_route_stop(
+    route_id: int,
+    payload: StopCreate,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    return _create_route_run_stop(
+        route_id=route_id,
+        run_id=payload.run_id,
         payload=schemas.RunStopCreate(
             type=payload.type,
             sequence=payload.sequence,
@@ -739,8 +788,8 @@ def create_route_stop(
             longitude=payload.longitude,
         ),
         db=db,
+        operator=operator,
     )
-    return new_stop
 
 
 # -----------------------------------------------------------

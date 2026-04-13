@@ -556,6 +556,117 @@ def test_create_student_inside_run_stop_context_rejects_stop_mismatch(client):
     assert response.json()["detail"] == "Stop does not belong to run"
 
 
+def test_create_student_inside_run_stop_context_returns_404_for_missing_run(client):
+    school = client.post("/schools/", json={"name": "Missing Run School", "address": "92 Missing Way"})
+    assert school.status_code in (200, 201)
+
+    response = client.post(
+        "/runs/999999/stops/1/students",
+        json={"name": "Missing Run Student", "grade": "6", "school_id": school.json()["id"]},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Run not found"
+
+
+def test_create_student_inside_run_stop_context_returns_404_for_missing_stop(client):
+    school = client.post("/schools/", json={"name": "Missing Stop School", "address": "93 Missing Way"})
+    assert school.status_code in (200, 201)
+
+    driver = client.post("/drivers/", json={"name": "Missing Stop Driver", "email": "missing.stop@x.com", "phone": "8", "pin": "1234"})
+    assert driver.status_code in (200, 201)
+    route_id = _create_route_with_assignment(client, "MISS-STOP-1", "BUS-MISS-STOP-1", driver.json()["id"])
+    route_update = client.put(
+        f"/routes/{route_id}",
+        json={"route_number": "MISS-STOP-1", "school_ids": [school.json()["id"]]},
+    )
+    assert route_update.status_code == 200
+
+    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "Morning"})
+    assert run.status_code in (200, 201)
+
+    response = client.post(
+        f"/runs/{run.json()['id']}/stops/999999/students",
+        json={"name": "Missing Stop Student", "grade": "6", "school_id": school.json()["id"]},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Stop not found"
+
+
+def test_create_student_inside_run_stop_context_rejects_invalid_school(client):
+    driver = client.post("/drivers/", json={"name": "Invalid School Driver", "email": "invalid.school@x.com", "phone": "9", "pin": "1234"})
+    assert driver.status_code in (200, 201)
+    route_id = _create_route_with_assignment(client, "INV-SCH-1", "BUS-INV-SCH-1", driver.json()["id"])
+
+    school = client.post("/schools/", json={"name": "Assigned School", "address": "94 Assigned Way"})
+    assert school.status_code in (200, 201)
+    route_update = client.put(
+        f"/routes/{route_id}",
+        json={"route_number": "INV-SCH-1", "school_ids": [school.json()["id"]]},
+    )
+    assert route_update.status_code == 200
+
+    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "Morning"})
+    assert run.status_code in (200, 201)
+    stop = client.post(
+        f"/runs/{run.json()['id']}/stops",
+        json={"sequence": 1, "type": "pickup", "name": "Assigned Stop"},
+    )
+    assert stop.status_code in (200, 201)
+
+    response = client.post(
+        f"/runs/{run.json()['id']}/stops/{stop.json()['id']}/students",
+        json={"name": "Wrong School Student", "grade": "6", "school_id": school.json()["id"] + 999},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "School not found"
+
+
+def test_create_student_inside_run_stop_context_rejects_started_run(client):
+    school = client.post("/schools/", json={"name": "Started Run School", "address": "95 Started Way"})
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]
+
+    driver = client.post("/drivers/", json={"name": "Started Run Driver", "email": "started.run@x.com", "phone": "10", "pin": "1234"})
+    assert driver.status_code in (200, 201)
+    route_id = _create_route_with_assignment(client, "START-CTX-1", "BUS-START-CTX-1", driver.json()["id"])
+    route_update = client.put(
+        f"/routes/{route_id}",
+        json={"route_number": "START-CTX-1", "school_ids": [school_id]},
+    )
+    assert route_update.status_code == 200
+
+    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "Morning"})
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    stop = client.post(
+        f"/runs/{run_id}/stops",
+        json={"sequence": 1, "type": "pickup", "name": "Started Stop"},
+    )
+    assert stop.status_code in (200, 201)
+    stop_id = stop.json()["id"]
+
+    seed_student = client.post(
+        f"/runs/{run_id}/stops/{stop_id}/students",
+        json={"name": "Seed Student", "grade": "4", "school_id": school_id},
+    )
+    assert seed_student.status_code == 201
+
+    started = client.post(f"/runs/start?run_id={run_id}")
+    assert started.status_code in (200, 201)
+
+    response = client.post(
+        f"/runs/{run_id}/stops/{stop_id}/students",
+        json={"name": "Late Student", "grade": "5", "school_id": school_id},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Only planned runs can be modified"
+
+
 def test_update_student_inside_run_stop_context_rejects_wrong_run_or_stop_pairing(client):
     school = client.post("/schools/", json={"name": "Mismatch Update School", "address": "91 Mismatch Way"})
     assert school.status_code in (200, 201)
@@ -1557,6 +1668,7 @@ def test_run_context_student_create_endpoint_appears_in_openapi(client):
     assert "route_id" not in properties
     assert "run_id" not in properties
     assert "stop_id" not in properties
+    assert "school_id" in properties
 
 
 def test_generic_student_create_endpoint_is_secondary_in_openapi(client):
@@ -1566,8 +1678,10 @@ def test_generic_student_create_endpoint_is_secondary_in_openapi(client):
     path_item = response.json()["paths"]["/students/"]["post"]
     assert path_item["summary"] == "Create student (secondary compatibility)"
     assert "Preferred layered workflow is POST /runs/{run_id}/stops/{stop_id}/students" in path_item["description"]
+    assert "Deprecated compatibility endpoint" in path_item["description"]
     assert "Optional route_id and stop_id fields are legacy planning pointers" in path_item["description"]
     assert "only planned runs can be modified" in path_item["description"].lower()
+    assert path_item["deprecated"] is True
 
     schema_ref = path_item["requestBody"]["content"]["application/json"]["schema"]["$ref"]
     assert schema_ref.endswith("/StudentCompatibilityCreate")
@@ -1575,6 +1689,37 @@ def test_generic_student_create_endpoint_is_secondary_in_openapi(client):
     properties = response.json()["components"]["schemas"]["StudentCompatibilityCreate"]["properties"]
     assert "route_id" in properties
     assert "stop_id" in properties
+
+
+def test_district_student_create_endpoint_is_compatibility_only_in_openapi(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    path_item = response.json()["paths"]["/districts/{district_id}/students"]["post"]
+    assert path_item["summary"] == "Create student under district (compatibility)"
+    assert "Deprecated compatibility endpoint" in path_item["description"]
+    assert "Preferred layered workflow is POST /runs/{run_id}/stops/{stop_id}/students" in path_item["description"]
+    assert path_item["deprecated"] is True
+
+
+def test_route_stop_create_compatibility_endpoint_is_deprecated_in_openapi(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    path_item = response.json()["paths"]["/routes/{route_id}/stops"]["post"]
+    assert path_item["summary"] == "Create stop inside route (compatibility)"
+    assert "Preferred workflow is POST /routes/{route_id}/runs/{run_id}/stops" in path_item["description"]
+    assert path_item["deprecated"] is True
+
+
+def test_reports_school_status_compatibility_endpoint_is_deprecated_in_openapi(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    path_item = response.json()["paths"]["/reports/school/student-status"]["post"]
+    assert path_item["summary"] == "Update school student status (compatibility)"
+    assert "Preferred workflow is POST /runs/{run_id}/students/{student_id}/school-status" in path_item["description"]
+    assert path_item["deprecated"] is True
 
 
 def test_run_context_student_update_endpoint_appears_in_openapi(client):

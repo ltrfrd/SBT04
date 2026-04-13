@@ -3521,12 +3521,8 @@ def test_update_school_status(client, db_engine):                              #
     # Call school status update endpoint
     # -------------------------------------------------------------------------
     response = client.post(
-        "/reports/school/student-status",
-        json={
-            "student_id": student_id,
-            "run_id": run_id,
-            "status": "present",
-        },
+        f"/runs/{run_id}/students/{student_id}/school-status",
+        json={"status": "present"},
     )
 
     assert response.status_code == 200                                         # Confirm endpoint succeeded
@@ -3721,12 +3717,8 @@ def test_school_status_update_persists_into_school_reports(client):
     ids = _build_school_reports_fixture(client)                     # Build minimal reports setup
 
     update = client.post(
-        "/reports/school/student-status",
-        json={
-            "student_id": ids["student_id"],                        # Target student
-            "run_id": ids["run_1_id"],                              # Target run
-            "status": "present",                                    # School-side override
-        },
+        f"/runs/{ids['run_1_id']}/students/{ids['student_id']}/school-status",
+        json={"status": "present"},                                 # School-side override
     )
     assert update.status_code == 200
     assert update.json()["school_status"] == "present"             # Confirm saved override
@@ -3743,6 +3735,82 @@ def test_school_status_update_persists_into_school_reports(client):
     assert run_1["total_present"] == 1                             # Totals reflect saved status
     assert run_1["total_absent"] == 0                              # Totals reflect saved status
     assert run_1["students"][0]["status"] == "present"            # Persisted status returned
+
+
+# -----------------------------------------------------------
+# - School-side status validation
+# - Reject unsupported status values on the canonical path
+# -----------------------------------------------------------
+def test_school_status_update_rejects_invalid_status(client):
+    ids = _build_school_reports_fixture(client)
+
+    response = client.post(
+        f"/runs/{ids['run_1_id']}/students/{ids['student_id']}/school-status",
+        json={"status": "late"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid payload"
+
+
+# -----------------------------------------------------------
+# - School-side status assignment guard
+# - Reject run and student pairs that are not assigned together
+# -----------------------------------------------------------
+def test_school_status_update_rejects_missing_assignment(client):
+    ids = _build_school_reports_fixture(client)
+
+    response = client.post(
+        f"/runs/{ids['run_2_id']}/students/{ids['student_id']}/school-status",
+        json={"status": "present"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Assignment not found"
+
+
+# -----------------------------------------------------------
+# - School-side status confirmation lock
+# - Reject updates after the school confirms the run
+# -----------------------------------------------------------
+def test_school_status_update_rejects_confirmed_runs(client):
+    ids = _build_school_reports_fixture(client)
+
+    confirm = client.post(
+        f"/reports/school/{ids['school_id']}/confirm/{ids['run_1_id']}",
+        json={"confirmed_by": "lock-test"},
+    )
+    assert confirm.status_code == 200
+
+    response = client.post(
+        f"/runs/{ids['run_1_id']}/students/{ids['student_id']}/school-status",
+        json={"status": "absent"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Reports already confirmed for this run"
+
+
+# -----------------------------------------------------------
+# - School-side status compatibility
+# - Preserve the legacy reports endpoint for older clients
+# -----------------------------------------------------------
+def test_school_status_update_compatibility_endpoint_remains_available(client):
+    ids = _build_school_reports_fixture(client)
+
+    response = client.post(
+        "/reports/school/student-status",
+        json={
+            "student_id": ids["student_id"],
+            "run_id": ids["run_1_id"],
+            "status": "present",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["student_id"] == ids["student_id"]
+    assert response.json()["run_id"] == ids["run_1_id"]
+    assert response.json()["school_status"] == "present"
 
 
 # -----------------------------------------------------------

@@ -499,14 +499,12 @@
                 return;
             }
 
-            const response = await fetch("/reports/school/student-status", {
+            const response = await fetch(`/runs/${runId}/students/${studentId}/school-status`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json"
                 },
                 body: JSON.stringify({
-                    student_id: studentId,
-                    run_id: runId,
                     status: statusValue
                 })
             });

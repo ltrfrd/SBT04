@@ -1,12 +1,18 @@
+import uuid
+
 import pytest
+
+from tests.conftest import ensure_prepared_run_student
 
 
 def _setup_run(client):
-    r = client.post("/drivers/", json={"name": "D", "email": "d@d.com", "phone": "1", "pin": "1234"})
+    unique = uuid.uuid4().hex[:8]
+
+    r = client.post("/drivers/", json={"name": f"D-{unique}", "email": f"d-{unique}@d.com", "phone": "1", "pin": "1234"})
     assert r.status_code in (200, 201)
     driver_id = r.json()["id"]
 
-    r = client.post("/routes/", json={"route_number": "R1"})
+    r = client.post("/routes/", json={"route_number": f"R1-{unique}"})
     assert r.status_code in (200, 201)
     route_id = r.json()["id"]
 
@@ -204,6 +210,103 @@ def test_run_context_stop_update_rejects_wrong_run_stop_pairing(client):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Stop does not belong to run"
+
+
+def test_route_run_context_stop_creation_works_without_run_id_in_body(client):
+    run_id = _setup_run(client)
+    run_response = client.get(f"/runs/{run_id}")
+    assert run_response.status_code == 200
+    route_id = run_response.json()["route"]["route_id"]
+
+    response = client.post(
+        f"/routes/{route_id}/runs/{run_id}/stops",
+        json={
+            "type": "pickup",
+            "name": "Route Run Context Stop",
+            "address": "10 Route Context Way",
+            "planned_time": "07:15:00",
+            "latitude": 1,
+            "longitude": 1,
+        },
+    )
+
+    assert response.status_code in (200, 201)
+    body = response.json()
+    assert body["run_id"] == run_id
+    assert body["name"] == "Route Run Context Stop"
+    assert body["sequence"] == 1
+
+
+def test_route_run_context_stop_creation_returns_404_for_missing_run(client):
+    run_id = _setup_run(client)
+    run_response = client.get(f"/runs/{run_id}")
+    assert run_response.status_code == 200
+    route_id = run_response.json()["route"]["route_id"]
+
+    response = client.post(
+        f"/routes/{route_id}/runs/999999/stops",
+        json={"type": "pickup", "name": "Missing Run Stop"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Run not found"
+
+
+def test_route_run_context_stop_creation_rejects_run_from_other_route(client):
+    run_a_id = _setup_run(client)
+    run_a_response = client.get(f"/runs/{run_a_id}")
+    assert run_a_response.status_code == 200
+    route_a_id = run_a_response.json()["route"]["route_id"]
+
+    run_b_id = _setup_run(client)
+
+    response = client.post(
+        f"/routes/{route_a_id}/runs/{run_b_id}/stops",
+        json={"type": "pickup", "name": "Wrong Route Stop"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Run does not belong to route"
+
+
+def test_route_run_context_stop_creation_rejects_started_runs(client):
+    run_id = _setup_run(client)
+    run_response = client.get(f"/runs/{run_id}")
+    assert run_response.status_code == 200
+    route_id = run_response.json()["route"]["route_id"]
+
+    seed_stop = client.post(
+        f"/runs/{run_id}/stops",
+        json={"type": "pickup", "name": "Seed Stop"},
+    )
+    assert seed_stop.status_code in (200, 201)
+
+    ensure_prepared_run_student(client, run_id)
+    started = client.post(f"/runs/start?run_id={run_id}")
+    assert started.status_code in (200, 201)
+
+    response = client.post(
+        f"/routes/{route_id}/runs/{run_id}/stops",
+        json={"type": "pickup", "name": "Late Stop"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Only planned runs can be modified"
+
+
+def test_route_stop_create_compatibility_endpoint_remains_available(client):
+    run_id = _setup_run(client)
+    run_response = client.get(f"/runs/{run_id}")
+    assert run_response.status_code == 200
+    route_id = run_response.json()["route"]["route_id"]
+
+    response = client.post(
+        f"/routes/{route_id}/stops",
+        json={"run_id": run_id, "type": "pickup", "name": "Compatibility Stop"},
+    )
+
+    assert response.status_code in (200, 201)
+    assert response.json()["run_id"] == run_id
 
 
 def test_stop_rejects_invalid_type_value(client):
