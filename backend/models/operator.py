@@ -12,6 +12,7 @@ class Operator(Base):
 
     drivers = relationship("Driver", back_populates="operator")
     buses = relationship("Bus", back_populates="operator")
+    yards = relationship("Yard", back_populates="operator")
     schools = relationship("School", back_populates="operator")
     students = relationship("Student", back_populates="operator")
     routes = relationship("Route", back_populates="operator")
