@@ -123,7 +123,7 @@ def _get_route_with_schools(
     route_id: int,
     db: Session,
     operator_id: int,
-    required_access: str = "owner",
+    required_access: str = "read",
 ) -> route_model.Route:
     return get_operator_scoped_route_or_404(
         db=db,
@@ -140,6 +140,42 @@ def _validate_route_school_membership(route: route_model.Route, school_id: int) 
         raise HTTPException(status_code=400, detail="School is not assigned to the run route")
 
 
+def _get_school_for_planning_or_404(
+    *,
+    db: Session,
+    school_id: int,
+    operator_id: int,
+    detail: str,
+) -> school_model.School:
+    school = (
+        db.query(school_model.School)
+        .filter(school_model.School.id == school_id)
+        .filter(_accessible_school_filter(operator_id))
+        .first()
+    )
+    if not school:
+        raise HTTPException(status_code=404, detail=detail)
+    return school
+
+
+def _get_student_for_planning_or_404(
+    *,
+    db: Session,
+    student_id: int,
+    operator_id: int,
+    detail: str,
+) -> student_model.Student:
+    student = (
+        db.query(student_model.Student)
+        .filter(student_model.Student.id == student_id)
+        .filter(_accessible_student_filter(operator_id))
+        .first()
+    )
+    if not student:
+        raise HTTPException(status_code=404, detail=detail)
+    return student
+
+
 def _validate_compatibility_student_create_target(
     *,
     school: school_model.School,
@@ -150,7 +186,7 @@ def _validate_compatibility_student_create_target(
     db: Session,
 ) -> tuple[route_model.Route | None, stop_model.Stop | None]:
     route = (
-        _get_route_with_schools(route_id, db, operator_id, "owner")
+        _get_route_with_schools(route_id, db, operator_id, "read")
         if route_id is not None else None
     )
     stop = get_stop_or_404(stop_id, db) if stop_id is not None else None
@@ -161,15 +197,13 @@ def _validate_compatibility_student_create_target(
             raise HTTPException(status_code=400, detail="Stop does not belong to route")
         if run.route is None:
             raise HTTPException(status_code=404, detail="Route not found")
-        if run.route.operator_id != operator_id:
-            raise HTTPException(status_code=404, detail="Route not found")
         ensure_run_is_planned_for_setup(run)
 
         if route is not None and run.route_id != route.id:
             raise HTTPException(status_code=400, detail="Stop does not belong to route")
 
         if route is None:
-            route = _get_route_with_schools(run.route_id, db, operator_id, "owner")
+            route = _get_route_with_schools(run.route_id, db, operator_id, "read")
 
     _validate_student_school_planning_alignment(
         student_district_id=student_district_id,
@@ -197,7 +231,7 @@ def _validate_student_assignment_target(
     operator_id: int,
     db: Session,
 ) -> tuple[route_model.Route, run_model.Run, stop_model.Stop]:
-    route = _get_route_with_schools(route_id, db, operator_id, "owner")
+    route = _get_route_with_schools(route_id, db, operator_id, "read")
     run, stop = get_run_stop_context_or_404(
         run_id=run_id,
         stop_id=stop_id,
@@ -280,14 +314,13 @@ def _update_student_record(
 
     route = None
     if target_route_id is not None:
-        route = _get_route_with_schools(target_route_id, db, operator_id, "owner")
+        route = _get_route_with_schools(target_route_id, db, operator_id, "read")
 
-    school = get_operator_scoped_record_or_404(
+    school = _get_school_for_planning_or_404(
         db=db,
-        model=school_model.School,
-        record_id=target_school_id,
         operator_id=operator_id,
         detail="School not found",
+        school_id=target_school_id,
     )
 
     _validate_student_school_planning_alignment(
@@ -350,12 +383,11 @@ def create_student(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    school = get_operator_scoped_record_or_404(
+    school = _get_school_for_planning_or_404(
         db=db,
-        model=school_model.School,
-        record_id=student.school_id,
         operator_id=operator.id,
         detail="School not found",
+        school_id=student.school_id,
     )
 
     _validate_compatibility_student_create_target(
@@ -400,12 +432,11 @@ def create_student_for_district(
     if not district:
         raise HTTPException(status_code=404, detail="District not found")
 
-    school = get_operator_scoped_record_or_404(
+    school = _get_school_for_planning_or_404(
         db=db,
-        model=school_model.School,
-        record_id=student.school_id,
         operator_id=operator.id,
         detail="School not found",
+        school_id=student.school_id,
     )
 
     _validate_compatibility_student_create_target(
@@ -489,12 +520,11 @@ def update_student_assignment(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    student = get_operator_scoped_record_or_404(
+    student = _get_student_for_planning_or_404(
         db=db,
-        model=student_model.Student,
-        record_id=student_id,
         operator_id=operator.id,
         detail="Student not found",
+        student_id=student_id,
     )
 
     target_route, target_run, target_stop = _validate_student_assignment_target(

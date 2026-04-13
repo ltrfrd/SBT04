@@ -121,6 +121,21 @@ def _get_conflicting_route_or_none(
     return query.first()
 
 
+def _get_schools_for_route_attachment(
+    *,
+    db: Session,
+    school_ids: list[int],
+) -> list[School]:
+    schools = (
+        db.query(School)
+        .filter(School.id.in_(school_ids))
+        .all()
+    )
+    if len(schools) != len(set(school_ids)):
+        raise HTTPException(status_code=404, detail="School not found")
+    return schools
+
+
 # -----------------------------------------------------------
 # - Route serializer
 # - Return stable route summary payloads with assignment context
@@ -374,14 +389,10 @@ def create_route(
     db.flush()                                                   # Allocate route id before school linking
 
     if school_ids:
-        schools = (
-            db.query(School)
-            .filter(School.operator_id == operator.id)
-            .filter(School.id.in_(school_ids))
-            .all()
+        schools = _get_schools_for_route_attachment(
+            db=db,
+            school_ids=school_ids,
         )
-        if len(schools) != len(set(school_ids)):
-            raise HTTPException(status_code=404, detail="School not found")
         _validate_route_school_links(
             route_district_id=payload.get("district_id"),
             route_operator_id=operator.id,
@@ -449,14 +460,10 @@ def create_route_for_district(
     db.flush()
 
     if school_ids:
-        schools = (
-            db.query(School)
-            .filter(School.operator_id == operator.id)
-            .filter(School.id.in_(school_ids))
-            .all()
+        schools = _get_schools_for_route_attachment(
+            db=db,
+            school_ids=school_ids,
         )
-        if len(schools) != len(set(school_ids)):
-            raise HTTPException(status_code=404, detail="School not found")
         _validate_route_school_links(
             route_district_id=district_id,
             route_operator_id=operator.id,
@@ -607,14 +614,10 @@ def update_route(
         setattr(route, key, value)
 
     if school_ids is not None:
-        schools = (
-            db.query(School)
-            .filter(School.operator_id == operator.id)
-            .filter(School.id.in_(school_ids))
-            .all()
+        schools = _get_schools_for_route_attachment(
+            db=db,
+            school_ids=school_ids,
         )
-        if len(schools) != len(set(school_ids)):
-            raise HTTPException(status_code=404, detail="School not found")
 
     _validate_route_school_links(
         route_district_id=target_district_id,

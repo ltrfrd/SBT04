@@ -16,8 +16,8 @@ from backend.models.operator import Operator
 from backend.models.operator import OperatorRouteAccess
 from backend.models import route as route_model
 from backend.models import school as school_model
-from backend.utils.operator_scope import ensure_route_owner
 from backend.utils.operator_scope import get_operator_context
+from backend.utils.operator_scope import get_operator_scoped_route_or_404
 from backend.utils.operator_scope import get_operator_scoped_record_or_404
 
 
@@ -69,6 +69,24 @@ def _school_access_filter(operator_id: int):
             )
         ),
     )
+
+
+def _get_school_for_planning_mutation_or_404(
+    *,
+    db: Session,
+    school_id: int,
+    operator_id: int,
+    detail: str,
+) -> school_model.School:
+    school = (
+        db.query(school_model.School)
+        .filter(school_model.School.id == school_id)
+        .filter(_school_access_filter(operator_id))
+        .first()
+    )
+    if not school:
+        raise HTTPException(status_code=404, detail=detail)
+    return school
 
 
 @router.post(
@@ -177,12 +195,11 @@ def update_school(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    school = get_operator_scoped_record_or_404(
+    school = _get_school_for_planning_mutation_or_404(
         db=db,
-        model=school_model.School,
-        record_id=school_id,
         operator_id=operator.id,
         detail="School not found",
+        school_id=school_id,
     )
 
     update_data = school_in.model_dump(exclude_unset=True)
@@ -213,12 +230,11 @@ def delete_school(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    school = get_operator_scoped_record_or_404(
+    school = _get_school_for_planning_mutation_or_404(
         db=db,
-        model=school_model.School,
-        record_id=school_id,
         operator_id=operator.id,
         detail="School not found",
+        school_id=school_id,
     )
     db.delete(school)
     db.commit()
@@ -238,18 +254,18 @@ def assign_route_to_school(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    school = get_operator_scoped_record_or_404(
+    school = _get_school_for_planning_mutation_or_404(
         db=db,
-        model=school_model.School,
-        record_id=school_id,
         operator_id=operator.id,
         detail="School or Route not found",
+        school_id=school_id,
     )
-    route = db.get(route_model.Route, route_id)
-    if not route:
-        raise HTTPException(status_code=404, detail="School or Route not found")
-
-    ensure_route_owner(route, operator.id)
+    route = get_operator_scoped_route_or_404(
+        db=db,
+        route_id=route_id,
+        operator_id=operator.id,
+        required_access="read",
+    )
     _validate_route_school_planning_alignment(
         route=route,
         school_district_id=school.district_id,
@@ -277,18 +293,23 @@ def unassign_route_from_school(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    school = get_operator_scoped_record_or_404(
+    school = _get_school_for_planning_mutation_or_404(
         db=db,
-        model=school_model.School,
-        record_id=school_id,
         operator_id=operator.id,
         detail="School or Route not found",
+        school_id=school_id,
     )
-    route = db.get(route_model.Route, route_id)
-    if not route:
-        raise HTTPException(status_code=404, detail="School or Route not found")
-
-    ensure_route_owner(route, operator.id)
+    route = get_operator_scoped_route_or_404(
+        db=db,
+        route_id=route_id,
+        operator_id=operator.id,
+        required_access="read",
+    )
+    _validate_route_school_planning_alignment(
+        route=route,
+        school_district_id=school.district_id,
+        school_operator_id=school.operator_id,
+    )
 
     if route in school.routes:
         school.routes.remove(route)

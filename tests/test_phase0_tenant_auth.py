@@ -718,6 +718,75 @@ def test_school_detail_returns_404_for_missing_school(client):
     assert school.json()["detail"] == "School not found"
 
 
+def test_school_update_succeeds_via_valid_shared_planning_access(client, db_engine):
+    owner_operator_id = _create_operator_in_db(db_engine, "School Update Owner")
+    shared_operator_id = _create_operator_in_db(db_engine, "School Update Shared")
+    owner_driver_id = _create_driver_in_db(db_engine, owner_operator_id, "School Update Owner Driver", "school-update-owner@test.com")
+    shared_driver_id = _create_driver_in_db(db_engine, shared_operator_id, "School Update Shared Driver", "school-update-shared@test.com")
+
+    _logout(client)
+    _login(client, owner_driver_id)
+
+    school = client.post(
+        "/schools/",
+        json={"name": "Shared Update School", "address": "50 Update Way"},
+    )
+    assert school.status_code == 201
+    school_id = school.json()["id"]
+
+    route = client.post("/routes/", json={"route_number": "SHARED-SCHOOL-UPDATE"})
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    assign = client.post(f"/schools/{school_id}/assign_route/{route_id}")
+    assert assign.status_code == 200
+    _share_route(client, route_id, shared_operator_id)
+
+    _logout(client)
+    _login(client, shared_driver_id)
+
+    update = client.put(
+        f"/schools/{school_id}",
+        json={"name": "Shared Update School Renamed", "address": "50 Update Way"},
+    )
+    assert update.status_code == 200
+    assert update.json()["name"] == "Shared Update School Renamed"
+
+
+def test_school_delete_succeeds_via_valid_shared_planning_access(client, db_engine):
+    owner_operator_id = _create_operator_in_db(db_engine, "School Delete Owner")
+    shared_operator_id = _create_operator_in_db(db_engine, "School Delete Shared")
+    owner_driver_id = _create_driver_in_db(db_engine, owner_operator_id, "School Delete Owner Driver", "school-delete-owner@test.com")
+    shared_driver_id = _create_driver_in_db(db_engine, shared_operator_id, "School Delete Shared Driver", "school-delete-shared@test.com")
+
+    _logout(client)
+    _login(client, owner_driver_id)
+
+    school = client.post(
+        "/schools/",
+        json={"name": "Shared Delete School", "address": "51 Delete Way"},
+    )
+    assert school.status_code == 201
+    school_id = school.json()["id"]
+
+    route = client.post("/routes/", json={"route_number": "SHARED-SCHOOL-DELETE"})
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    assign = client.post(f"/schools/{school_id}/assign_route/{route_id}")
+    assert assign.status_code == 200
+    _share_route(client, route_id, shared_operator_id)
+
+    _logout(client)
+    _login(client, shared_driver_id)
+
+    delete = client.delete(f"/schools/{school_id}")
+    assert delete.status_code == 204
+
+    read_back = client.get(f"/schools/{school_id}")
+    assert read_back.status_code == 404
+
+
 def test_route_list_still_returns_operator_owned_routes(client):
     owned_route = client.post(
         "/routes/",
@@ -1062,6 +1131,159 @@ def test_student_becomes_visible_through_shared_route_school_access(client, db_e
     student_detail = client.get(f"/students/{student_id}")
     assert student_detail.status_code == 200
     assert student_detail.json()["id"] == student_id
+
+
+def test_student_create_succeeds_via_valid_shared_district_planning_access(client, db_engine):
+    owner_operator_id = _create_operator_in_db(db_engine, "Student Create Owner")
+    shared_operator_id = _create_operator_in_db(db_engine, "Student Create Shared")
+    owner_driver_id = _create_driver_in_db(db_engine, owner_operator_id, "Student Create Owner Driver", "student-create-owner@test.com")
+    shared_driver_id = _create_driver_in_db(db_engine, shared_operator_id, "Student Create Shared Driver", "student-create-shared@test.com")
+    district_id = _create_district_in_db(db_engine, "Shared Student Create District")
+
+    _logout(client)
+    _login(client, owner_driver_id)
+
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "Shared District Student School", "address": "52 Student Way"},
+    )
+    assert school.status_code == 201
+    school_id = school.json()["id"]
+
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "SHARED-DISTRICT-STUDENT-ROUTE"},
+    )
+    assert route.status_code == 201
+    route_id = route.json()["id"]
+
+    assign = client.post(f"/schools/{school_id}/assign_route/{route_id}")
+    assert assign.status_code == 200
+    _share_route(client, route_id, shared_operator_id)
+
+    _logout(client)
+    _login(client, shared_driver_id)
+
+    student = client.post(
+        "/students/",
+        json={
+            "name": "Shared District Student",
+            "grade": "9",
+            "school_id": school_id,
+            "route_id": route_id,
+            "district_id": district_id,
+        },
+    )
+    assert student.status_code == 201
+
+
+def test_student_assignment_update_succeeds_via_valid_shared_district_planning_access(client, db_engine):
+    owner_operator_id = _create_operator_in_db(db_engine, "Student Update Owner")
+    shared_operator_id = _create_operator_in_db(db_engine, "Student Update Shared")
+    owner_driver_id = _create_driver_in_db(db_engine, owner_operator_id, "Student Update Owner Driver", "student-update-owner@test.com")
+    shared_driver_id = _create_driver_in_db(db_engine, shared_operator_id, "Student Update Shared Driver", "student-update-shared@test.com")
+    district_id = _create_district_in_db(db_engine, "Shared Student Update District")
+
+    _logout(client)
+    _login(client, owner_driver_id)
+
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "Shared Update Student School", "address": "53 Student Update Way"},
+    )
+    assert school.status_code == 201
+    school_id = school.json()["id"]
+
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "SHARED-DISTRICT-STUDENT-UPDATE"},
+    )
+    assert route.status_code == 201
+    route_id = route.json()["id"]
+
+    assign = client.post(f"/schools/{school_id}/assign_route/{route_id}")
+    assert assign.status_code == 200
+
+    run = client.post(
+        f"/routes/{route_id}/runs",
+        json={"run_type": "AM"},
+    )
+    assert run.status_code == 201
+    run_id = run.json()["id"]
+
+    stop = client.post(
+        f"/runs/{run_id}/stops",
+        json={"name": "Shared Update Stop", "sequence": 1, "type": "pickup"},
+    )
+    assert stop.status_code == 201
+    stop_id = stop.json()["id"]
+
+    student = client.post(
+        f"/districts/{district_id}/students",
+        json={"name": "Shared Update Student", "grade": "10", "school_id": school_id},
+    )
+    assert student.status_code == 201
+    student_id = student.json()["id"]
+
+    _share_route(client, route_id, shared_operator_id)
+
+    _logout(client)
+    _login(client, shared_driver_id)
+
+    update = client.put(
+        f"/students/{student_id}/assignment",
+        json={"route_id": route_id, "run_id": run_id, "stop_id": stop_id},
+    )
+    assert update.status_code == 200
+    assert update.json()["route_id"] == route_id
+    assert update.json()["stop_id"] == stop_id
+
+
+def test_student_assignment_update_fails_for_mismatched_district_route(client, db_engine):
+    district_one_id = _create_district_in_db(db_engine, "Student Update Mismatch School District")
+    district_two_id = _create_district_in_db(db_engine, "Student Update Mismatch Route District")
+
+    school = client.post(
+        f"/districts/{district_one_id}/schools",
+        json={"name": "Mismatch Update School", "address": "54 Mismatch Update Way"},
+    )
+    assert school.status_code == 201
+    school_id = school.json()["id"]
+
+    student = client.post(
+        f"/districts/{district_one_id}/students",
+        json={"name": "Mismatch Update Student", "grade": "11", "school_id": school_id},
+    )
+    assert student.status_code == 201
+    student_id = student.json()["id"]
+
+    route = client.post(
+        f"/districts/{district_two_id}/routes",
+        json={"route_number": "MISMATCH-STUDENT-UPDATE-ROUTE"},
+    )
+    assert route.status_code == 201
+    route_id = route.json()["id"]
+
+    run = client.post(
+        f"/routes/{route_id}/runs",
+        json={"run_type": "AM"},
+    )
+    assert run.status_code == 201
+    run_id = run.json()["id"]
+
+    stop = client.post(
+        f"/runs/{run_id}/stops",
+        json={"name": "Mismatch Update Stop", "sequence": 1, "type": "pickup"},
+    )
+    assert stop.status_code == 201
+    stop_id = stop.json()["id"]
+
+    update = client.put(
+        f"/students/{student_id}/assignment",
+        json={"route_id": route_id, "run_id": run_id, "stop_id": stop_id},
+    )
+    assert update.status_code == 400
+    assert update.json()["detail"] == "Student does not match route district"
 
 
 # ---------------------------------------------------------------------------
