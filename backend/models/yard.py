@@ -17,3 +17,4 @@ class Yard(Base):
 
     operator = relationship("Operator", back_populates="yards")
     drivers = relationship("Driver", back_populates="yard")
+    buses = relationship("Bus", back_populates="yard")

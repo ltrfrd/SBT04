@@ -18,6 +18,7 @@ class Bus(Base):
 
     id = Column(Integer, primary_key=True, index=True)  # Unique bus identifier
     operator_id = Column(Integer, ForeignKey("operators.id", ondelete="CASCADE"), nullable=False, index=True)
+    yard_id = Column(Integer, ForeignKey("yards.id"), nullable=True)
     unit_number = Column(String(50), index=True, nullable=False)  # Visible bus unit number — unique per operator
     license_plate = Column(String(50), index=True, nullable=False)  # Registration plate — unique per operator
     capacity = Column(Integer, nullable=False)  # Total seating capacity
@@ -29,6 +30,7 @@ class Bus(Base):
     )
 
     operator = relationship("Operator", back_populates="buses")
+    yard = relationship("Yard", back_populates="buses")
     routes = relationship(
         "Route",
         back_populates="bus",  # Current routes pointing at this bus
