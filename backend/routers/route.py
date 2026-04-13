@@ -32,6 +32,14 @@ from backend.schemas.route import (
 )
 from backend.schemas.run import RouteRunCreate, RunUpdate
 from backend.schemas.stop import StopCreate, StopOut, StopUpdate
+from backend.utils.planning_scope import (
+    get_route_run_or_404,
+    get_route_stop_or_404,
+    get_route_student_or_404,
+    get_schools_for_route_attachment_or_404,
+    validate_route_school_alignment,
+    validate_route_school_links,
+)
 from backend.utils.route_driver_assignment import (
     get_active_route_driver_assignments,
     get_primary_route_driver_assignments,
@@ -41,7 +49,6 @@ from backend.utils.route_driver_assignment import (
 from backend.utils.operator_scope import create_operator_route_access
 from backend.utils.operator_scope import ensure_route_owner
 from backend.utils.operator_scope import get_operator_context
-from backend.utils.operator_scope import get_operator_scoped_record_or_404
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
 from backend.utils.operator_scope import get_route_access_level
 from datetime import datetime, timezone
@@ -62,48 +69,6 @@ def _route_identity_query(
         return query.filter(Route.district_id == district_id)
     return query.filter(Route.district_id.is_(None)).filter(Route.operator_id == operator_id)
 
-
-def _planning_relationship_matches(
-    *,
-    primary_district_id: int | None,
-    primary_operator_id: int,
-    secondary_district_id: int | None,
-    secondary_operator_id: int,
-) -> bool:
-    if primary_district_id is not None and secondary_district_id is not None:
-        return primary_district_id == secondary_district_id
-    return primary_operator_id == secondary_operator_id
-
-
-def _validate_route_school_planning_alignment(
-    *,
-    route_district_id: int | None,
-    route_operator_id: int,
-    school: School,
-) -> None:
-    if not _planning_relationship_matches(
-        primary_district_id=route_district_id,
-        primary_operator_id=route_operator_id,
-        secondary_district_id=school.district_id,
-        secondary_operator_id=school.operator_id,
-    ):
-        raise HTTPException(status_code=400, detail="School does not match route district")
-
-
-def _validate_route_school_links(
-    *,
-    route_district_id: int | None,
-    route_operator_id: int,
-    schools: list[School],
-) -> None:
-    for school in schools:
-        _validate_route_school_planning_alignment(
-            route_district_id=route_district_id,
-            route_operator_id=route_operator_id,
-            school=school,
-        )
-
-
 def _get_conflicting_route_or_none(
     *,
     db: Session,
@@ -121,62 +86,6 @@ def _get_conflicting_route_or_none(
     if exclude_route_id is not None:
         query = query.filter(Route.id != exclude_route_id)
     return query.first()
-
-
-def _get_route_run_or_404(*, route_id: int, run_id: int, db: Session) -> run_model.Run:
-    run = (
-        db.query(run_model.Run)
-        .options(joinedload(run_model.Run.route), joinedload(run_model.Run.driver))
-        .filter(run_model.Run.id == run_id)
-        .first()
-    )
-    if not run or run.route_id != route_id:
-        raise HTTPException(status_code=404, detail="Run not found")
-    return run
-
-
-def _get_route_stop_or_404(*, route_id: int, stop_id: int, db: Session) -> stop_model.Stop:
-    stop = (
-        db.query(stop_model.Stop)
-        .options(joinedload(stop_model.Stop.run))
-        .filter(stop_model.Stop.id == stop_id)
-        .first()
-    )
-    stop_route_id = None
-    if stop is not None:
-        stop_route_id = stop.route_id if stop.route_id is not None else stop.run.route_id if stop.run else None
-
-    if not stop or stop_route_id != route_id:
-        raise HTTPException(status_code=404, detail="Stop not found")
-    return stop
-
-
-def _get_route_student_or_404(*, route_id: int, student_id: int, db: Session) -> student_model.Student:
-    student = (
-        db.query(student_model.Student)
-        .options(joinedload(student_model.Student.school))
-        .filter(student_model.Student.id == student_id)
-        .first()
-    )
-    if not student or student.route_id != route_id:
-        raise HTTPException(status_code=404, detail="Student not found")
-    return student
-
-
-def _get_schools_for_route_attachment(
-    *,
-    db: Session,
-    school_ids: list[int],
-) -> list[School]:
-    schools = (
-        db.query(School)
-        .filter(School.id.in_(school_ids))
-        .all()
-    )
-    if len(schools) != len(set(school_ids)):
-        raise HTTPException(status_code=404, detail="School not found")
-    return schools
-
 
 # -----------------------------------------------------------
 # - Route serializer
@@ -431,11 +340,11 @@ def create_route(
     db.flush()                                                   # Allocate route id before school linking
 
     if school_ids:
-        schools = _get_schools_for_route_attachment(
+        schools = get_schools_for_route_attachment_or_404(
             db=db,
             school_ids=school_ids,
         )
-        _validate_route_school_links(
+        validate_route_school_links(
             route_district_id=payload.get("district_id"),
             route_operator_id=operator.id,
             schools=schools,
@@ -502,11 +411,11 @@ def create_route_for_district(
     db.flush()
 
     if school_ids:
-        schools = _get_schools_for_route_attachment(
+        schools = get_schools_for_route_attachment_or_404(
             db=db,
             school_ids=school_ids,
         )
-        _validate_route_school_links(
+        validate_route_school_links(
             route_district_id=district_id,
             route_operator_id=operator.id,
             schools=schools,
@@ -656,12 +565,12 @@ def update_route(
         setattr(route, key, value)
 
     if school_ids is not None:
-        schools = _get_schools_for_route_attachment(
+        schools = get_schools_for_route_attachment_or_404(
             db=db,
             school_ids=school_ids,
         )
 
-    _validate_route_school_links(
+    validate_route_school_links(
         route_district_id=target_district_id,
         route_operator_id=route.operator_id,
         schools=schools if schools is not None else list(route.schools),
@@ -780,7 +689,7 @@ def update_route_run(
         operator_id=operator.id,
         required_access="read",
     )
-    run = _get_route_run_or_404(route_id=route.id, run_id=run_id, db=db)
+    run = get_route_run_or_404(route_id=route.id, run_id=run_id, db=db)
 
     if run.start_time is not None:
         raise HTTPException(status_code=400, detail="Only planned runs can be updated")
@@ -825,7 +734,7 @@ def delete_route_run(
         operator_id=operator.id,
         required_access="read",
     )
-    run = _get_route_run_or_404(route_id=route.id, run_id=run_id, db=db)
+    run = get_route_run_or_404(route_id=route.id, run_id=run_id, db=db)
 
     if run.start_time is not None:
         raise HTTPException(status_code=400, detail="Only planned runs can be deleted")
@@ -942,7 +851,7 @@ def update_route_stop(
         operator_id=operator.id,
         required_access="read",
     )
-    stop = _get_route_stop_or_404(route_id=route.id, stop_id=stop_id, db=db)
+    stop = get_route_stop_or_404(route_id=route.id, stop_id=stop_id, db=db)
 
     updated_stop = stop_router._update_stop_record(
         stop=stop,
@@ -989,7 +898,7 @@ def delete_route_stop(
         operator_id=operator.id,
         required_access="read",
     )
-    stop = _get_route_stop_or_404(route_id=route.id, stop_id=stop_id, db=db)
+    stop = get_route_stop_or_404(route_id=route.id, stop_id=stop_id, db=db)
 
     run_id = stop.run_id
     db.delete(stop)
@@ -1108,7 +1017,7 @@ def delete_route_student(
         operator_id=operator.id,
         required_access="read",
     )
-    student = _get_route_student_or_404(route_id=route.id, student_id=student_id, db=db)
+    student = get_route_student_or_404(route_id=route.id, student_id=student_id, db=db)
 
     student.route_id = None
     if student.stop_id is not None:

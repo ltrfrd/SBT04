@@ -6,15 +6,12 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
-from sqlalchemy.orm import selectinload
 
 from database import get_db
 from backend import schemas
 from backend.models.district import District
 from backend.models.operator import Operator
-from backend.models.operator import OperatorRouteAccess
 from backend.models import associations as assoc_model
 from backend.models import route as route_model
 from backend.models import run as run_model
@@ -23,7 +20,14 @@ from backend.models import stop as stop_model
 from backend.models import student as student_model
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_operator_scoped_record_or_404
-from backend.utils.operator_scope import get_operator_scoped_route_or_404
+from backend.utils.planning_scope import (
+    accessible_student_filter,
+    get_route_with_schools_or_404,
+    get_school_for_planning_or_404,
+    get_student_for_planning_or_404,
+    validate_planning_alignment,
+    validate_route_school_alignment,
+)
 from backend.utils.run_setup import (
     ensure_run_is_planned_for_setup,
     get_run_stop_context_or_404,
@@ -40,32 +44,19 @@ district_router = APIRouter(
     tags=["Students"],
 )
 
-
-def _planning_relationship_matches(
-    *,
-    primary_district_id: int | None,
-    primary_operator_id: int,
-    secondary_district_id: int | None,
-    secondary_operator_id: int,
-) -> bool:
-    if primary_district_id is not None and secondary_district_id is not None:
-        return primary_district_id == secondary_district_id
-    return primary_operator_id == secondary_operator_id
-
-
 def _validate_student_school_planning_alignment(
     *,
     student_district_id: int | None,
     student_operator_id: int,
     school: school_model.School,
 ) -> None:
-    if not _planning_relationship_matches(
+    validate_planning_alignment(
         primary_district_id=student_district_id,
         primary_operator_id=student_operator_id,
         secondary_district_id=school.district_id,
         secondary_operator_id=school.operator_id,
-    ):
-        raise HTTPException(status_code=400, detail="School does not match student district")
+        detail="School does not match student district",
+    )
 
 
 def _validate_student_route_planning_alignment(
@@ -74,48 +65,12 @@ def _validate_student_route_planning_alignment(
     student_operator_id: int,
     route: route_model.Route,
 ) -> None:
-    if not _planning_relationship_matches(
+    validate_planning_alignment(
         primary_district_id=student_district_id,
         primary_operator_id=student_operator_id,
         secondary_district_id=route.district_id,
         secondary_operator_id=route.operator_id,
-    ):
-        raise HTTPException(status_code=400, detail="Student does not match route district")
-
-
-def _validate_route_school_planning_alignment(
-    *,
-    route: route_model.Route,
-    school: school_model.School,
-) -> None:
-    if not _planning_relationship_matches(
-        primary_district_id=route.district_id,
-        primary_operator_id=route.operator_id,
-        secondary_district_id=school.district_id,
-        secondary_operator_id=school.operator_id,
-    ):
-        raise HTTPException(status_code=400, detail="School does not match route district")
-
-
-def _accessible_route_filter(operator_id: int):
-    return or_(
-        route_model.Route.operator_id == operator_id,
-        route_model.Route.operator_access.any(OperatorRouteAccess.operator_id == operator_id),
-    )
-
-
-def _accessible_school_filter(operator_id: int):
-    return or_(
-        school_model.School.operator_id == operator_id,
-        school_model.School.routes.any(_accessible_route_filter(operator_id)),
-    )
-
-
-def _accessible_student_filter(operator_id: int):
-    return or_(
-        student_model.Student.operator_id == operator_id,
-        student_model.Student.route.has(_accessible_route_filter(operator_id)),
-        student_model.Student.school.has(_accessible_school_filter(operator_id)),
+        detail="Student does not match route district",
     )
 
 
@@ -125,12 +80,11 @@ def _get_route_with_schools(
     operator_id: int,
     required_access: str = "read",
 ) -> route_model.Route:
-    return get_operator_scoped_route_or_404(
+    return get_route_with_schools_or_404(
         db=db,
         route_id=route_id,
         operator_id=operator_id,
         required_access=required_access,
-        options=[selectinload(route_model.Route.schools)],
     )
 
 
@@ -147,15 +101,12 @@ def _get_school_for_planning_or_404(
     operator_id: int,
     detail: str,
 ) -> school_model.School:
-    school = (
-        db.query(school_model.School)
-        .filter(school_model.School.id == school_id)
-        .filter(_accessible_school_filter(operator_id))
-        .first()
+    return get_school_for_planning_or_404(
+        db=db,
+        school_id=school_id,
+        operator_id=operator_id,
+        detail=detail,
     )
-    if not school:
-        raise HTTPException(status_code=404, detail=detail)
-    return school
 
 
 def _get_student_for_planning_or_404(
@@ -165,15 +116,12 @@ def _get_student_for_planning_or_404(
     operator_id: int,
     detail: str,
 ) -> student_model.Student:
-    student = (
-        db.query(student_model.Student)
-        .filter(student_model.Student.id == student_id)
-        .filter(_accessible_student_filter(operator_id))
-        .first()
+    return get_student_for_planning_or_404(
+        db=db,
+        student_id=student_id,
+        operator_id=operator_id,
+        detail=detail,
     )
-    if not student:
-        raise HTTPException(status_code=404, detail=detail)
-    return student
 
 
 def _validate_compatibility_student_create_target(
@@ -217,7 +165,11 @@ def _validate_compatibility_student_create_target(
             student_operator_id=operator_id,
             route=route,
         )
-        _validate_route_school_planning_alignment(route=route, school=school)
+        validate_route_school_alignment(
+            route_district_id=route.district_id,
+            route_operator_id=route.operator_id,
+            school=school,
+        )
 
     return route, stop
 
@@ -247,7 +199,11 @@ def _validate_student_assignment_target(
         student_operator_id=student.operator_id,
         route=route,
     )
-    _validate_route_school_planning_alignment(route=route, school=student.school)
+    validate_route_school_alignment(
+        route_district_id=route.district_id,
+        route_operator_id=route.operator_id,
+        school=student.school,
+    )
     _validate_route_school_membership(route, student.school_id)
 
     return route, run, stop
@@ -335,7 +291,11 @@ def _update_student_record(
             student_operator_id=student.operator_id,
             route=route,
         )
-        _validate_route_school_planning_alignment(route=route, school=school)
+        validate_route_school_alignment(
+            route_district_id=route.district_id,
+            route_operator_id=route.operator_id,
+            school=school,
+        )
         _validate_route_school_membership(route, school.id)
 
     stop = None
@@ -474,7 +434,7 @@ def get_students(
 ):
     return (
         db.query(student_model.Student)
-        .filter(_accessible_student_filter(operator.id))
+        .filter(accessible_student_filter(operator.id))
         .all()
     )
 
@@ -494,7 +454,7 @@ def get_student(
     student = (
         db.query(student_model.Student)
         .filter(student_model.Student.id == student_id)
-        .filter(_accessible_student_filter(operator.id))
+        .filter(accessible_student_filter(operator.id))
         .first()
     )
     if not student:
