@@ -289,6 +289,111 @@ def test_create_school_under_district_context_ignores_payload_district_id(client
         assert school.district_id != payload_district_id
 
 
+def test_get_districts_returns_created_districts(client, db_engine):
+    district_one_id = _create_district_in_db(db_engine, "District List One")
+    district_two_id = _create_district_in_db(db_engine, "District List Two")
+
+    response = client.get("/districts/")
+    assert response.status_code == 200
+
+    district_ids = {district["id"] for district in response.json()}
+    assert district_one_id in district_ids
+    assert district_two_id in district_ids
+
+
+def test_get_district_detail_returns_district(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "District Detail")
+
+    response = client.get(f"/districts/{district_id}")
+    assert response.status_code == 200
+    assert response.json()["id"] == district_id
+    assert response.json()["name"] == "District Detail"
+
+
+def test_get_district_schools_returns_only_schools_in_that_district(client, db_engine):
+    district_one_id = _create_district_in_db(db_engine, "District School List One")
+    district_two_id = _create_district_in_db(db_engine, "District School List Two")
+
+    school_one = client.post(
+        f"/districts/{district_one_id}/schools",
+        json={"name": "District One School", "address": "1 School Way"},
+    )
+    school_two = client.post(
+        f"/districts/{district_two_id}/schools",
+        json={"name": "District Two School", "address": "2 School Way"},
+    )
+    assert school_one.status_code == 201
+    assert school_two.status_code == 201
+
+    response = client.get(f"/districts/{district_one_id}/schools")
+    assert response.status_code == 200
+    assert [school["id"] for school in response.json()] == [school_one.json()["id"]]
+
+
+def test_get_district_routes_returns_only_routes_in_that_district(client, db_engine):
+    district_one_id = _create_district_in_db(db_engine, "District Route List One")
+    district_two_id = _create_district_in_db(db_engine, "District Route List Two")
+
+    route_one = client.post(
+        f"/districts/{district_one_id}/routes",
+        json={"route_number": "DISTRICT-LIST-ROUTE-1"},
+    )
+    route_two = client.post(
+        f"/districts/{district_two_id}/routes",
+        json={"route_number": "DISTRICT-LIST-ROUTE-2"},
+    )
+    assert route_one.status_code == 201
+    assert route_two.status_code == 201
+
+    response = client.get(f"/districts/{district_one_id}/routes")
+    assert response.status_code == 200
+    assert [route["id"] for route in response.json()] == [route_one.json()["id"]]
+
+
+def test_district_summary_returns_correct_counts(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "District Summary")
+
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "Summary School", "address": "3 Summary Way"},
+    )
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "SUMMARY-ROUTE"},
+    )
+    assert school.status_code == 201
+    assert route.status_code == 201
+
+    student = client.post(
+        f"/districts/{district_id}/students",
+        json={"name": "Summary Student", "grade": "3", "school_id": school.json()["id"]},
+    )
+    assert student.status_code == 201
+
+    response = client.get(f"/districts/{district_id}/summary")
+    assert response.status_code == 200
+    assert response.json() == {
+        "district_id": district_id,
+        "schools_count": 1,
+        "routes_count": 1,
+        "students_count": 1,
+    }
+
+
+def test_district_endpoints_return_404_for_missing_district(client):
+    responses = (
+        client.get("/districts/999999"),
+        client.get("/districts/999999/schools"),
+        client.get("/districts/999999/routes"),
+        client.get("/districts/999999/summary"),
+        client.post("/districts/999999/schools", json={"name": "Missing District School"}),
+        client.post("/districts/999999/routes", json={"route_number": "MISSING-DISTRICT-ROUTE"}),
+    )
+
+    for response in responses:
+        assert response.status_code == 404
+
+
 def test_create_route_under_district_context_sets_district_and_operator(client, db_engine):
     district_id = _create_district_in_db(db_engine, "Route District Alpha")
 

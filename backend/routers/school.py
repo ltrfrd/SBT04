@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from backend import schemas
-from backend.models.district import District
 from backend.models.operator import Operator
 from backend.models import route as route_model
 from backend.models import school as school_model
@@ -26,11 +25,6 @@ from backend.utils.planning_scope import (
 
 router = APIRouter(
     prefix="/schools",
-    tags=["Schools"],
-)
-
-district_router = APIRouter(
-    prefix="/districts",
     tags=["Schools"],
 )
 
@@ -89,42 +83,32 @@ def create_school(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    new_school = school_model.School(
-        **school.model_dump(),
+    new_school = create_school_record(
+        school=school,
+        db=db,
         operator_id=operator.id,
     )
-    db.add(new_school)
     db.commit()
     db.refresh(new_school)
     return new_school
 
 
-@district_router.post(
-    "/{district_id}/schools",
-    response_model=schemas.SchoolOut,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create school under district",
-    description="Create a new school record under the selected district context.",
-    response_description="Created school",
-)
-def create_school_for_district(
-    district_id: int,
+def create_school_record(
+    *,
     school: schemas.SchoolCreate,
-    db: Session = Depends(get_db),
-    operator: Operator = Depends(get_operator_context),
-):
-    district = db.get(District, district_id)
-    if not district:
-        raise HTTPException(status_code=404, detail="District not found")
-
+    db: Session,
+    operator_id: int,
+    district_id: int | None = None,
+) -> school_model.School:
+    payload = school.model_dump()
+    payload.pop("district_id", None)
+    effective_district_id = district_id if district_id is not None else school.district_id
     new_school = school_model.School(
-        **school.model_dump(exclude={"district_id"}),
-        district_id=district_id,
-        operator_id=operator.id,
+        **payload,
+        district_id=effective_district_id,
+        operator_id=operator_id,
     )
     db.add(new_school)
-    db.commit()
-    db.refresh(new_school)
     return new_school
 
 

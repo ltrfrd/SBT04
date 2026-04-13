@@ -9,7 +9,6 @@ from database import get_db
 from backend import schemas
 from backend.models.associations import RouteDriverAssignment
 from backend.models.bus import Bus
-from backend.models.district import District
 from backend.models.operator import Operator, OperatorRouteAccess
 from backend.models.driver import Driver
 from backend.models.route import Route
@@ -54,7 +53,6 @@ from backend.utils.operator_scope import get_route_access_level
 from datetime import datetime, timezone
 
 router = APIRouter(prefix="/routes", tags=["Routes"])
-district_router = APIRouter(prefix="/districts", tags=["Routes"])
 
 
 def _route_identity_query(
@@ -320,14 +318,34 @@ def create_route(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
+    db_route = create_route_record(
+        route=route,
+        db=db,
+        operator_id=operator.id,
+    )
+    db.commit()                                                  # Persist route and optional schools
+    db.refresh(db_route)                                         # Reload committed route
+    return _serialize_route(db_route)                            # Return route summary
+
+
+def create_route_record(
+    *,
+    route: RouteCreate,
+    db: Session,
+    operator_id: int,
+    district_id: int | None = None,
+) -> Route:
     payload = route.model_dump(exclude_unset=True)               # Read validated route payload
+    if district_id is not None:
+        payload.pop("district_id", None)
     school_ids = payload.pop("school_ids", [])                   # Separate school assignment ids
+    effective_district_id = district_id if district_id is not None else payload.get("district_id")
 
     existing_route = _get_conflicting_route_or_none(
         db=db,
         route_number=payload["route_number"],
-        district_id=payload.get("district_id"),
-        operator_id=operator.id,
+        district_id=effective_district_id,
+        operator_id=operator_id,
     )
     if existing_route:
         raise HTTPException(
@@ -335,7 +353,11 @@ def create_route(
             detail="Route number already exists",
         )
 
-    db_route = Route(**payload, operator_id=operator.id)           # Create route after uniqueness check
+    db_route = Route(
+        **payload,
+        district_id=effective_district_id,
+        operator_id=operator_id,
+    )           # Create route after uniqueness check
     db.add(db_route)                                             # Add route to session
     db.flush()                                                   # Allocate route id before school linking
 
@@ -345,86 +367,13 @@ def create_route(
             school_ids=school_ids,
         )
         validate_route_school_links(
-            route_district_id=payload.get("district_id"),
-            route_operator_id=operator.id,
+            route_district_id=effective_district_id,
+            route_operator_id=operator_id,
             schools=schools,
         )
         db_route.schools = schools  # Attach requested schools
 
-    db.commit()                                                  # Persist route and optional schools
-    db.refresh(db_route)                                         # Reload committed route
-    return _serialize_route(db_route)                            # Return route summary
-
-
-@district_router.post(
-    "/{district_id}/routes",
-    response_model=RouteOut,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create route under district",
-    description=(
-        "Create a route under the selected district context. "
-        "The path district_id is authoritative and operator context is preserved for compatibility."
-    ),
-    response_description="Created route",
-    responses={
-        409: {
-            "description": "Route number already exists",
-            "content": {
-                "application/json": {
-                    "example": {"detail": "Route number already exists"}
-                }
-            },
-        }
-    },
-)
-def create_route_for_district(
-    district_id: int,
-    route: RouteCreate,
-    db: Session = Depends(get_db),
-    operator: Operator = Depends(get_operator_context),
-):
-    district = db.get(District, district_id)
-    if not district:
-        raise HTTPException(status_code=404, detail="District not found")
-
-    payload = route.model_dump(exclude_unset=True, exclude={"district_id"})
-    school_ids = payload.pop("school_ids", [])
-
-    existing_route = _get_conflicting_route_or_none(
-        db=db,
-        route_number=payload["route_number"],
-        district_id=district_id,
-        operator_id=operator.id,
-    )
-    if existing_route:
-        raise HTTPException(
-            status_code=409,
-            detail="Route number already exists",
-        )
-
-    db_route = Route(
-        **payload,
-        district_id=district_id,
-        operator_id=operator.id,
-    )
-    db.add(db_route)
-    db.flush()
-
-    if school_ids:
-        schools = get_schools_for_route_attachment_or_404(
-            db=db,
-            school_ids=school_ids,
-        )
-        validate_route_school_links(
-            route_district_id=district_id,
-            route_operator_id=operator.id,
-            schools=schools,
-        )
-        db_route.schools = schools
-
-    db.commit()
-    db.refresh(db_route)
-    return _serialize_route(db_route)
+    return db_route
 
 
 # -----------------------------------------------------------

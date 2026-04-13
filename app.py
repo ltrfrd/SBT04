@@ -23,7 +23,7 @@ import backend.models  # noqa: F401
 
 # ---------- ROUTERS ----------
 from backend.routers import (
-    auth, bus, driver, school, student, route, stop, run, dispatch, reports, student_run_assignment, web_pages, ws, pretrip, posttrip
+    auth, bus, district, driver, school, student, route, stop, run, dispatch, reports, student_run_assignment, web_pages, ws, pretrip, posttrip
 )  # Import active routers through reports ownership
 
 
@@ -67,12 +67,11 @@ app.mount("/static", StaticFiles(directory="backend/templates/static"), name="st
 # Each router defines its own endpoints (CRUD APIs)
 app.include_router(driver.router)  # Register driver endpoints
 app.include_router(bus.router)  # Register bus endpoints
+app.include_router(district.router)  # Register district planning entry points
 app.include_router(school.router)  # Register school endpoints
-app.include_router(school.district_router)  # Register district-scoped school creation endpoint
 app.include_router(student.router)  # Register student endpoints
 app.include_router(student.district_router)  # Register district-scoped student creation endpoint
 app.include_router(route.router)  # Register route endpoints
-app.include_router(route.district_router)  # Register district-scoped route creation endpoint
 app.include_router(stop.router)  # Register stop endpoints
 app.include_router(run.router)  # Register run endpoints
 app.include_router(dispatch.router)  # Register dispatch endpoints
