@@ -147,6 +147,7 @@ def _build_stop_payload(
     final_run_id = payload.run_id if getattr(payload, "run_id", None) is not None else run_id
     if final_run_id is None:
         raise HTTPException(status_code=422, detail="run_id is required")
+    run = get_run_or_404(final_run_id, db)
 
     school_id = payload.school_id if payload.school_id is not None else None
     name = payload.name.strip() if isinstance(payload.name, str) and payload.name.strip() else None
@@ -185,6 +186,8 @@ def _build_stop_payload(
 
     return {
         "run_id": final_run_id,
+        "route_id": run.route_id,
+        "district_id": run.route.district_id if run.route else None,
         "sequence": sequence,
         "type": stop_type,
         "name": name,

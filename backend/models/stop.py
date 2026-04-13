@@ -37,6 +37,8 @@ class Stop(Base):
     sequence = Column(Integer, nullable=False)  # Store planned stop order within a run
     type = Column(String(32), nullable=False)  # Store canonical stop type without breaking legacy rows
     run_id = Column(Integer, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)  # Link the stop to its run
+    route_id = Column(Integer, ForeignKey("routes.id", ondelete="SET NULL"), nullable=True, index=True)  # Store owning route inherited from run when available
+    district_id = Column(Integer, ForeignKey("districts.id", ondelete="SET NULL"), nullable=True, index=True)  # Store planning district inherited from route when available
     school_id = Column(Integer, ForeignKey("schools.id", ondelete="SET NULL"), nullable=True)  # Link school stops to a real school
     name = Column(String(100), nullable=True)  # Store stop display name
     address = Column(String(255), nullable=True)  # Store stop address
@@ -45,6 +47,8 @@ class Stop(Base):
     longitude = Column(Float, nullable=True)  # Store stop longitude
 
     run = relationship("Run", back_populates="stops", foreign_keys=[run_id])  # Load owning run through Stop.run_id
+    route = relationship("Route")  # Load owning route inherited from the parent run
+    district = relationship("District", back_populates="stops")  # Load planning district when present
     school = relationship("School", back_populates="stops")  # Load linked school for school stop rows
     students = relationship("Student", viewonly=True)  # Expose linked students without managing writes here
     student_assignments = relationship("StudentRunAssignment", back_populates="stop", cascade="all, delete-orphan", passive_deletes=True, foreign_keys="StudentRunAssignment.stop_id")  # Load planned student assignments for this stop

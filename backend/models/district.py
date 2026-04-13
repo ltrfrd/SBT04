@@ -13,4 +13,6 @@ class District(Base):
 
     schools = relationship("School", back_populates="district")
     routes = relationship("Route", back_populates="district")
+    runs = relationship("Run", back_populates="district")
+    stops = relationship("Stop", back_populates="district")
     students = relationship("Student", back_populates="district")

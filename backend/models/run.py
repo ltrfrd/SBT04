@@ -19,6 +19,7 @@ class Run(Base):
     id = Column(Integer, primary_key=True, index=True)  # Store unique run ID
     driver_id = Column(Integer, ForeignKey("drivers.id", ondelete="RESTRICT"), nullable=True)  # Store assigned driver ID when the run is started or preassigned
     route_id = Column(Integer, ForeignKey("routes.id", ondelete="CASCADE"), nullable=False)  # Store assigned route ID
+    district_id = Column(Integer, ForeignKey("districts.id", ondelete="SET NULL"), nullable=True, index=True)  # Store planning district inherited from route when available
     run_type = Column(String, nullable=False)  # Store flexible operational run label
     scheduled_start_time = Column(Time, nullable=False)  # Store fixed planned start time
     scheduled_end_time = Column(Time, nullable=False)  # Store fixed planned end time
@@ -31,6 +32,7 @@ class Run(Base):
 
     driver = relationship("Driver", back_populates="runs")  # Load assigned driver
     route = relationship("Route", back_populates="runs")  # Load assigned route
+    district = relationship("District", back_populates="runs")  # Load planning district when present
     stops = relationship("Stop", back_populates="run", cascade="all, delete-orphan", passive_deletes=True, foreign_keys="Stop.run_id")  # Load stops that belong to this run
     student_assignments = relationship("StudentRunAssignment", back_populates="run", cascade="all, delete-orphan", passive_deletes=True)  # Load runtime student assignments
     events = relationship("RunEvent", back_populates="run", cascade="all, delete-orphan")

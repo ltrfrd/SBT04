@@ -414,6 +414,7 @@ def _create_stop_context_student(
     student = Student(
         name=payload.name,
         grade=payload.grade,
+        district_id=run.route.district_id if run.route else None,
         operator_id=operator_id,
         school_id=payload.school_id,
         route_id=run.route_id,
@@ -578,6 +579,7 @@ def _create_planned_run(
     new_run = run_model.Run(                                    # Create run under current route context
         driver_id=resolved_driver_id,                           # Inherit current route driver when available
         route_id=route.id,                                      # Inherit route automatically
+        district_id=route.district_id,                          # Inherit planning district when available
         run_type=normalized_run_type,                           # Store normalized flexible run label
         scheduled_start_time=scheduled_start_time,              # Store fixed planned start time
         scheduled_end_time=scheduled_end_time,                  # Store fixed planned end time

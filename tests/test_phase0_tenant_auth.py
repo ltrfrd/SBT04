@@ -13,6 +13,7 @@ from backend.models.district import District
 from backend.models.driver import Driver
 from backend.models.route import Route
 from backend.models.school import School
+from backend.models.stop import Stop
 from backend.models.student import Student
 from tests.conftest import TEST_DRIVER_PIN, _create_operator_in_db, _create_driver_in_db
 
@@ -1284,6 +1285,165 @@ def test_student_assignment_update_fails_for_mismatched_district_route(client, d
     )
     assert update.status_code == 400
     assert update.json()["detail"] == "Student does not match route district"
+
+
+# ---------------------------------------------------------------------------
+# Route cascade planning endpoints
+# ---------------------------------------------------------------------------
+
+def test_create_and_list_runs_under_route(client):
+    route = client.post("/routes/", json={"route_number": "CASCADE-RUN-1"})
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    create = client.post(
+        f"/routes/{route_id}/runs",
+        json={"run_type": "AM"},
+    )
+    assert create.status_code == 201
+    run_id = create.json()["id"]
+    assert create.json()["route_id"] == route_id
+
+    listing = client.get(f"/routes/{route_id}/runs")
+    assert listing.status_code == 200
+    assert {run["id"] for run in listing.json()} == {run_id}
+
+
+def test_create_and_list_stops_under_route_sets_route_identity(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "Cascade Stop District")
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "CASCADE-STOP-1"},
+    )
+    assert route.status_code == 201
+    route_id = route.json()["id"]
+
+    run = client.post(
+        f"/routes/{route_id}/runs",
+        json={"run_type": "PM"},
+    )
+    assert run.status_code == 201
+    run_id = run.json()["id"]
+
+    create = client.post(
+        f"/routes/{route_id}/stops",
+        json={"run_id": run_id, "type": "pickup", "sequence": 1, "name": "Cascade Stop"},
+    )
+    assert create.status_code == 201
+    stop_id = create.json()["id"]
+    assert create.json()["run_id"] == run_id
+
+    listing = client.get(f"/routes/{route_id}/stops")
+    assert listing.status_code == 200
+    assert {stop["id"] for stop in listing.json()} == {stop_id}
+
+    with Session(db_engine) as db:
+        stop = db.get(Stop, stop_id)
+        assert stop is not None
+        assert stop.route_id == route_id
+        assert stop.district_id == district_id
+
+
+def test_route_stop_creation_fails_when_run_belongs_to_other_route(client):
+    route_one = client.post("/routes/", json={"route_number": "CASCADE-STOP-A"})
+    route_two = client.post("/routes/", json={"route_number": "CASCADE-STOP-B"})
+    assert route_one.status_code in (200, 201)
+    assert route_two.status_code in (200, 201)
+
+    run = client.post(
+        f"/routes/{route_one.json()['id']}/runs",
+        json={"run_type": "AM"},
+    )
+    assert run.status_code == 201
+
+    create = client.post(
+        f"/routes/{route_two.json()['id']}/stops",
+        json={"run_id": run.json()["id"], "type": "pickup", "sequence": 1},
+    )
+    assert create.status_code == 400
+    assert create.json()["detail"] == "Run does not belong to route"
+
+
+def test_create_and_list_students_under_route_sets_route_and_district(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "Cascade Student District")
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "Cascade School", "address": "100 Cascade Way"},
+    )
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "CASCADE-STUDENT-1"},
+    )
+    assert school.status_code == 201
+    assert route.status_code == 201
+    route_id = route.json()["id"]
+
+    create = client.post(
+        f"/routes/{route_id}/students",
+        json={
+            "name": "Cascade Student",
+            "grade": "4",
+            "school_id": school.json()["id"],
+        },
+    )
+    assert create.status_code == 201
+    student_id = create.json()["id"]
+    assert create.json()["route_id"] == route_id
+
+    listing = client.get(f"/routes/{route_id}/students")
+    assert listing.status_code == 200
+    assert {student["id"] for student in listing.json()} == {student_id}
+
+    with Session(db_engine) as db:
+        student = db.get(Student, student_id)
+        assert student is not None
+        assert student.route_id == route_id
+        assert student.district_id == district_id
+
+
+def test_route_student_creation_fails_for_mismatched_school_district(client, db_engine):
+    district_one_id = _create_district_in_db(db_engine, "Cascade Student District One")
+    district_two_id = _create_district_in_db(db_engine, "Cascade Student District Two")
+
+    school = client.post(
+        f"/districts/{district_one_id}/schools",
+        json={"name": "Mismatch Cascade School", "address": "10 Mismatch Way"},
+    )
+    route = client.post(
+        f"/districts/{district_two_id}/routes",
+        json={"route_number": "CASCADE-STUDENT-MISMATCH"},
+    )
+    assert school.status_code == 201
+    assert route.status_code == 201
+
+    create = client.post(
+        f"/routes/{route.json()['id']}/students",
+        json={
+            "name": "Mismatch Student",
+            "grade": "5",
+            "school_id": school.json()["id"],
+        },
+    )
+    assert create.status_code == 400
+    assert create.json()["detail"] == "School does not match student district"
+
+
+def test_route_cascade_endpoints_return_404_for_missing_route(client):
+    create_run = client.post("/routes/999999/runs", json={"run_type": "AM"})
+    list_runs = client.get("/routes/999999/runs")
+    create_stop = client.post(
+        "/routes/999999/stops",
+        json={"run_id": 1, "type": "pickup", "sequence": 1},
+    )
+    list_stops = client.get("/routes/999999/stops")
+    create_student = client.post(
+        "/routes/999999/students",
+        json={"name": "Missing Route Student", "school_id": 1},
+    )
+    list_students = client.get("/routes/999999/students")
+
+    for response in (create_run, list_runs, create_stop, list_stops, create_student, list_students):
+        assert response.status_code == 404
 
 
 # ---------------------------------------------------------------------------

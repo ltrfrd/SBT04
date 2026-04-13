@@ -15,6 +15,7 @@ from backend.models.driver import Driver
 from backend.models.route import Route
 from backend.models.school import School
 from backend.models import run as run_model
+from backend.models import stop as stop_model
 from backend.models import student as student_model
 from backend.models.associations import StudentRunAssignment
 from backend.schemas.route import (
@@ -30,6 +31,7 @@ from backend.schemas.route import (
     RouteSchoolOut,
 )
 from backend.schemas.run import RouteRunCreate
+from backend.schemas.stop import StopCreate, StopOut
 from backend.utils.route_driver_assignment import (
     get_active_route_driver_assignments,
     get_primary_route_driver_assignments,
@@ -665,7 +667,6 @@ def create_route_run(
         required_access="read",
         options=[joinedload(Route.driver_assignments).joinedload(RouteDriverAssignment.driver)],
     )
-    ensure_route_owner(route, operator.id)
 
     new_run = run_router._create_planned_run(                   # Reuse shared run creation rules
         route=route,                                            # Parent route context
@@ -677,6 +678,207 @@ def create_route_run(
     db.commit()
     db.refresh(new_run)
     return run_router._serialize_run(new_run)
+
+
+# -----------------------------------------------------------
+# - List planned runs inside route
+# - Return all planned runs for the selected route context
+# -----------------------------------------------------------
+@router.get(
+    "/{route_id}/runs",
+    response_model=List[schemas.RunOut],
+    summary="List runs inside route",
+    description="Return all planned runs that belong to the selected route.",
+    response_description="Route runs",
+)
+def get_route_runs(
+    route_id: int,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    from backend.routers import run as run_router  # Local import avoids circular import at module load time
+
+    route = get_operator_scoped_route_or_404(
+        db=db,
+        route_id=route_id,
+        operator_id=operator.id,
+        required_access="read",
+    )
+
+    runs = (
+        db.query(run_model.Run)
+        .filter(run_model.Run.route_id == route.id)
+        .order_by(run_model.Run.id.asc())
+        .all()
+    )
+    return [run_router._serialize_run(run) for run in runs]
+
+
+# -----------------------------------------------------------
+# - Create stop inside route
+# - Attach one planned stop under a run that belongs to the route
+# -----------------------------------------------------------
+@router.post(
+    "/{route_id}/stops",
+    response_model=StopOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create stop inside route",
+    description="Create a planned stop under the selected route context. The target run must already belong to the route.",
+    response_description="Created stop",
+)
+def create_route_stop(
+    route_id: int,
+    payload: StopCreate,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    from backend.routers import stop as stop_router  # Local import avoids circular import at module load time
+
+    route = get_operator_scoped_route_or_404(
+        db=db,
+        route_id=route_id,
+        operator_id=operator.id,
+        required_access="read",
+    )
+
+    run = db.get(run_model.Run, payload.run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.route_id != route.id:
+        raise HTTPException(status_code=400, detail="Run does not belong to route")
+
+    new_stop = stop_router.create_run_stop(
+        run_id=run.id,
+        payload=schemas.RunStopCreate(
+            type=payload.type,
+            sequence=payload.sequence,
+            name=payload.name,
+            school_id=payload.school_id,
+            address=payload.address,
+            planned_time=payload.planned_time,
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+        ),
+        db=db,
+    )
+    return new_stop
+
+
+# -----------------------------------------------------------
+# - List planned stops inside route
+# - Return all stops that inherit the route context
+# -----------------------------------------------------------
+@router.get(
+    "/{route_id}/stops",
+    response_model=List[StopOut],
+    summary="List stops inside route",
+    description="Return all planned stops that belong to the selected route.",
+    response_description="Route stops",
+)
+def get_route_stops(
+    route_id: int,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    route = get_operator_scoped_route_or_404(
+        db=db,
+        route_id=route_id,
+        operator_id=operator.id,
+        required_access="read",
+    )
+
+    return (
+        db.query(stop_model.Stop)
+        .filter(stop_model.Stop.route_id == route.id)
+        .order_by(stop_model.Stop.run_id.asc(), stop_model.Stop.sequence.asc(), stop_model.Stop.id.asc())
+        .all()
+    )
+
+
+# -----------------------------------------------------------
+# - Create student inside route
+# - Attach one planning student record directly to route context
+# -----------------------------------------------------------
+@router.post(
+    "/{route_id}/students",
+    response_model=schemas.StudentOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create student inside route",
+    description="Create a planning-side student assignment inside the selected route context without changing runtime assignment behavior.",
+    response_description="Created student",
+)
+def create_route_student(
+    route_id: int,
+    payload: schemas.StudentCompatibilityCreate,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    from backend.routers import student as student_router  # Local import avoids circular import at module load time
+
+    route = get_operator_scoped_route_or_404(
+        db=db,
+        route_id=route_id,
+        operator_id=operator.id,
+        required_access="read",
+        options=[selectinload(Route.schools)],
+    )
+    school = db.get(School, payload.school_id)
+    if not school:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    _, stop = student_router._validate_compatibility_student_create_target(
+        school=school,
+        student_district_id=route.district_id,
+        route_id=route.id,
+        stop_id=payload.stop_id,
+        operator_id=operator.id,
+        db=db,
+    )
+
+    new_student = student_model.Student(
+        name=payload.name,
+        grade=payload.grade,
+        school_id=school.id,
+        route_id=route.id,
+        stop_id=stop.id if stop is not None else None,
+        district_id=route.district_id,
+        operator_id=operator.id,
+    )
+    db.add(new_student)
+    db.commit()
+    db.refresh(new_student)
+    return new_student
+
+
+# -----------------------------------------------------------
+# - List students inside route
+# - Return all planning-side students linked directly to route
+# -----------------------------------------------------------
+@router.get(
+    "/{route_id}/students",
+    response_model=List[schemas.StudentOut],
+    summary="List students inside route",
+    description="Return all planning-side student records linked directly to the selected route.",
+    response_description="Route students",
+)
+def get_route_students(
+    route_id: int,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    route = get_operator_scoped_route_or_404(
+        db=db,
+        route_id=route_id,
+        operator_id=operator.id,
+        required_access="read",
+    )
+
+    return (
+        db.query(student_model.Student)
+        .filter(student_model.Student.route_id == route.id)
+        .order_by(student_model.Student.name.asc(), student_model.Student.id.asc())
+        .all()
+    )
 
 
 # -----------------------------------------------------------
