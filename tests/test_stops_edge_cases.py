@@ -294,21 +294,6 @@ def test_route_run_context_stop_creation_rejects_started_runs(client):
     assert response.json()["detail"] == "Only planned runs can be modified"
 
 
-def test_route_stop_create_compatibility_endpoint_remains_available(client):
-    run_id = _setup_run(client)
-    run_response = client.get(f"/runs/{run_id}")
-    assert run_response.status_code == 200
-    route_id = run_response.json()["route"]["route_id"]
-
-    response = client.post(
-        f"/routes/{route_id}/stops",
-        json={"run_id": run_id, "type": "pickup", "name": "Compatibility Stop"},
-    )
-
-    assert response.status_code in (200, 201)
-    assert response.json()["run_id"] == run_id
-
-
 def test_stop_rejects_invalid_type_value(client):
     run_id = _setup_run(client)
 

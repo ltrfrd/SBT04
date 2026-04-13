@@ -175,13 +175,15 @@ def generate_reports(
     end: date = None,
     operator_id: int | None = None,
 ):
-    if reports_type == "driver" and ref_id:
+    normalized_reports_type = "dispatch" if reports_type == "payroll" else reports_type  # Keep payroll as a compatibility alias
+
+    if normalized_reports_type == "driver" and ref_id:
         return driver_summary(db, ref_id, operator_id=operator_id)  # Return driver reports summary
-    if reports_type == "route" and ref_id:
+    if normalized_reports_type == "route" and ref_id:
         return route_summary(db, ref_id, operator_id=operator_id)  # Return route reports summary
-    if reports_type == "dispatch" and start and end:
+    if normalized_reports_type == "dispatch" and start and end:
         return dispatch_summary(db, start, end, operator_id=operator_id)  # Return dispatch summary
-    if reports_type == "run" and ref_id:
+    if normalized_reports_type == "run" and ref_id:
         run = db.get(Run, ref_id)  # Load run for run-level reports
         if not run:
             return {"error": "Run not found"}  # Preserve error-style contract
@@ -213,9 +215,9 @@ def generate_reports(
             events,
             absence_lookup,
         )  # Return run reports summary
-    if reports_type == "date" and start and end:
+    if normalized_reports_type == "date" and start and end:
         return date_summary(db, start, end, operator_id=operator_id)
-    if reports_type == "school" and ref_id:
+    if normalized_reports_type == "school" and ref_id:
         return school_reports_summary(db, ref_id, operator_id=operator_id)
     return {"error": "Invalid reports type or parameters"}  # Preserve error-style contract
 
@@ -388,7 +390,7 @@ def school_reports_summary(db: Session, school_id: int, operator_id: int | None 
         .filter(school_model.School.id == school_id)
         .first()
     )
-    if not school or (operator_id is not None and school.operator_id != operator_id):
+    if not school:
         return {"error": "School not found"}
 
     routes = (  # Load routes serving the school
@@ -402,6 +404,8 @@ def school_reports_summary(db: Session, school_id: int, operator_id: int | None 
             route for route in routes
             if get_route_access_level(route, operator_id) is not None
         ]
+        if school.operator_id != operator_id and not routes:
+            return {"error": "School not found"}
 
     results = []  # Collect run reports summaries
 

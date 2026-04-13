@@ -13,12 +13,16 @@
 # -----------------------------
 # Logic
 import pytest                                                      # Pytest framework
-from datetime import datetime, timezone                            # Time utilities
+from datetime import date, datetime, time, timezone                # Time utilities
 from sqlalchemy.orm import Session, sessionmaker                   # DB session tools
 from backend.models.associations import StudentRunAssignment       # Runtime assignment model
+from backend.models.driver import Driver                           # Driver model for dispatch compatibility checks
+from backend.models.operator import Operator                       # Operator model for dispatch compatibility checks
 from backend.models import run as run_model                        # Direct run verification model
 from backend.models.route import Route                             # Direct route verification model
 from backend.models.student import Student                         # Direct student verification model
+from backend.models.dispatch import DispatchRecord                 # Dispatch model for reports compatibility checks
+from backend.utils import reports_generator                        # Reports generator utility
 from database import engine                                        # DB engine
 import uuid
 
@@ -417,6 +421,11 @@ def test_alerts(client):
     r = client.post("/schools/", json={"name": "Test School", "address": "123 Test St"})
     assert r.status_code in (200, 201)
     school_id = r.json()["id"]
+    route_update = client.put(
+        f"/routes/{route_id}",
+        json={"route_number": route["route_number"], "school_ids": [school_id]},
+    )
+    assert route_update.status_code == 200
 
     r = client.post(
         "/stops/",
@@ -433,12 +442,8 @@ def test_alerts(client):
     stop_id = r.json()["id"]
 
     r = client.post(
-        "/students/",
-        json={
-            "name": "Kid",
-            "school_id": school_id,
-            "stop_id": stop_id,
-        },
+        f"/runs/{run_id}/stops/{stop_id}/students",
+        json={"name": "Kid", "school_id": school_id},
     )
     assert r.status_code in (200, 201)
 
@@ -1238,23 +1243,6 @@ def test_run_context_stop_update_is_blocked_after_start(client):
     assert response.json()["detail"] == "Only planned runs can be modified"
 
 
-def test_legacy_stop_create_is_blocked_after_start(client):
-    context = _create_started_run_context(
-        client,
-        route_number="LOCK-LEGACY-STOP-CREATE",
-        unit_number="BUS-LOCK-LEGACY-STOP-CREATE",
-        run_type="AM",
-    )
-
-    response = client.post(
-        "/stops/",
-        json={"run_id": context["run_id"], "name": "Blocked Legacy Stop", "type": "pickup", "sequence": 2},
-    )
-
-    assert response.status_code == 400
-    assert response.json()["detail"] == "Only planned runs can be modified"
-
-
 def test_legacy_stop_update_is_blocked_after_start(client):
     context = _create_started_run_context(
         client,
@@ -1283,28 +1271,6 @@ def test_run_context_student_create_is_blocked_after_start(client):
     response = client.post(
         f"/runs/{context['run_id']}/stops/{context['stop_id']}/students",
         json={"name": "Blocked Student", "grade": "5", "school_id": context["school_id"]},
-    )
-
-    assert response.status_code == 400
-    assert response.json()["detail"] == "Only planned runs can be modified"
-
-
-def test_legacy_student_create_is_blocked_when_target_stop_run_is_started(client):
-    context = _create_started_run_context(
-        client,
-        route_number="LOCK-LEGACY-STUDENT-CREATE",
-        unit_number="BUS-LOCK-LEGACY-STUDENT-CREATE",
-        run_type="AM",
-    )
-
-    response = client.post(
-        "/students/",
-        json={
-            "name": "Blocked Legacy Student",
-            "grade": "5",
-            "school_id": context["school_id"],
-            "stop_id": context["stop_id"],
-        },
     )
 
     assert response.status_code == 400
@@ -3792,28 +3758,6 @@ def test_school_status_update_rejects_confirmed_runs(client):
 
 
 # -----------------------------------------------------------
-# - School-side status compatibility
-# - Preserve the legacy reports endpoint for older clients
-# -----------------------------------------------------------
-def test_school_status_update_compatibility_endpoint_remains_available(client):
-    ids = _build_school_reports_fixture(client)
-
-    response = client.post(
-        "/reports/school/student-status",
-        json={
-            "student_id": ids["student_id"],
-            "run_id": ids["run_1_id"],
-            "status": "present",
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json()["student_id"] == ids["student_id"]
-    assert response.json()["run_id"] == ids["run_1_id"]
-    assert response.json()["school_status"] == "present"
-
-
-# -----------------------------------------------------------
 # - School reports confirmation persistence
 # - Confirmed run returns confirmation in school reports payload
 # -----------------------------------------------------------
@@ -3843,6 +3787,58 @@ def test_school_confirmation_persists_into_school_reports(client):
     assert run_1["confirmation"]["is_confirmed"] is True           # Report shows confirmed state
     assert run_1["confirmation"]["confirmed_by"] == "frd"         # Report shows confirmer
     assert run_1["confirmation"]["confirmed_at"] is not None      # Report shows timestamp   
+
+
+# -----------------------------------------------------------
+# - Dispatch reports compatibility naming
+# - Keep payroll as an internal alias while dispatch stays canonical
+# -----------------------------------------------------------
+def test_generate_reports_accepts_payroll_as_dispatch_alias(db_engine):
+    with Session(db_engine) as db:
+        operator = Operator(name="Dispatch Alias Operator")
+        db.add(operator)
+        db.flush()
+
+        driver = Driver(name="Dispatch Alias Driver", email="dispatch-alias@test.com", phone="5551234", operator_id=1, pin_hash="test-hash")
+        driver.operator_id = operator.id
+        db.add(driver)
+        db.flush()
+
+        dispatch = DispatchRecord(
+            driver_id=driver.id,
+            work_date=date(2026, 4, 12),
+            charter_start=time(7, 0),
+            charter_end=time(9, 0),
+            charter_hours=2.0,
+            approved=True,
+        )
+        db.add(dispatch)
+        db.commit()
+
+        dispatch_result = reports_generator.generate_reports(
+            db,
+            "dispatch",
+            start=date(2026, 4, 12),
+            end=date(2026, 4, 12),
+            operator_id=operator.id,
+        )
+        payroll_result = reports_generator.generate_reports(
+            db,
+            "payroll",
+            start=date(2026, 4, 12),
+            end=date(2026, 4, 12),
+            operator_id=operator.id,
+        )
+
+    assert dispatch_result == payroll_result
+    assert dispatch_result == [
+        {
+            "driver_id": dispatch_result[0]["driver_id"],
+            "work_date": date(2026, 4, 12),
+            "charter_hours": 2.0,
+            "approved": True,
+        }
+    ]
 
 
 # -----------------------------------------------------------
@@ -4200,9 +4196,14 @@ def test_delete_student_entirely_removes_student_record(client):
         json={"name": "Full Delete School", "address": "108 Delete Way"},
     )
     assert school.status_code in (200, 201)
+    route = client.post(
+        "/routes/",
+        json={"route_number": "FULL-DELETE-STUDENT-ROUTE", "school_ids": [school.json()["id"]]},
+    )
+    assert route.status_code in (200, 201)
 
     student = client.post(
-        "/students/",
+        f"/routes/{route.json()['id']}/students",
         json={"name": "Full Delete Student", "grade": "6", "school_id": school.json()["id"]},
     )
     assert student.status_code in (200, 201)

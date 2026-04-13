@@ -32,20 +32,6 @@ def normalize_run_type(value: str) -> str:
 # -----------------------------
 # Logic
 # -----------------------------
-class RunCreateLegacy(BaseModel):
-    route_id: int  # Route being run
-    run_type: str = Field(min_length=1)  # Flexible run label
-    scheduled_start_time: time  # Fixed planned start time
-    scheduled_end_time: time  # Fixed planned end time
-
-    model_config = ConfigDict(extra="forbid")
-
-    @field_validator("run_type")
-    @classmethod
-    def validate_run_type(cls, value: str) -> str:
-        return normalize_run_type(value)
-
-
 class RouteRunCreate(BaseModel):
     run_type: str = Field(min_length=1)  # Flexible run label within selected route
     scheduled_start_time: time  # Fixed planned start time

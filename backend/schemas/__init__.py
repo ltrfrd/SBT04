@@ -55,7 +55,7 @@ from .route import (
 # -------------------------------------------------------------------------
 # Stop schemas
 # -------------------------------------------------------------------------
-from .stop import RunStopCreate, RunStopUpdate, StopCreate, StopOut  # Stop creation and response schemas
+from .stop import RunStopCreate, RunStopUpdate, StopOut  # Stop creation and response schemas
 
 
 # -------------------------------------------------------------------------
@@ -165,7 +165,6 @@ __all__ = [
     "RouteDriverAssignmentOut",
     "RouteRestorePrimaryBus",
 
-    "StopCreate",
     "RunStopCreate",
     "RunStopUpdate",
     "StopOut",

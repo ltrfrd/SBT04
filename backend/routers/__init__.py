@@ -14,7 +14,6 @@ from .stop import router as stop_router                          # Stop manageme
 from .run import router as run_router                            # Run operation endpoints
 from .dispatch import router as dispatch_router                  # Dispatch/business endpoints
 from .reports import router as reports_router                    # Reports endpoints
-from .reports import attendance_router                          # Deprecated attendance alias router
 from .reports import student_bus_absence_router                 # Reports-owned planned absence router
 from .student_run_assignment import router as student_run_assignment_router  # Run assignment endpoints
 from .pretrip import router as pretrip_router                    # Pre-trip inspection endpoints
@@ -33,7 +32,6 @@ __all__ = [
     "run_router",                        # Export run router
     "dispatch_router",                   # Export dispatch router
     "reports_router",                    # Export reports router
-    "attendance_router",                 # Export deprecated attendance alias router
     "student_bus_absence_router",        # Export reports-owned planned absence router
     "student_run_assignment_router",     # Export run assignment router
     "pretrip_router",                    # Export pre-trip router

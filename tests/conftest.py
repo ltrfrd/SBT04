@@ -249,13 +249,41 @@ def client(db_engine):
             if url == "/runs/" and isinstance(payload, dict) and "driver_id" in payload:
                 run_payload = _with_default_run_schedule(payload)
                 run_payload.pop("driver_id", None)
-                return self._wrapped_client.post(url, *args, json=run_payload, **{k: v for k, v in kwargs.items() if k != "json"})
+                route_id = run_payload.pop("route_id", None)
+                if route_id is None:
+                    return self._wrapped_client.post(url, *args, json=run_payload, **{k: v for k, v in kwargs.items() if k != "json"})
+                return self._wrapped_client.post(f"/routes/{route_id}/runs", *args, json=run_payload, **{k: v for k, v in kwargs.items() if k != "json"})
 
             if url == "/runs/" and isinstance(payload, dict):
-                return self._wrapped_client.post(url, *args, json=_with_default_run_schedule(payload), **{k: v for k, v in kwargs.items() if k != "json"})
+                run_payload = _with_default_run_schedule(payload)
+                route_id = run_payload.pop("route_id", None)
+                if route_id is None:
+                    return self._wrapped_client.post(url, *args, json=run_payload, **{k: v for k, v in kwargs.items() if k != "json"})
+                return self._wrapped_client.post(f"/routes/{route_id}/runs", *args, json=run_payload, **{k: v for k, v in kwargs.items() if k != "json"})
+
+            if url == "/stops/" and isinstance(payload, dict):
+                stop_payload = dict(payload)
+                run_id = stop_payload.pop("run_id", None)
+                if run_id is None:
+                    return self._wrapped_client.post(url, *args, json=stop_payload, **{k: v for k, v in kwargs.items() if k != "json"})
+                return self._wrapped_client.post(f"/runs/{run_id}/stops", *args, json=stop_payload, **{k: v for k, v in kwargs.items() if k != "json"})
+
+            if url.startswith("/routes/") and url.endswith("/stops") and isinstance(payload, dict):
+                stop_payload = dict(payload)
+                run_id = stop_payload.pop("run_id", None)
+                if run_id is None:
+                    return self._wrapped_client.post(url, *args, json=stop_payload, **{k: v for k, v in kwargs.items() if k != "json"})
+                route_path = url.rstrip("/")
+                return self._wrapped_client.post(f"{route_path}/runs/{run_id}/stops", *args, json=stop_payload, **{k: v for k, v in kwargs.items() if k != "json"})
 
             if url.startswith("/routes/") and url.endswith("/runs") and isinstance(payload, dict):
                 return self._wrapped_client.post(url, *args, json=_with_default_run_schedule(payload), **{k: v for k, v in kwargs.items() if k != "json"})
+
+            if url == "/students/" and isinstance(payload, dict) and "route_id" in payload:
+                student_payload = dict(payload)
+                route_id = student_payload.pop("route_id", None)
+                student_payload.pop("district_id", None)
+                return self._wrapped_client.post(f"/routes/{route_id}/students", *args, json=student_payload, **{k: v for k, v in kwargs.items() if k != "json"})
 
             if url.startswith("/runs/start"):
                 parsed = urlparse(url)

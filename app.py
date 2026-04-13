@@ -70,13 +70,11 @@ app.include_router(bus.router)  # Register bus endpoints
 app.include_router(district.router)  # Register district planning entry points
 app.include_router(school.router)  # Register school endpoints
 app.include_router(student.router)  # Register student endpoints
-app.include_router(student.district_router)  # Register district-scoped student creation endpoint
 app.include_router(route.router)  # Register route endpoints
 app.include_router(stop.router)  # Register stop endpoints
 app.include_router(run.router)  # Register run endpoints
 app.include_router(dispatch.router)  # Register dispatch endpoints
 app.include_router(reports.router)  # Register reports endpoints
-app.include_router(reports.attendance_router)  # Register deprecated attendance alias endpoints
 app.include_router(student_run_assignment.router)  # Register student run assignment endpoints
 app.include_router(reports.student_bus_absence_router)  # Register absence endpoints through reports ownership
 app.include_router(pretrip.router)  # Register pre-trip inspection endpoints

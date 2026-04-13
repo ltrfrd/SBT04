@@ -41,13 +41,13 @@ from backend.models.operator import Operator
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_operator_scoped_record_or_404
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
+from backend.utils.planning_scope import accessible_student_filter, get_school_for_planning_or_404
 
 from pydantic import BaseModel  # Small request body schema
 
 templates = Jinja2Templates(directory="backend/templates")   # Templates directory
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
-attendance_router = APIRouter(prefix="/attendance", tags=["Reports"])
 # -----------------------------------------------------------
 # School confirmation request body
 # -----------------------------------------------------------
@@ -58,14 +58,6 @@ class SchoolConfirmationRequest(BaseModel):
 # - Driver reports summary
 # - Return reports payload for one driver
 # -----------------------------------------------------------
-@attendance_router.get(
-    "/driver/{driver_id}",
-    status_code=status.HTTP_200_OK,
-    summary="Driver reports summary",
-    description="Return reports and work summary for a driver.",
-    response_description="Driver reports summary",
-    deprecated=True,
-)
 @router.get(
     "/driver/{driver_id}",                                      # Endpoint path with driver id
     status_code=status.HTTP_200_OK,                             # HTTP 200 on success
@@ -89,14 +81,6 @@ def get_driver_reports(
 # - Route reports summary
 # - Return reports payload for one route
 # -----------------------------------------------------------
-@attendance_router.get(
-    "/route/{route_id}",
-    status_code=status.HTTP_200_OK,
-    summary="Route reports summary",
-    description="Return reports and work summary for a route.",
-    response_description="Route reports summary",
-    deprecated=True,
-)
 @router.get(
     "/route/{route_id}",                                        # Endpoint path with route id
     status_code=status.HTTP_200_OK,                             # HTTP 200 on success
@@ -119,14 +103,6 @@ def get_route_reports(
 # - Run reports summary
 # - Return reports status for each student in a run
 # -----------------------------------------------------------
-@attendance_router.get(
-    "/run/{run_id}",
-    status_code=status.HTTP_200_OK,
-    summary="Run reports summary",
-    description="Return reports status for each student in a run.",
-    response_description="Run reports summary",
-    deprecated=True,
-)
 @router.get(
     "/run/{run_id}",                                           # Endpoint path with run id
     status_code=status.HTTP_200_OK,                            # HTTP 200 on success
@@ -196,14 +172,6 @@ def get_run_reports(
 # - Driver dispatch summary
 # - Return dispatch work summary for a date range
 # -----------------------------------------------------------
-@attendance_router.get(
-    "/payroll",
-    status_code=status.HTTP_200_OK,
-    summary="Driver dispatch summary",
-    description="Return driver dispatch summary for the selected date range.",
-    response_description="Driver dispatch summary",
-    deprecated=True,
-)
 @router.get(
     "/payroll",                                                # Deprecated endpoint path
     status_code=status.HTTP_200_OK,                            # HTTP 200 on success
@@ -239,13 +207,6 @@ def get_driver_dispatch_summary(
 # - Date reports summary
 # - Return reports aggregation for one date
 # -----------------------------------------------------------
-@attendance_router.get(
-    "/date/{target_date}",
-    summary="Date reports summary",
-    description="Return reports aggregation for a single date.",
-    response_description="Date reports summary",
-    deprecated=True,
-)
 @router.get(
     "/date/{target_date}",                                    # Endpoint path with target date
     summary="Date reports summary",                           # Swagger title
@@ -269,13 +230,6 @@ def get_date_reports(
 # - School reports summary
 # - Return reports aggregation for one school
 # -----------------------------------------------------------
-@attendance_router.get(
-    "/school/{school_id}",
-    summary="School reports summary",
-    description="Return reports aggregation for a single school.",
-    response_description="School reports summary",
-    deprecated=True,
-)
 @router.get(
     "/school/{school_id}",                                    # Endpoint path with school id
     summary="School reports summary",                         # Swagger title
@@ -298,14 +252,6 @@ def get_school_reports(
 # - Confirm school reports
 # - Create or refresh school confirmation for one school/run pair
 # -----------------------------------------------------------
-@attendance_router.post(
-    "/school/{school_id}/confirm/{run_id}",
-    status_code=status.HTTP_200_OK,
-    summary="Confirm school reports",
-    description="Create or refresh school confirmation for a specific school and run.",
-    response_description="School reports confirmation saved",
-    deprecated=True,
-)
 @router.post(
     "/school/{school_id}/confirm/{run_id}",                   # Endpoint path with school + run ids
     status_code=status.HTTP_200_OK,                           # HTTP 200 on success
@@ -320,11 +266,10 @@ def confirm_school_reports(
     db: Session = Depends(get_db),  # Database session
     operator: Operator = Depends(get_operator_context),
 ):
-    school = get_operator_scoped_record_or_404(
+    school = get_school_for_planning_or_404(
         db=db,
-        model=School,
-        record_id=school_id,
         operator_id=operator.id,
+        school_id=school_id,
         detail="School not found",
     )
 
@@ -390,13 +335,6 @@ def confirm_school_reports(
 # - Absences by date
 # - Return planned bus absences for one date
 # -----------------------------------------------------------
-@attendance_router.get(
-    "/absences/date/{target_date}",
-    summary="Absences by date",
-    description="Return planned bus absences for a single date.",
-    response_description="Absence list for date",
-    deprecated=True,
-)
 @router.get(
     "/absences/date/{target_date}",                            # Endpoint path with target date
     summary="Absences by date",                                # Swagger title
@@ -413,7 +351,7 @@ def get_absences_by_date(
         db.query(StudentBusAbsence)                                                   # Query planned absences
         .join(Student, Student.id == StudentBusAbsence.student_id)
         .options(joinedload(StudentBusAbsence.student))                               # Load student relation
-        .filter(Student.operator_id == operator.id)
+        .filter(accessible_student_filter(operator.id))
         .filter(StudentBusAbsence.date == target_date)                                # Only this date
         .order_by(StudentBusAbsence.created_at.asc(), StudentBusAbsence.id.asc())     # Stable ordering
         .all()                                                                        # Materialize list
@@ -444,13 +382,6 @@ def get_absences_by_date(
 # - Absences by school
 # - Return planned absences for one school
 # -----------------------------------------------------------
-@attendance_router.get(
-    "/absences/school/{school_id}",
-    summary="Absences by school",
-    description="Return planned bus absences for a single school.",
-    response_description="Absence list for school",
-    deprecated=True,
-)
 @router.get(
     "/absences/school/{school_id}",                          # Endpoint path with school id
     summary="Absences by school",                            # Swagger title
@@ -500,13 +431,6 @@ def get_absences_by_school(
 # - Absences by run
 # - Return planned absences for one run
 # -----------------------------------------------------------
-@attendance_router.get(
-    "/absences/run/{run_id}",
-    summary="Absences by run",
-    description="Return planned bus absences for a single run.",
-    response_description="Absence list for run",
-    deprecated=True,
-)
 @router.get(
     "/absences/run/{run_id}",                               # Endpoint path with run id
     summary="Absences by run",                              # Swagger title
@@ -577,22 +501,6 @@ def get_absences_by_run(
 # - School reports by date
 # - Return present or absent status for school students
 # -----------------------------------------------------------
-@attendance_router.get(
-    "/school/{school_id}/attendance/{target_date}",
-    status_code=status.HTTP_200_OK,
-    summary="School reports by date",
-    description="Return present or absent status for school students on one date.",
-    response_description="School reports by date",
-    deprecated=True,
-)
-@attendance_router.get(
-    "/school/{school_id}/reports/{target_date}",
-    status_code=status.HTTP_200_OK,
-    summary="School reports by date",
-    description="Return present or absent status for school students on one date.",
-    response_description="School reports by date",
-    deprecated=True,
-)
 @router.get(
     "/school/{school_id}/reports/{target_date}",
     status_code=status.HTTP_200_OK,                                              # HTTP 200 on success
@@ -606,19 +514,12 @@ def get_school_reports_by_date(
     db: Session = Depends(get_db),                                               # Database session
     operator: Operator = Depends(get_operator_context),
 ):
-    school = get_operator_scoped_record_or_404(
+    school = get_school_for_planning_or_404(
         db=db,
-        model=School,
-        record_id=school_id,
         operator_id=operator.id,
+        school_id=school_id,
         detail="School not found",
     )
-
-    if not school:                                                               # Validate school exists
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="School not found",
-        )
 
     runs = (
         db.query(Run)                                                            # Query runs
@@ -659,14 +560,6 @@ def get_school_reports_by_date(
 # - School mobile reports checklist
 # - Render mobile-friendly school reports route list
 # -----------------------------------------------------------
-@attendance_router.get(
-    "/school/{school_id}/mobile",
-    status_code=status.HTTP_200_OK,
-    summary="School mobile reports checklist",
-    description="Render the mobile school reports checklist for one school.",
-    response_description="Rendered school mobile reports page",
-    deprecated=True,
-)
 @router.get(
     "/school/{school_id}/mobile",                             # Mobile school reports page
     status_code=status.HTTP_200_OK,                           # HTTP 200 on success
@@ -704,14 +597,6 @@ def get_school_mobile_reports(
 # - School route reports run list
 # - Render runs for one selected school route
 # -----------------------------------------------------------
-@attendance_router.get(
-    "/school/{school_id}/mobile/route/{route_id}",
-    status_code=status.HTTP_200_OK,
-    summary="School mobile route runs",
-    description="Render the mobile list of runs for one selected school route.",
-    response_description="Rendered school mobile route runs page",
-    deprecated=True,
-)
 @router.get(
     "/school/{school_id}/mobile/route/{route_id}",            # Mobile school route page
     status_code=status.HTTP_200_OK,                           # HTTP 200 on success
@@ -752,14 +637,6 @@ def get_school_mobile_route_runs(
 # - School single run reports
 # - Render one selected run only
 # -----------------------------------------------------------
-@attendance_router.get(
-    "/school/{school_id}/mobile/run/{run_id}",
-    status_code=status.HTTP_200_OK,
-    summary="School mobile single run",
-    description="Render the mobile reports view for one selected run.",
-    response_description="Rendered school mobile single run page",
-    deprecated=True,
-)
 @router.get(
     "/school/{school_id}/mobile/run/{run_id}",                # Mobile school run page
     status_code=status.HTTP_200_OK,                           # HTTP 200 on success
@@ -797,12 +674,6 @@ def get_school_mobile_single_run_reports(
 # -------------------------------------------------------------------------
 # Request Schema - School Student Status Update
 # -------------------------------------------------------------------------
-class StudentStatusUpdate(BaseModel):                      # Pydantic model for request body
-    student_id: int                                        # Student ID
-    run_id: int                                            # Run ID
-    status: str                                            # "present" or "absent"
-
-
 class SchoolStatusUpdate(BaseModel):                       # Canonical request body for path-driven school status updates
     status: str                                            # "present" or "absent"
 
@@ -843,7 +714,7 @@ def update_school_status_for_assignment(
             status_code=404,
             detail="Assignment not found",
         )
-    if not assignment.student or assignment.student.operator_id != operator.id:
+    if not assignment.student:
         raise HTTPException(status_code=404, detail="Assignment not found")
     if not assignment.run or not assignment.run.route:
         raise HTTPException(status_code=404, detail="Assignment not found")
@@ -886,50 +757,9 @@ def update_school_status_for_assignment(
     }
 
 
-# -------------------------------------------------------------------------
-# School updates student status (layered, non-driver)
-# -------------------------------------------------------------------------
-@attendance_router.post(
-    "/school/student-status",
-    status_code=status.HTTP_200_OK,
-    summary="Update school student status (compatibility)",
-    description="Compatibility endpoint for older clients that still send run_id and student_id in the body. Preferred workflow is POST /runs/{run_id}/students/{student_id}/school-status so run and student context stay in the path.",
-    response_description="School student status updated",
-    deprecated=True,
-)
-@router.post(
-    "/school/student-status",                               # Endpoint for school-side status updates
-    status_code=status.HTTP_200_OK,                         # HTTP 200 on success
-    summary="Update school student status (compatibility)", # Swagger title
-    description="Compatibility endpoint for older clients that still send run_id and student_id in the body. Preferred workflow is POST /runs/{run_id}/students/{student_id}/school-status so run and student context stay in the path.",  # Swagger description
-    response_description="School student status updated",   # Swagger response text
-    deprecated=True,
-)
-def update_school_status(                                  # Handler function
-    payload: StudentStatusUpdate,                          # Typed JSON body
-    db: Session = Depends(get_db),                         # Database session dependency
-    operator: Operator = Depends(get_operator_context),
-):
-    return update_school_status_for_assignment(
-        run_id=payload.run_id,
-        student_id=payload.student_id,
-        status_value=payload.status,
-        db=db,
-        operator=operator,
-    )
-
 get_driver_work_summary = get_driver_dispatch_summary
-get_driver_attendance = get_driver_reports
-get_route_attendance = get_route_reports
-get_run_attendance = get_run_reports
-get_date_attendance = get_date_reports
-get_school_attendance = get_school_reports
-confirm_school_attendance = confirm_school_reports
-get_school_attendance_by_date = get_school_reports_by_date
-get_school_mobile_attendance = get_school_mobile_reports
-get_school_mobile_single_run = get_school_mobile_single_run_reports
 
 student_bus_absence_router = student_bus_absence.router
 
-__all__ = ["router", "attendance_router", "student_bus_absence_router"]
+__all__ = ["router", "student_bus_absence_router"]
 

@@ -282,6 +282,11 @@ def test_students_crud(client):
     driver_id = r.json()["id"]
 
     route_id = _create_route_with_assignment(client, "R1", "Bus-01", driver_id)
+    route_update = client.put(
+        f"/routes/{route_id}",
+        json={"route_number": "R1", "school_ids": [school_id]},
+    )
+    assert route_update.status_code == 200
 
     r = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
     assert r.status_code in (200, 201)
@@ -291,7 +296,10 @@ def test_students_crud(client):
     assert r.status_code in (200, 201)
     stop_id = r.json()["id"]
 
-    r = client.post("/students/", json={"name": "Kid1", "school_id": school_id, "stop_id": stop_id})
+    r = client.post(
+        f"/runs/{run_id}/stops/{stop_id}/students",
+        json={"name": "Kid1", "school_id": school_id},
+    )
     assert r.status_code in (200, 201)
     student_id = r.json()["id"]
 
@@ -909,116 +917,6 @@ def test_create_student_compatibility_allows_school_not_assigned_to_provided_rou
     assert response.json()["route_id"] == route_id
 
 
-def test_create_student_compatibility_allows_school_not_assigned_to_stop_route(client):
-    assigned_school = client.post("/schools/", json={"name": "Stop Assigned School", "address": "104 Stop Assigned Way"})
-    other_school = client.post("/schools/", json={"name": "Stop Other School", "address": "105 Stop Other Way"})
-    assert assigned_school.status_code in (200, 201)
-    assert other_school.status_code in (200, 201)
-
-    driver = client.post("/drivers/", json={"name": "Compatibility Stop Driver", "email": "compat.stop@test.com", "phone": "8c3", "pin": "1234"})
-    assert driver.status_code in (200, 201)
-
-    route_id = _create_route_with_assignment(client, "COMP-STOP-1", "BUS-COMP-STOP-1", driver.json()["id"])
-    route_update = client.put(
-        f"/routes/{route_id}",
-        json={"route_number": "COMP-STOP-1", "school_ids": [assigned_school.json()["id"]]},
-    )
-    assert route_update.status_code == 200
-
-    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
-    assert run.status_code in (200, 201)
-
-    stop = client.post(
-        f"/runs/{run.json()['id']}/stops",
-        json={"sequence": 1, "type": "pickup", "name": "Compatibility Stop"},
-    )
-    assert stop.status_code in (200, 201)
-
-    response = client.post(
-        "/students/",
-        json={
-            "name": "Wrong Stop School Student",
-            "grade": "4",
-            "school_id": other_school.json()["id"],
-            "stop_id": stop.json()["id"],
-        },
-    )
-    assert response.status_code == 201
-    assert response.json()["school_id"] == other_school.json()["id"]
-    assert response.json()["stop_id"] == stop.json()["id"]
-
-
-def test_create_student_compatibility_allows_safe_combinations(client):
-    standalone_school = client.post("/schools/", json={"name": "Standalone School", "address": "106 Standalone Way"})
-    route_school = client.post("/schools/", json={"name": "Route School", "address": "107 Route Way"})
-    assert standalone_school.status_code in (200, 201)
-    assert route_school.status_code in (200, 201)
-
-    driver = client.post("/drivers/", json={"name": "Compatibility Safe Driver", "email": "compat.safe@test.com", "phone": "8c4", "pin": "1234"})
-    assert driver.status_code in (200, 201)
-
-    route_id = _create_route_with_assignment(client, "COMP-SAFE-1", "BUS-COMP-SAFE-1", driver.json()["id"])
-    route_update = client.put(
-        f"/routes/{route_id}",
-        json={"route_number": "COMP-SAFE-1", "school_ids": [route_school.json()["id"]]},
-    )
-    assert route_update.status_code == 200
-
-    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
-    assert run.status_code in (200, 201)
-
-    stop = client.post(
-        f"/runs/{run.json()['id']}/stops",
-        json={"sequence": 1, "type": "pickup", "name": "Compatibility Safe Stop"},
-    )
-    assert stop.status_code in (200, 201)
-
-    school_only = client.post(
-        "/students/",
-        json={"name": "School Only Student", "grade": "3", "school_id": standalone_school.json()["id"]},
-    )
-    route_only = client.post(
-        "/students/",
-        json={
-            "name": "Route Only Student",
-            "grade": "4",
-            "school_id": route_school.json()["id"],
-            "route_id": route_id,
-        },
-    )
-    stop_only = client.post(
-        "/students/",
-        json={
-            "name": "Stop Only Student",
-            "grade": "5",
-            "school_id": route_school.json()["id"],
-            "stop_id": stop.json()["id"],
-        },
-    )
-    aligned = client.post(
-        "/students/",
-        json={
-            "name": "Aligned Student",
-            "grade": "6",
-            "school_id": route_school.json()["id"],
-            "route_id": route_id,
-            "stop_id": stop.json()["id"],
-        },
-    )
-
-    assert school_only.status_code == 201
-    assert route_only.status_code == 201
-    assert stop_only.status_code == 201
-    assert aligned.status_code == 201
-
-    assert school_only.json()["route_id"] is None
-    assert school_only.json()["stop_id"] is None
-    assert route_only.json()["route_id"] == route_id
-    assert route_only.json()["stop_id"] is None
-    assert stop_only.json()["route_id"] is None
-    assert stop_only.json()["stop_id"] == stop.json()["id"]
-    assert aligned.json()["route_id"] == route_id
-    assert aligned.json()["stop_id"] == stop.json()["id"]
 
 
 def test_update_student_inside_run_stop_context_validates_route_school_membership(client):
@@ -1522,19 +1420,11 @@ def test_run_context_create_endpoint_appears_in_openapi(client):
     assert "route_id" not in properties
 
 
-def test_generic_run_create_endpoint_is_legacy_in_openapi(client):
+def test_legacy_run_create_endpoint_is_removed_from_openapi(client):
     response = client.get("/openapi.json")
     assert response.status_code == 200
 
-    path_item = response.json()["paths"]["/runs/"]["post"]
-    assert path_item["summary"] == "Create run (legacy compatibility)"
-    assert "Preferred workflow-first creation is POST /routes/{route_id}/runs" in path_item["description"]
-
-    schema_ref = path_item["requestBody"]["content"]["application/json"]["schema"]["$ref"]
-    assert schema_ref.endswith("/RunCreateLegacy")
-
-    properties = response.json()["components"]["schemas"]["RunCreateLegacy"]["properties"]
-    assert "route_id" in properties
+    assert "post" not in response.json()["paths"]["/runs/"]
 
 
 def test_start_run_endpoint_has_query_param_only_in_openapi(client):
@@ -1625,8 +1515,8 @@ def test_run_context_stop_create_endpoint_appears_in_openapi(client):
 
     path_item = response.json()["paths"]["/runs/{run_id}/stops"]["post"]
     assert path_item["summary"] == "Create stop inside run"
-    assert "without sending run_id in the body" in path_item["description"]
-    assert "planned run context" in path_item["description"]
+    assert "Preferred primary stop creation workflow is POST /routes/{route_id}/runs/{run_id}/stops" in path_item["description"]
+    assert "run helper for stop setup" in path_item["description"]
     assert "not available after the run has started" in path_item["description"]
 
     schema_ref = path_item["requestBody"]["content"]["application/json"]["schema"]["$ref"]
@@ -1636,20 +1526,11 @@ def test_run_context_stop_create_endpoint_appears_in_openapi(client):
     assert "run_id" not in properties
 
 
-def test_generic_stop_create_endpoint_is_legacy_in_openapi(client):
+def test_legacy_stop_create_endpoint_is_removed_from_openapi(client):
     response = client.get("/openapi.json")
     assert response.status_code == 200
 
-    path_item = response.json()["paths"]["/stops/"]["post"]
-    assert path_item["summary"] == "Create stop (legacy compatibility)"
-    assert "Preferred workflow-first creation is POST /runs/{run_id}/stops." in path_item["description"]
-    assert "Only planned runs can be modified." in path_item["description"]
-
-    schema_ref = path_item["requestBody"]["content"]["application/json"]["schema"]["$ref"]
-    assert schema_ref.endswith("/StopCreate")
-
-    properties = response.json()["components"]["schemas"]["StopCreate"]["properties"]
-    assert "run_id" in properties
+    assert "post" not in response.json()["paths"]["/stops/"]
 
 
 def test_run_context_student_create_endpoint_appears_in_openapi(client):
@@ -1671,55 +1552,32 @@ def test_run_context_student_create_endpoint_appears_in_openapi(client):
     assert "school_id" in properties
 
 
-def test_generic_student_create_endpoint_is_secondary_in_openapi(client):
+def test_legacy_student_create_endpoint_is_removed_from_openapi(client):
     response = client.get("/openapi.json")
     assert response.status_code == 200
 
-    path_item = response.json()["paths"]["/students/"]["post"]
-    assert path_item["summary"] == "Create student (secondary compatibility)"
-    assert "Preferred layered workflow is POST /runs/{run_id}/stops/{stop_id}/students" in path_item["description"]
-    assert "Deprecated compatibility endpoint" in path_item["description"]
-    assert "Optional route_id and stop_id fields are legacy planning pointers" in path_item["description"]
-    assert "only planned runs can be modified" in path_item["description"].lower()
-    assert path_item["deprecated"] is True
-
-    schema_ref = path_item["requestBody"]["content"]["application/json"]["schema"]["$ref"]
-    assert schema_ref.endswith("/StudentCompatibilityCreate")
-
-    properties = response.json()["components"]["schemas"]["StudentCompatibilityCreate"]["properties"]
-    assert "route_id" in properties
-    assert "stop_id" in properties
+    assert "post" not in response.json()["paths"]["/students/"]
 
 
-def test_district_student_create_endpoint_is_compatibility_only_in_openapi(client):
+def test_legacy_district_student_create_endpoint_is_removed_from_openapi(client):
     response = client.get("/openapi.json")
     assert response.status_code == 200
 
-    path_item = response.json()["paths"]["/districts/{district_id}/students"]["post"]
-    assert path_item["summary"] == "Create student under district (compatibility)"
-    assert "Deprecated compatibility endpoint" in path_item["description"]
-    assert "Preferred layered workflow is POST /runs/{run_id}/stops/{stop_id}/students" in path_item["description"]
-    assert path_item["deprecated"] is True
+    assert "/districts/{district_id}/students" not in response.json()["paths"]
 
 
-def test_route_stop_create_compatibility_endpoint_is_deprecated_in_openapi(client):
+def test_legacy_route_stop_create_endpoint_is_removed_from_openapi(client):
     response = client.get("/openapi.json")
     assert response.status_code == 200
 
-    path_item = response.json()["paths"]["/routes/{route_id}/stops"]["post"]
-    assert path_item["summary"] == "Create stop inside route (compatibility)"
-    assert "Preferred workflow is POST /routes/{route_id}/runs/{run_id}/stops" in path_item["description"]
-    assert path_item["deprecated"] is True
+    assert "post" not in response.json()["paths"]["/routes/{route_id}/stops"]
 
 
-def test_reports_school_status_compatibility_endpoint_is_deprecated_in_openapi(client):
+def test_reports_school_status_compatibility_endpoint_is_removed_from_openapi(client):
     response = client.get("/openapi.json")
     assert response.status_code == 200
 
-    path_item = response.json()["paths"]["/reports/school/student-status"]["post"]
-    assert path_item["summary"] == "Update school student status (compatibility)"
-    assert "Preferred workflow is POST /runs/{run_id}/students/{student_id}/school-status" in path_item["description"]
-    assert path_item["deprecated"] is True
+    assert "/reports/school/student-status" not in response.json()["paths"]
 
 
 def test_run_context_student_update_endpoint_appears_in_openapi(client):
@@ -1748,7 +1606,7 @@ def test_run_context_bulk_student_create_endpoint_appears_in_openapi(client):
 
     path_item = response.json()["paths"]["/runs/{run_id}/stops/{stop_id}/students/bulk"]["post"]
     assert path_item["summary"] == "Bulk add students to run stop"
-    assert "planned run-stop context" in path_item["description"]
+    assert "run-stop context" in path_item["description"]
     assert "not available after the run has started" in path_item["description"]
 
 

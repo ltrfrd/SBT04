@@ -1,7 +1,6 @@
 from typing import List
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Response, status
-from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from database import get_db
@@ -30,8 +29,9 @@ from backend.schemas.route import (
     RouteSchoolOut,
 )
 from backend.schemas.run import RouteRunCreate, RunUpdate
-from backend.schemas.stop import RunStopCreate, StopCreate, StopOut, StopUpdate
+from backend.schemas.stop import RunStopCreate, StopOut, StopUpdate
 from backend.utils.planning_scope import (
+    accessible_route_filter,
     get_route_run_or_404,
     get_route_stop_or_404,
     get_route_student_or_404,
@@ -399,12 +399,7 @@ def get_routes(
             selectinload(Route.runs).selectinload(run_model.Run.stops),  # Load stop counts per run
             selectinload(Route.runs).selectinload(run_model.Run.student_assignments),  # Load runtime student counts
         )
-        .filter(
-            or_(
-                Route.operator_id == operator.id,
-                Route.operator_access.any(OperatorRouteAccess.operator_id == operator.id),
-            )
-        )
+        .filter(accessible_route_filter(operator.id))
         .order_by(Route.route_number.asc(), Route.id.asc())      # Keep route list stable
         .all()
     )
@@ -437,12 +432,7 @@ def get_route(
             selectinload(Route.runs).selectinload(run_model.Run.student_assignments).selectinload(StudentRunAssignment.student).selectinload(student_model.Student.school),
         )
         .filter(Route.id == route_id)
-        .filter(
-            or_(
-                Route.operator_id == operator.id,
-                Route.operator_access.any(OperatorRouteAccess.operator_id == operator.id),
-            )
-        )
+        .filter(accessible_route_filter(operator.id))
         .first()
     )
     if not route:
@@ -471,16 +461,17 @@ def update_route(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    route = get_operator_scoped_route_or_404(
-        db=db,
-        route_id=route_id,
-        operator_id=operator.id,
-        required_access="read",
-        options=[
+    route = (
+        db.query(Route)
+        .options(
             joinedload(Route.schools),
             joinedload(Route.driver_assignments).joinedload(RouteDriverAssignment.driver),
-        ],
+        )
+        .filter(Route.id == route_id)
+        .first()
     )
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
     ensure_route_owner(route, operator.id)
 
     update_data = route_in.model_dump(exclude_unset=True)
@@ -736,7 +727,7 @@ def _create_route_run_stop(
     response_model=StopOut,
     status_code=status.HTTP_201_CREATED,
     summary="Create stop inside route run",
-    description="Preferred workflow-first stop creation endpoint. Create a planned stop under the selected route and run context without sending internal run_id in the body.",
+    description="Primary path-driven stop creation workflow. Create a planned stop under the selected route and run context without sending internal run_id in the body.",
     response_description="Created stop",
 )
 def create_route_run_stop(
@@ -750,43 +741,6 @@ def create_route_run_stop(
         route_id=route_id,
         run_id=run_id,
         payload=payload,
-        db=db,
-        operator=operator,
-    )
-
-
-# -----------------------------------------------------------
-# - Create stop inside route
-# - Attach one planned stop under a run that belongs to the route
-# -----------------------------------------------------------
-@router.post(
-    "/{route_id}/stops",
-    response_model=StopOut,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create stop inside route (compatibility)",
-    description="Compatibility endpoint for older clients that still send run_id in the body. Preferred workflow is POST /routes/{route_id}/runs/{run_id}/stops so route and run context stay in the path.",
-    response_description="Created stop",
-    deprecated=True,
-)
-def create_route_stop(
-    route_id: int,
-    payload: StopCreate,
-    db: Session = Depends(get_db),
-    operator: Operator = Depends(get_operator_context),
-):
-    return _create_route_run_stop(
-        route_id=route_id,
-        run_id=payload.run_id,
-        payload=schemas.RunStopCreate(
-            type=payload.type,
-            sequence=payload.sequence,
-            name=payload.name,
-            school_id=payload.school_id,
-            address=payload.address,
-            planned_time=payload.planned_time,
-            latitude=payload.latitude,
-            longitude=payload.longitude,
-        ),
         db=db,
         operator=operator,
     )
@@ -915,7 +869,7 @@ def delete_route_stop(
     response_model=schemas.StudentOut,
     status_code=status.HTTP_201_CREATED,
     summary="Create student inside route",
-    description="Create a planning-side student assignment inside the selected route context without changing runtime assignment behavior.",
+    description="Route-scoped planning helper. This is not the preferred initial student setup workflow. Preferred workflow is POST /runs/{run_id}/stops/{stop_id}/students so run and stop context stay authoritative.",
     response_description="Created student",
 )
 def create_route_student(

@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from backend import schemas
-from backend.models.district import District
 from backend.models.operator import Operator
 from backend.models import associations as assoc_model
 from backend.models import route as route_model
@@ -19,7 +18,7 @@ from backend.models import school as school_model
 from backend.models import stop as stop_model
 from backend.models import student as student_model
 from backend.utils.operator_scope import get_operator_context
-from backend.utils.operator_scope import get_operator_scoped_record_or_404
+from backend.utils.operator_scope import get_operator_scoped_route_or_404
 from backend.utils.planning_scope import (
     accessible_student_filter,
     get_route_with_schools_or_404,
@@ -37,10 +36,6 @@ from backend.utils.run_setup import (
 
 router = APIRouter(
     prefix="/students",
-    tags=["Students"],
-)
-district_router = APIRouter(
-    prefix="/districts",
     tags=["Students"],
 )
 
@@ -325,105 +320,6 @@ def _update_student_record(
     return student
 
 
-@router.post(
-    "/",
-    response_model=schemas.StudentOut,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create student (secondary compatibility)",
-    description=(
-        "Deprecated compatibility endpoint for creating a student record directly. "
-        "Preferred layered workflow is POST /runs/{run_id}/stops/{stop_id}/students so route and stop context are inherited automatically. "
-        "Optional route_id and stop_id fields are legacy planning pointers for compatibility only. "
-        "When stop context is supplied, only planned runs can be modified."
-    ),
-    response_description="Created student",
-    deprecated=True,
-)
-def create_student(
-    student: schemas.StudentCompatibilityCreate,
-    db: Session = Depends(get_db),
-    operator: Operator = Depends(get_operator_context),
-):
-    school = _get_school_for_planning_or_404(
-        db=db,
-        operator_id=operator.id,
-        detail="School not found",
-        school_id=student.school_id,
-    )
-
-    _validate_compatibility_student_create_target(
-        school=school,
-        student_district_id=student.district_id,
-        route_id=student.route_id,
-        stop_id=student.stop_id,
-        operator_id=operator.id,
-        db=db,
-    )
-
-    payload = student.model_dump()
-    payload["school_id"] = school.id
-    new_student = student_model.Student(
-        **payload,
-        operator_id=operator.id,
-    )
-    db.add(new_student)
-    db.commit()
-    db.refresh(new_student)
-    return new_student
-
-
-@district_router.post(
-    "/{district_id}/students",
-    response_model=schemas.StudentOut,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create student under district (compatibility)",
-    description=(
-        "Deprecated compatibility endpoint for creating a student under the selected district context. "
-        "Preferred layered workflow is POST /runs/{run_id}/stops/{stop_id}/students so route, run, and stop context are inherited automatically. "
-        "The path district_id is authoritative and operator context is preserved for compatibility."
-    ),
-    response_description="Created student",
-    deprecated=True,
-)
-def create_student_for_district(
-    district_id: int,
-    student: schemas.StudentCompatibilityCreate,
-    db: Session = Depends(get_db),
-    operator: Operator = Depends(get_operator_context),
-):
-    district = db.get(District, district_id)
-    if not district:
-        raise HTTPException(status_code=404, detail="District not found")
-
-    school = _get_school_for_planning_or_404(
-        db=db,
-        operator_id=operator.id,
-        detail="School not found",
-        school_id=student.school_id,
-    )
-
-    _validate_compatibility_student_create_target(
-        school=school,
-        student_district_id=district_id,
-        route_id=student.route_id,
-        stop_id=student.stop_id,
-        operator_id=operator.id,
-        db=db,
-    )
-
-    payload = student.model_dump(exclude={"district_id"})
-    payload["school_id"] = school.id
-    new_student = student_model.Student(
-        **payload,
-        district_id=district_id,
-        operator_id=operator.id,
-    )
-    db.add(new_student)
-    db.commit()
-    db.refresh(new_student)
-    return new_student
-
-
 @router.get(
     "/",
     response_model=List[schemas.StudentOut],
@@ -530,12 +426,11 @@ def delete_student(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    student = get_operator_scoped_record_or_404(
+    student = _get_student_for_planning_or_404(
         db=db,
-        model=student_model.Student,
-        record_id=student_id,
         operator_id=operator.id,
         detail="Student not found",
+        student_id=student_id,
     )
     db.delete(student)
     db.commit()
@@ -554,17 +449,16 @@ def get_students_by_school(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    get_operator_scoped_record_or_404(
+    _get_school_for_planning_or_404(
         db=db,
-        model=school_model.School,
-        record_id=school_id,
         operator_id=operator.id,
         detail="School not found",
+        school_id=school_id,
     )
 
     return (
         db.query(student_model.Student)
-        .filter(student_model.Student.operator_id == operator.id)
+        .filter(accessible_student_filter(operator.id))
         .filter(student_model.Student.school_id == school_id)
         .all()
     )
@@ -599,7 +493,7 @@ def get_students_by_route(
             run_model.Run,
             run_model.Run.id == assoc_model.StudentRunAssignment.run_id,
         )
-        .filter(student_model.Student.operator_id == operator.id)
+        .filter(accessible_student_filter(operator.id))
         .filter(run_model.Run.route_id == route_id)
         .distinct()
         .all()

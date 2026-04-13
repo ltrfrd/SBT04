@@ -16,10 +16,9 @@ from backend.models import school as school_model
 from backend.models import stop as stop_model
 from backend.models import run as run_model
 from backend.models.stop import Stop, StopType
-from backend.schemas.stop import RunStopCreate, RunStopUpdate, StopCreate, StopOut, StopUpdate, StopReorder
+from backend.schemas.stop import RunStopCreate, RunStopUpdate, StopOut, StopUpdate, StopReorder
 from backend.utils.db_errors import raise_conflict_if_unique
 from backend.utils.operator_scope import get_operator_context
-from backend.utils.operator_scope import get_operator_scoped_record_or_404
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
 from backend.utils.operator_scope import get_route_access_level
 from backend.utils.run_setup import (
@@ -136,7 +135,7 @@ def _get_next_stop_sequence(db: Session, run_id: int, requested_sequence: int | 
 def _build_stop_payload(
     *,
     run_id: int,
-    payload: StopCreate | RunStopCreate | StopUpdate,
+    payload: RunStopCreate | StopUpdate,
     db: Session,
     existing_stop: stop_model.Stop | None = None,
 ) -> dict:
@@ -407,54 +406,6 @@ def force_normalize_run(
             detail="Stop sequence conflict for this run",
         )
         raise HTTPException(status_code=400, detail="Integrity error")
-
-# -----------------------------------------------------------
-# - Create stop
-# - Create a stop and place it within the run sequence
-# -----------------------------------------------------------
-@router.post(
-    "/",
-    response_model=StopOut,
-    status_code=201,
-    summary="Create stop (legacy compatibility)",
-    description="Legacy compatibility endpoint for creating a stop by sending run_id in the body. Preferred workflow-first creation is POST /runs/{run_id}/stops. Only planned runs can be modified.",
-    response_description="Created stop",
-)
-def create_stop(
-    payload: StopCreate,
-    db: Session = Depends(get_db),
-    operator: Operator = Depends(get_operator_context),
-):
-    try:
-        run = get_run_or_404(payload.run_id, db)
-        route = get_operator_scoped_route_or_404(db=db, route_id=run.route_id, operator_id=operator.id, required_access="read")
-        if route.operator_id != operator.id:
-            raise HTTPException(status_code=404, detail="Run not found")
-        ensure_run_is_planned_for_setup(run)                       # Legacy compatibility create still honors planned-only setup
-
-        data = _build_stop_payload(                             # Apply shared stop workflow rules
-            run_id=payload.run_id,                              # Parent run from generic payload
-            payload=payload,                                    # Incoming stop request
-            db=db,                                              # Shared DB session
-        )
-
-        stop = stop_model.Stop(**data)
-        db.add(stop)
-        db.commit()
-        db.refresh(stop)
-        return stop
-
-    except IntegrityError as e:
-        db.rollback()
-        raise_conflict_if_unique(
-            db,
-            e,
-            constraint_name="uq_stops_run_sequence",
-            sqlite_columns=("run_id", "sequence"),
-            detail="Stop sequence conflict for this run",
-        )
-        raise HTTPException(status_code=400, detail="Integrity error")
-
 
 # -----------------------------------------------------------
 # Run-context stop creation helper

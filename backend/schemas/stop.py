@@ -43,23 +43,6 @@ def _normalize_stop_type(value: str | StopType | None) -> str | StopType | None:
     raise ValueError("Stop type must be pickup, dropoff, school_arrive, or school_depart")
 
 
-class StopCreate(BaseModel):
-    run_id: int
-    type: StopType
-    sequence: Optional[int] = None
-    name: Optional[str] = None
-    school_id: Optional[int] = None
-    address: Optional[str] = None
-    planned_time: Optional[time] = None
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
-
-    @field_validator("type", mode="before")
-    @classmethod
-    def normalize_type(cls, value):
-        return _normalize_stop_type(value)
-
-
 class StopUpdate(BaseModel):
     sequence: int | None = None
     type: StopType | None = None

@@ -25,7 +25,7 @@ from backend.models.student import Student                      # Student model
 from backend.models.stop import Stop                            # Stop model
 from backend.models.associations import StudentRunAssignment  # Runtime rider assignments
 from backend.models.associations import RouteDriverAssignment  # Route-level driver assignments
-from backend.schemas.run import RunCreateLegacy, RunOut, RunUpdate, RunDetailOut, RunDetailRouteOut, RunDetailDriverOut, RunDetailStopOut, RunDetailStudentOut, RunListOut, normalize_run_type
+from backend.schemas.run import RunOut, RunUpdate, RunDetailOut, RunDetailRouteOut, RunDetailDriverOut, RunDetailStopOut, RunDetailStudentOut, RunListOut, normalize_run_type
 from backend.models.run_event import RunEvent                  # Run timeline event model
 from backend.models import student as student_model  # Student model for replay names
 from backend.schemas.run import RunReplayOut, RunReplayEventOut, RunReplaySummaryOut
@@ -713,57 +713,6 @@ def _serialize_run_list_item(run: run_model.Run) -> RunListOut:
 
 
 # -----------------------------------------------------------
-# - Create run
-# - Legacy planned run creation
-# - Preserve compatibility while the route-context flow is primary
-# -----------------------------------------------------------
-@router.post(
-    "/",                                                         # Route path
-    response_model=schemas.RunOut,                               # Response schema
-    status_code=status.HTTP_201_CREATED,                         # HTTP 201 on success
-    summary="Create run (legacy compatibility)",                 # Swagger summary
-    description=(
-        "Legacy compatibility endpoint for creating a planned run by sending route_id in the body. "
-        "Preferred workflow-first creation is POST /routes/{route_id}/runs so route context is inherited automatically. "
-        "When exactly one active route-driver assignment exists, the planned run inherits that active driver. "
-        "Primary/default assignment does not drive live run resolution by itself. "
-        "A driver assignment is optional until the run is started."
-    ),                                                           # Swagger description
-    response_description="Created run",                          # Swagger response text
-)
-def create_run(
-    run: RunCreateLegacy,
-    db: Session = Depends(get_db),
-    operator: Operator = Depends(get_operator_context),
-):
-    # -----------------------------------------------------------
-    # - Validate route exists
-    # - Load route context and optional active driver assignment
-    # -----------------------------------------------------------
-    route = get_operator_scoped_route_or_404(
-        db=db,
-        route_id=run.route_id,
-        operator_id=operator.id,
-        required_access="read",
-        options=[
-            joinedload(route_model.Route.driver_assignments).joinedload(RouteDriverAssignment.driver),
-        ],
-    )
-    if route.operator_id != operator.id:
-        raise HTTPException(status_code=404, detail="Route not found")
-
-    new_run = _create_planned_run(                               # Reuse normalized planned run workflow
-        route=route,                                             # Selected route context
-        run_type=run.run_type,                                   # Flexible run label
-        scheduled_start_time=run.scheduled_start_time,           # Fixed planned start time
-        scheduled_end_time=run.scheduled_end_time,               # Fixed planned end time
-        db=db,                                                   # Shared DB session
-    )
-    db.commit()                                                  # Persist to DB
-    db.refresh(new_run)                                          # Reload instance
-    return _serialize_run(new_run)                               # Return response
-
-# -----------------------------------------------------------
 # - Start run
 # - Start a prepared run only
 # -----------------------------------------------------------
@@ -1144,7 +1093,7 @@ def get_run_stops(
     response_model=StopOut,
     status_code=status.HTTP_201_CREATED,
     summary="Create stop inside run",
-    description="Create a stop inside the selected planned run context without sending run_id in the body. This is a setup workflow endpoint and is not available after the run has started.",
+    description="Context-driven run helper for stop setup. Preferred primary stop creation workflow is POST /routes/{route_id}/runs/{run_id}/stops so route and run context stay explicit. This setup endpoint is not available after the run has started.",
     response_description="Created stop",
 )
 def create_stop_inside_run(
@@ -1200,7 +1149,7 @@ def update_stop_inside_run(
     "/{run_id}/students/{student_id}/school-status",
     status_code=status.HTTP_200_OK,
     summary="Update school status inside run",
-    description="Preferred workflow-first school status update endpoint. Update one assigned student's school status from run and student path context without sending internal IDs in the body.",
+    description="Primary path-driven school status workflow. Update one assigned student's school status from run and student path context without sending internal IDs in the body.",
     response_description="School student status updated",
 )
 def update_run_student_school_status(
@@ -1232,7 +1181,7 @@ def update_run_student_school_status(
     response_model=schemas.StudentOut,
     status_code=status.HTTP_201_CREATED,
     summary="Add student to run stop",
-    description="Create one student from planned run-stop context without repeating route_id, run_id, or stop_id in the body. This is a setup workflow endpoint and is not available after the run has started.",
+    description="Primary path-driven student creation workflow. Create one student from planned run-stop context without repeating route_id, run_id, or stop_id in the body. This setup endpoint is not available after the run has started.",
     response_description="Created student",
 )
 def create_run_stop_student(
@@ -1358,7 +1307,7 @@ def delete_run_stop_student(
     response_model=schemas.StopStudentBulkResult,
     status_code=status.HTTP_201_CREATED,
     summary="Bulk add students to run stop",
-    description="Create multiple students from planned run-stop context without repeating route_id, run_id, or stop_id in the body. This is a setup workflow endpoint and is not available after the run has started.",
+    description="Primary bulk student creation workflow for run-stop context. Create multiple students without repeating route_id, run_id, or stop_id in the body. This setup endpoint is not available after the run has started.",
     response_description="Bulk student creation summary",
 )
 def bulk_create_run_stop_students(

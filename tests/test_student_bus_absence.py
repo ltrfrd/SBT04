@@ -7,8 +7,15 @@ def _create_student(client):
     assert school_response.status_code in (200, 201)  # Confirm school creation succeeded
     school_id = school_response.json()["id"]  # Extract school ID
 
+    route_response = client.post(
+        "/routes/",
+        json={"route_number": "ABSENCE-STUDENT-ROUTE", "school_ids": [school_id]},
+    )  # Create route context for student planning
+    assert route_response.status_code in (200, 201)
+    route_id = route_response.json()["id"]
+
     student_response = client.post(
-        "/students/",
+        f"/routes/{route_id}/students",
         json={"name": "Absence Student", "grade": "4", "school_id": school_id},
     )  # Create student for absence tests
     assert student_response.status_code in (200, 201)  # Confirm student creation succeeded
