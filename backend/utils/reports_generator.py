@@ -35,10 +35,6 @@ def driver_summary(db: Session, driver_id: int, operator_id: int | None = None) 
     if not drv:
         return {"error": "Driver not found"}  # Return stable missing-driver payload
 
-    total_runs = (
-        db.query(run_model.Run).filter(run_model.Run.driver_id == driver_id).count()
-    )  # Count runs assigned to this driver
-
     total_charter_hours = (
         db.query(dispatch_model.DispatchRecord)
         .filter(dispatch_model.DispatchRecord.driver_id == driver_id)
@@ -69,7 +65,6 @@ def driver_summary(db: Session, driver_id: int, operator_id: int | None = None) 
     return {
         "driver_id": driver_id,
         "driver_name": drv.name,
-        "total_runs": total_runs,
         "charter_hours": round(total_hours, 2),
         "approved_days": approved,
         "pending_days": pending,
@@ -146,34 +141,55 @@ def route_summary(db: Session, route_id: int, operator_id: int | None = None) ->
     }  # Preserve existing payload shape
 
 
-def dispatch_summary(db: Session, start: date, end: date, operator_id: int | None = None) -> list:
+def dispatch_summary(
+    db: Session,
+    yard_id: int,
+    start: date,
+    end: date,
+    operator_id: int | None = None,
+) -> list:
     query = (
         db.query(dispatch_model.DispatchRecord)
+        .join(driver_model.Driver, driver_model.Driver.id == dispatch_model.DispatchRecord.driver_id)
+        .join(driver_model.Driver.yard)
         .filter(
             dispatch_model.DispatchRecord.work_date >= start,
             dispatch_model.DispatchRecord.work_date <= end,
+            Yard.id == yard_id,
         )
     )
     if operator_id is not None:
         query = (
             query
-            .join(driver_model.Driver, driver_model.Driver.id == dispatch_model.DispatchRecord.driver_id)
-            .join(driver_model.Driver.yard)
             .filter(Yard.operator_id == operator_id)
         )
-    records = query.all()  # Load dispatch rows inside the requested range
+    records = (
+        query
+        .order_by(
+            driver_model.Driver.name.asc(),
+            dispatch_model.DispatchRecord.work_date.asc(),
+            dispatch_model.DispatchRecord.id.asc(),
+        )
+        .all()
+    )  # Load dispatch rows inside the requested range
 
-    summary = []
+    driver_records = {}
     for r in records:
-        summary.append(
-            {
+        driver_name = r.driver.name if r.driver else None
+        if r.driver_id not in driver_records:
+            driver_records[r.driver_id] = {
                 "driver_id": r.driver_id,
+                "driver_name": driver_name,
+                "records": [],
+            }
+        driver_records[r.driver_id]["records"].append(
+            {
                 "work_date": r.work_date,
                 "charter_hours": float(r.charter_hours or 0),
                 "approved": r.approved,
             }
-        )  # Preserve existing dispatch summary row shape
-    return summary
+        )  # Preserve existing dispatch row data while grouping by driver
+    return list(driver_records.values())
 
 
 def generate_reports(
@@ -188,8 +204,8 @@ def generate_reports(
         return driver_summary(db, ref_id, operator_id=operator_id)  # Return driver reports summary
     if reports_type == "route" and ref_id:
         return route_summary(db, ref_id, operator_id=operator_id)  # Return route reports summary
-    if reports_type == "dispatch" and start and end:
-        return dispatch_summary(db, start, end, operator_id=operator_id)  # Return dispatch summary
+    if reports_type == "dispatch" and ref_id and start and end:
+        return dispatch_summary(db, ref_id, start, end, operator_id=operator_id)  # Return dispatch summary
     if reports_type == "run" and ref_id:
         run = db.get(Run, ref_id)  # Load run for run-level reports
         if not run:

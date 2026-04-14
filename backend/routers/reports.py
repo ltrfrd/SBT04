@@ -36,6 +36,7 @@ from backend.models.school import School                        # School model
 from backend.models.student_bus_absence import StudentBusAbsence  # Planned absence model
 from backend.models.associations import StudentRunAssignment       # Runtime student assignments
 from backend.models.route import Route                                    # Route model
+from backend.models.yard import Yard
 from backend.models import SchoolAttendanceVerification  # Confirmation model
 from backend.models.operator import Operator
 from backend.utils.operator_scope import get_operator_context
@@ -169,31 +170,46 @@ def get_run_reports(
 
 
 # -----------------------------------------------------------
-# - Driver dispatch summary
-# - Return dispatch work summary for a date range
+# - Yard time cards
+# - Return grouped driver time cards for a date range
 # -----------------------------------------------------------
 @router.get(
-    "/dispatch-summary",                                       # Canonical endpoint path
+    "/time-cards/all",                                         # Yard-scope endpoint path
     status_code=status.HTTP_200_OK,                            # HTTP 200 on success
-    summary="Driver dispatch summary",                         # Swagger title
-    description="Return driver dispatch summary for the selected date range.",  # Swagger description
-    response_description="Driver dispatch summary",            # Swagger response text
+    summary="Yard time cards",                                 # Swagger title
+    description="Return yard-scoped driver time cards for the selected date range.",  # Swagger description
+    response_description="Grouped driver time cards",          # Swagger response text
 )
-def get_driver_dispatch_summary(
+def get_yard_time_cards(
+    yard_id: int,
     start: date,
     end: date,
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    """Return dispatch summary for all drivers within the given date range."""
-    reports_data = reports_generator.dispatch_summary(db, start, end, operator_id=operator.id)
+    """Return grouped driver time cards for one yard within the given date range."""
+    yard = get_operator_scoped_record_or_404(
+        db=db,
+        model=Yard,
+        record_id=yard_id,
+        operator_id=operator.id,
+        detail="Yard not found",
+    )
+    reports_data = reports_generator.dispatch_summary(
+        db,
+        yard_id=yard.id,
+        start=start,
+        end=end,
+        operator_id=operator.id,
+    )
     if not reports_data:
         raise HTTPException(status_code=404, detail="No dispatch records found in range")  # Preserve empty-range behavior
     return {
+        "yard_id": yard.id,
         "date_range": {"start": start, "end": end},  # Requested date range
-        "total_records": len(reports_data),
-        "records": reports_data,
-    }  # Preserve existing response payload shape
+        "total_drivers": len(reports_data),
+        "drivers": reports_data,
+    }  # Yard-scoped grouped time card payload
 
 # -----------------------------------------------------------
 # - Date reports summary
@@ -233,6 +249,12 @@ def get_school_reports(
     db: Session = Depends(get_db),                            # Database session
     operator: Operator = Depends(get_operator_context),
 ):
+    get_school_for_planning_or_404(
+        db=db,
+        operator_id=operator.id,
+        school_id=school_id,
+        detail="School not found",
+    )
     return reports_generator.generate_reports(
         db=db,                                                # Pass DB session
         reports_type="school",
@@ -385,11 +407,10 @@ def get_absences_by_school(
     db: Session = Depends(get_db),                                                 # Database session
     operator: Operator = Depends(get_operator_context),
 ):
-    get_operator_scoped_record_or_404(
+    get_school_for_planning_or_404(
         db=db,
-        model=School,
-        record_id=school_id,
         operator_id=operator.id,
+        school_id=school_id,
         detail="School not found",
     )
 
@@ -749,7 +770,7 @@ def update_school_status_for_assignment(
     }
 
 
-get_driver_work_summary = get_driver_dispatch_summary
+get_driver_work_summary = get_yard_time_cards
 
 student_bus_absence_router = student_bus_absence.router
 

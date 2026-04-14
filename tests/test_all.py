@@ -3791,10 +3791,10 @@ def test_school_confirmation_persists_into_school_reports(client):
 
 
 # -----------------------------------------------------------
-# - Dispatch reports generation
-# - Keep dispatch as the canonical report type
+# - Yard dispatch report generation
+# - Keep dispatch grouped by driver within a yard
 # -----------------------------------------------------------
-def test_generate_reports_accepts_dispatch_type(db_engine):
+def test_dispatch_summary_groups_records_by_driver_and_yard(db_engine):
     with Session(db_engine) as db:
         operator = Operator(name="Dispatch Reports Operator")
         db.add(operator)
@@ -3802,6 +3802,10 @@ def test_generate_reports_accepts_dispatch_type(db_engine):
 
         yard = Yard(name="Dispatch Reports Yard", operator_id=operator.id)
         db.add(yard)
+        db.flush()
+
+        other_yard = Yard(name="Other Yard", operator_id=operator.id)
+        db.add(other_yard)
         db.flush()
 
         driver = Driver(
@@ -3814,6 +3818,26 @@ def test_generate_reports_accepts_dispatch_type(db_engine):
         db.add(driver)
         db.flush()
 
+        second_driver = Driver(
+            name="Dispatch Reports Driver 2",
+            email="dispatch-reports-2@test.com",
+            phone="5559999",
+            yard_id=yard.id,
+            pin_hash="test-hash",
+        )
+        db.add(second_driver)
+        db.flush()
+
+        other_yard_driver = Driver(
+            name="Other Yard Driver",
+            email="other-yard-driver@test.com",
+            phone="5550000",
+            yard_id=other_yard.id,
+            pin_hash="test-hash",
+        )
+        db.add(other_yard_driver)
+        db.flush()
+
         dispatch = DispatchRecord(
             driver_id=driver.id,
             work_date=date(2026, 4, 12),
@@ -3823,23 +3847,75 @@ def test_generate_reports_accepts_dispatch_type(db_engine):
             approved=True,
         )
         db.add(dispatch)
+
+        second_dispatch = DispatchRecord(
+            driver_id=driver.id,
+            work_date=date(2026, 4, 13),
+            charter_start=time(8, 0),
+            charter_end=time(10, 0),
+            charter_hours=2.0,
+            approved=False,
+        )
+        db.add(second_dispatch)
+
+        third_dispatch = DispatchRecord(
+            driver_id=second_driver.id,
+            work_date=date(2026, 4, 12),
+            charter_start=time(9, 0),
+            charter_end=time(11, 0),
+            charter_hours=2.0,
+            approved=True,
+        )
+        db.add(third_dispatch)
+
+        filtered_dispatch = DispatchRecord(
+            driver_id=other_yard_driver.id,
+            work_date=date(2026, 4, 12),
+            charter_start=time(7, 0),
+            charter_end=time(8, 0),
+            charter_hours=1.0,
+            approved=True,
+        )
+        db.add(filtered_dispatch)
         db.commit()
 
         dispatch_result = reports_generator.generate_reports(
             db,
             "dispatch",
+            ref_id=yard.id,
             start=date(2026, 4, 12),
-            end=date(2026, 4, 12),
+            end=date(2026, 4, 13),
             operator_id=operator.id,
         )
 
     assert dispatch_result == [
         {
-            "driver_id": dispatch_result[0]["driver_id"],
-            "work_date": date(2026, 4, 12),
-            "charter_hours": 2.0,
-            "approved": True,
-        }
+            "driver_id": driver.id,
+            "driver_name": "Dispatch Reports Driver",
+            "records": [
+                {
+                    "work_date": date(2026, 4, 12),
+                    "charter_hours": 2.0,
+                    "approved": True,
+                },
+                {
+                    "work_date": date(2026, 4, 13),
+                    "charter_hours": 2.0,
+                    "approved": False,
+                },
+            ],
+        },
+        {
+            "driver_id": second_driver.id,
+            "driver_name": "Dispatch Reports Driver 2",
+            "records": [
+                {
+                    "work_date": date(2026, 4, 12),
+                    "charter_hours": 2.0,
+                    "approved": True,
+                },
+            ],
+        },
     ]
 
 
