@@ -23,7 +23,7 @@ def _mark_active_run_ready_for_posttrip(client, run_id: int) -> int:
 
 def test_driver_workspace_keeps_posttrip_hidden_until_run_is_ready(client):
     context = _create_started_run_ready_for_posttrip(client, route_number="DRV-UI-HIDDEN")
-    login = client.post("/login", json={"driver_id": context["driver"]["id"], "pin": "1234"})
+    login = client.post("/session/operator", json={"operator_id": 1})
     assert login.status_code == 200
 
     response = client.get(f"/driver_run/{context['driver']['id']}?route_id={context['route']['id']}")
@@ -42,7 +42,7 @@ def test_driver_workspace_shows_posttrip_section_when_run_is_ready(client):
     context = _create_started_run_ready_for_posttrip(client, route_number="DRV-UI-READY")
     _mark_active_run_ready_for_posttrip(client, context["run"]["id"])
 
-    login = client.post("/login", json={"driver_id": context["driver"]["id"], "pin": "1234"})
+    login = client.post("/session/operator", json={"operator_id": 1})
     assert login.status_code == 200
 
     response = client.get(f"/driver_run/{context['driver']['id']}?route_id={context['route']['id']}")
@@ -65,7 +65,7 @@ def test_driver_workspace_enables_end_run_after_phase2_completion(client):
     _submit_phase1(client, context["run"]["id"])
     _submit_phase2(client, context["run"]["id"])
 
-    login = client.post("/login", json={"driver_id": context["driver"]["id"], "pin": "1234"})
+    login = client.post("/session/operator", json={"operator_id": 1})
     assert login.status_code == 200
 
     response = client.get(f"/driver_run/{context['driver']['id']}?route_id={context['route']['id']}")

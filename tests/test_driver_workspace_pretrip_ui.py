@@ -28,7 +28,7 @@ def _pretrip_payload(context, **overrides):
 
 
 def _login_and_open_workspace(client, context):
-    login = client.post("/login", json={"driver_id": context["driver"]["id"], "pin": "1234"})
+    login = client.post("/session/operator", json={"operator_id": 1})
     assert login.status_code == 200
     return client.get(f"/driver_run/{context['driver']['id']}?route_id={context['route']['id']}")
 

@@ -1,9 +1,7 @@
 # =============================================================================
 # tests/test_phase0_tenant_auth.py
 # -----------------------------------------------------------------------------
-# Phase 0 tenant isolation and authentication tests.
-# All multi-operator scenarios use session auth (login/logout) — no X-Operator-ID
-# header trust, which is intentionally removed as a security fix.
+# Phase 0 tenant isolation and transitional operator-session tests.
 # =============================================================================
 from datetime import date
 
@@ -23,13 +21,13 @@ from tests.conftest import TEST_DRIVER_PIN, _create_operator_in_db, _create_driv
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _login(client, driver_id: int, pin: str = TEST_DRIVER_PIN) -> None:
-    r = client.post("/login", json={"driver_id": driver_id, "pin": pin})
-    assert r.status_code == 200, f"Login failed: {r.text}"
+def _login(client, operator_id: int) -> None:
+    r = client.post("/session/operator", json={"operator_id": operator_id})
+    assert r.status_code == 200, f"Session bootstrap failed: {r.text}"
 
 
 def _logout(client) -> None:
-    r = client.post("/logout")
+    r = client.post("/session/logout")
     assert r.status_code == 200
 
 
@@ -59,7 +57,7 @@ def _create_shared_planning_context(client, db_engine, *, suffix: str) -> dict[s
     owner_driver_id = _create_driver_in_db(db_engine, owner_operator_id, f"{suffix} Owner Driver", f"{suffix.lower()}-owner@test.com")
     shared_driver_id = _create_driver_in_db(db_engine, shared_operator_id, f"{suffix} Shared Driver", f"{suffix.lower()}-shared@test.com")
 
-    _login(client, owner_driver_id)
+    _login(client, owner_operator_id)
 
     school = client.post(
         f"/districts/{district_id}/schools",
@@ -98,6 +96,7 @@ def _create_shared_planning_context(client, db_engine, *, suffix: str) -> dict[s
 
     return {
         "district_id": district_id,
+        "owner_operator_id": owner_operator_id,
         "owner_driver_id": owner_driver_id,
         "shared_driver_id": shared_driver_id,
         "shared_operator_id": shared_operator_id,
@@ -110,28 +109,21 @@ def _create_shared_planning_context(client, db_engine, *, suffix: str) -> dict[s
 
 
 # ---------------------------------------------------------------------------
-# AUTH: login / logout behaviour
+# AUTH: temporary operator session behaviour
 # ---------------------------------------------------------------------------
 
-def test_login_requires_valid_pin(client, db_engine):
-    # PIN is supplied explicitly here — this test documents what credential is used.
-    driver = client.post(
-        "/drivers/",
-        json={"name": "Secure Driver", "email": "secure@test.com", "phone": "555", "pin": "5678"},
-    )
-    assert driver.status_code == 201
-    with Session(db_engine) as db:
-        expected_operator_id = db.get(Driver, driver.json()["id"]).operator_id
+def test_session_operator_requires_valid_operator(client, db_engine):
+    operator_id = _create_operator_in_db(db_engine, "Session Operator")
 
-    missing_pin = client.post("/login", json={"driver_id": driver.json()["id"]})
-    assert missing_pin.status_code == 401
+    missing_operator = client.post("/session/operator", json={})
+    assert missing_operator.status_code == 422
 
-    wrong_pin = client.post("/login", json={"driver_id": driver.json()["id"], "pin": "9999"})
-    assert wrong_pin.status_code == 401
+    invalid_operator = client.post("/session/operator", json={"operator_id": 999999})
+    assert invalid_operator.status_code == 404
 
-    valid_login = client.post("/login", json={"driver_id": driver.json()["id"], "pin": "5678"})
-    assert valid_login.status_code == 200
-    assert valid_login.json()["operator_id"] == expected_operator_id
+    valid_session = client.post("/session/operator", json={"operator_id": operator_id})
+    assert valid_session.status_code == 200
+    assert valid_session.json()["operator_id"] == operator_id
 
 
 # ---------------------------------------------------------------------------
@@ -176,14 +168,14 @@ def test_operator_isolation_blocks_cross_operator_reads_and_writes(client, db_en
     driver_two_id = _create_driver_in_db(db_engine, operator_two_id, "Beta Driver", "beta-driver@test.com")
 
     # --- Operator one creates a route ---
-    _login(client, driver_one_id)
+    _login(client, operator_one_id)
     route_one = client.post("/routes/", json={"route_number": "ALPHA-1"})
     assert route_one.status_code in (200, 201)
     route_one_id = route_one.json()["id"]
 
     # --- Switch to operator two ---
     _logout(client)
-    _login(client, driver_two_id)
+    _login(client, operator_two_id)
 
     # Operator two cannot read operator one's driver
     cross_read_driver = client.get(f"/drivers/{driver_one_id}")
@@ -213,21 +205,21 @@ def test_shared_route_access_requires_explicit_grant(client, db_engine):
     shared_driver_id = _create_driver_in_db(db_engine, shared_operator_id, "Shared Driver", "shared-driver@test.com")
 
     # --- Owner creates a route ---
-    _login(client, owner_driver_id)
+    _login(client, owner_operator_id)
     route = client.post("/routes/", json={"route_number": "SHARED-1"})
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
 
     # --- Shared operator cannot read route before grant ---
     _logout(client)
-    _login(client, shared_driver_id)
+    _login(client, shared_operator_id)
 
     not_shared = client.get(f"/routes/{route_id}")
     assert not_shared.status_code == 404
 
     # --- Owner grants read access ---
     _logout(client)
-    _login(client, owner_driver_id)
+    _login(client, owner_operator_id)
 
     grant = client.post(
         f"/routes/{route_id}/share/{shared_operator_id}",
@@ -238,7 +230,7 @@ def test_shared_route_access_requires_explicit_grant(client, db_engine):
 
     # --- Shared operator can now read ---
     _logout(client)
-    _login(client, shared_driver_id)
+    _login(client, shared_operator_id)
 
     shared_read = client.get(f"/routes/{route_id}")
     assert shared_read.status_code == 200
@@ -259,7 +251,7 @@ def test_dashboard_counts_include_accessible_shared_planning_records(client, db_
     owner_driver_id = _create_driver_in_db(db_engine, owner_operator_id, "Dashboard Owner Driver", "dashboard-owner@test.com")
     shared_driver_id = _create_driver_in_db(db_engine, shared_operator_id, "Dashboard Shared Driver", "dashboard-shared@test.com")
 
-    _login(client, owner_driver_id)
+    _login(client, owner_operator_id)
 
     school = client.post(
         "/schools/",
@@ -296,7 +288,7 @@ def test_dashboard_counts_include_accessible_shared_planning_records(client, db_
     assert grant.status_code == 200
 
     _logout(client)
-    _login(client, shared_driver_id)
+    _login(client, shared_operator_id)
 
     response = client.get("/dashboard")
     assert response.status_code == 200
@@ -310,7 +302,7 @@ def test_dashboard_counts_include_accessible_shared_planning_records(client, db_
 
 def test_shared_operator_can_create_student_from_run_stop_context_on_shared_district_route(client, db_engine):
     context = _create_shared_planning_context(client, db_engine, suffix="Shared Student")
-    _login(client, context["shared_driver_id"])
+    _login(client, context["shared_operator_id"])
 
     response = client.post(
         f"/runs/{context['run_id']}/stops/{context['stop_id']}/students",
@@ -328,7 +320,7 @@ def test_shared_operator_can_create_student_from_run_stop_context_on_shared_dist
 def test_shared_operator_can_delete_accessible_student_record(client, db_engine):
     context = _create_shared_planning_context(client, db_engine, suffix="Delete Student Shared")
 
-    _login(client, context["shared_driver_id"])
+    _login(client, context["shared_operator_id"])
     response = client.delete(f"/students/{context['student_id']}")
     assert response.status_code == 204
 
@@ -339,7 +331,7 @@ def test_shared_operator_can_delete_accessible_student_record(client, db_engine)
 def test_students_by_school_includes_accessible_shared_students(client, db_engine):
     context = _create_shared_planning_context(client, db_engine, suffix="School Students Shared")
 
-    _login(client, context["shared_driver_id"])
+    _login(client, context["shared_operator_id"])
     response = client.get(f"/students/school/{context['school_id']}")
     assert response.status_code == 200
     assert [item["id"] for item in response.json()] == [context["student_id"]]
@@ -348,7 +340,7 @@ def test_students_by_school_includes_accessible_shared_students(client, db_engin
 def test_students_by_route_includes_accessible_shared_students(client, db_engine):
     context = _create_shared_planning_context(client, db_engine, suffix="Route Students Shared")
 
-    _login(client, context["shared_driver_id"])
+    _login(client, context["shared_operator_id"])
     response = client.get(f"/students/route/{context['route_id']}")
     assert response.status_code == 200
     assert [item["id"] for item in response.json()] == [context["student_id"]]
@@ -357,7 +349,7 @@ def test_students_by_route_includes_accessible_shared_students(client, db_engine
 def test_absences_by_date_includes_accessible_shared_students(client, db_engine):
     context = _create_shared_planning_context(client, db_engine, suffix="Absence Shared")
 
-    _login(client, context["owner_driver_id"])
+    _login(client, context["owner_operator_id"])
     create_absence = client.post(
         f"/students/{context['student_id']}/bus_absence",
         json={"date": date.today().isoformat(), "run_type": "AM"},
@@ -365,7 +357,7 @@ def test_absences_by_date_includes_accessible_shared_students(client, db_engine)
     assert create_absence.status_code == 201
     _logout(client)
 
-    _login(client, context["shared_driver_id"])
+    _login(client, context["shared_operator_id"])
     response = client.get(f"/reports/absences/date/{date.today().isoformat()}")
     assert response.status_code == 200
     assert response.json()["total_absences"] == 1
@@ -384,7 +376,7 @@ def test_operator_lists_only_show_owned_records(client, db_engine):
     driver_two_id = _create_driver_in_db(db_engine, operator_two_id, "Driver Two", "driver-two@test.com")
 
     # --- Operator one creates assets ---
-    _login(client, driver_one_id)
+    _login(client, operator_one_id)
     extra_driver_one = client.post(
         "/drivers/",
         json={"name": "Extra One", "email": "extra-one@test.com", "phone": "101", "pin": TEST_DRIVER_PIN},
@@ -395,7 +387,7 @@ def test_operator_lists_only_show_owned_records(client, db_engine):
 
     # --- Operator two creates assets ---
     _logout(client)
-    _login(client, driver_two_id)
+    _login(client, operator_two_id)
     extra_driver_two = client.post(
         "/drivers/",
         json={"name": "Extra Two", "email": "extra-two@test.com", "phone": "202", "pin": TEST_DRIVER_PIN},
@@ -406,7 +398,7 @@ def test_operator_lists_only_show_owned_records(client, db_engine):
 
     # --- Operator one list only shows its records ---
     _logout(client)
-    _login(client, driver_one_id)
+    _login(client, operator_one_id)
 
     drivers_one = client.get("/drivers/")
     routes_one = client.get("/routes/")
@@ -1006,7 +998,7 @@ def test_school_update_succeeds_via_valid_shared_planning_access(client, db_engi
     shared_driver_id = _create_driver_in_db(db_engine, shared_operator_id, "School Update Shared Driver", "school-update-shared@test.com")
 
     _logout(client)
-    _login(client, owner_driver_id)
+    _login(client, owner_operator_id)
 
     school = client.post(
         "/schools/",
@@ -1024,7 +1016,7 @@ def test_school_update_succeeds_via_valid_shared_planning_access(client, db_engi
     _share_route(client, route_id, shared_operator_id)
 
     _logout(client)
-    _login(client, shared_driver_id)
+    _login(client, shared_operator_id)
 
     update = client.put(
         f"/schools/{school_id}",
@@ -1041,7 +1033,7 @@ def test_school_delete_succeeds_via_valid_shared_planning_access(client, db_engi
     shared_driver_id = _create_driver_in_db(db_engine, shared_operator_id, "School Delete Shared Driver", "school-delete-shared@test.com")
 
     _logout(client)
-    _login(client, owner_driver_id)
+    _login(client, owner_operator_id)
 
     school = client.post(
         "/schools/",
@@ -1059,7 +1051,7 @@ def test_school_delete_succeeds_via_valid_shared_planning_access(client, db_engi
     _share_route(client, route_id, shared_operator_id)
 
     _logout(client)
-    _login(client, shared_driver_id)
+    _login(client, shared_operator_id)
 
     delete = client.delete(f"/schools/{school_id}")
     assert delete.status_code == 204
@@ -1160,13 +1152,13 @@ def test_district_owned_route_is_not_automatically_visible_to_other_operator(cli
     district_id = _create_district_in_db(db_engine, "District Route Hidden")
 
     _logout(client)
-    _login(client, owner_driver_id)
+    _login(client, owner_operator_id)
     route = client.post(f"/districts/{district_id}/routes", json={"route_number": "DISTRICT-HIDDEN-ROUTE"})
     assert route.status_code == 201
     route_id = route.json()["id"]
 
     _logout(client)
-    _login(client, other_driver_id)
+    _login(client, other_operator_id)
 
     route_list = client.get("/routes/")
     assert route_list.status_code == 200
@@ -1184,14 +1176,14 @@ def test_shared_route_remains_visible_in_route_list(client, db_engine):
     shared_driver_id = _create_driver_in_db(db_engine, shared_operator_id, "Shared Route List Reader Driver", "shared-route-list-reader@test.com")
 
     _logout(client)
-    _login(client, owner_driver_id)
+    _login(client, owner_operator_id)
     route = client.post("/routes/", json={"route_number": "SHARED-ROUTE-LIST"})
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
     _share_route(client, route_id, shared_operator_id)
 
     _logout(client)
-    _login(client, shared_driver_id)
+    _login(client, shared_operator_id)
 
     route_list = client.get("/routes/")
     assert route_list.status_code == 200
@@ -1301,7 +1293,7 @@ def test_district_owned_school_requires_route_access_for_other_operator(client, 
     district_id = _create_district_in_db(db_engine, "District School Hidden")
 
     _logout(client)
-    _login(client, owner_driver_id)
+    _login(client, owner_operator_id)
     school = client.post(
         f"/districts/{district_id}/schools",
         json={"name": "District Hidden School", "address": "40 Hidden School Way"},
@@ -1310,7 +1302,7 @@ def test_district_owned_school_requires_route_access_for_other_operator(client, 
     school_id = school.json()["id"]
 
     _logout(client)
-    _login(client, other_driver_id)
+    _login(client, other_operator_id)
 
     school_list = client.get("/schools/")
     assert school_list.status_code == 200
@@ -1328,7 +1320,7 @@ def test_school_becomes_visible_when_linked_to_shared_route(client, db_engine):
     shared_driver_id = _create_driver_in_db(db_engine, shared_operator_id, "Shared School Reader Driver", "shared-school-reader@test.com")
 
     _logout(client)
-    _login(client, owner_driver_id)
+    _login(client, owner_operator_id)
 
     school = client.post(
         "/schools/",
@@ -1346,7 +1338,7 @@ def test_school_becomes_visible_when_linked_to_shared_route(client, db_engine):
     _share_route(client, route_id, shared_operator_id)
 
     _logout(client)
-    _login(client, shared_driver_id)
+    _login(client, shared_operator_id)
 
     school_list = client.get("/schools/")
     assert school_list.status_code == 200
@@ -1366,7 +1358,7 @@ def _build_shared_school_reports_context(client, db_engine):
     district_id = _create_district_in_db(db_engine, "Shared Reports District")
 
     _logout(client)
-    _login(client, owner_driver_id)
+    _login(client, owner_operator_id)
 
     school = client.post(
         f"/districts/{district_id}/schools",
@@ -1421,7 +1413,7 @@ def _build_shared_school_reports_context(client, db_engine):
     run_date = started_run.json()["start_time"][:10]
 
     _logout(client)
-    _login(client, shared_driver_id)
+    _login(client, shared_operator_id)
 
     return {
         "district_id": district_id,
@@ -1486,7 +1478,7 @@ def test_district_owned_student_requires_accessible_school_or_route_for_other_op
     district_id = _create_district_in_db(db_engine, "District Student Hidden")
 
     _logout(client)
-    _login(client, owner_driver_id)
+    _login(client, owner_operator_id)
 
     school = client.post(
         f"/districts/{district_id}/schools",
@@ -1509,7 +1501,7 @@ def test_district_owned_student_requires_accessible_school_or_route_for_other_op
     student_id = student.json()["id"]
 
     _logout(client)
-    _login(client, other_driver_id)
+    _login(client, other_operator_id)
 
     student_list = client.get("/students/")
     assert student_list.status_code == 200
@@ -1527,7 +1519,7 @@ def test_student_becomes_visible_through_shared_route_school_access(client, db_e
     shared_driver_id = _create_driver_in_db(db_engine, shared_operator_id, "Shared Student Reader Driver", "shared-student-reader@test.com")
 
     _logout(client)
-    _login(client, owner_driver_id)
+    _login(client, owner_operator_id)
 
     school = client.post(
         "/schools/",
@@ -1553,7 +1545,7 @@ def test_student_becomes_visible_through_shared_route_school_access(client, db_e
     _share_route(client, route_id, shared_operator_id)
 
     _logout(client)
-    _login(client, shared_driver_id)
+    _login(client, shared_operator_id)
 
     student_list = client.get("/students/")
     assert student_list.status_code == 200
@@ -1573,7 +1565,7 @@ def test_student_create_succeeds_via_valid_shared_district_planning_access(clien
     district_id = _create_district_in_db(db_engine, "Shared Student Create District")
 
     _logout(client)
-    _login(client, owner_driver_id)
+    _login(client, owner_operator_id)
 
     school = client.post(
         f"/districts/{district_id}/schools",
@@ -1594,7 +1586,7 @@ def test_student_create_succeeds_via_valid_shared_district_planning_access(clien
     _share_route(client, route_id, shared_operator_id)
 
     _logout(client)
-    _login(client, shared_driver_id)
+    _login(client, shared_operator_id)
 
     student = client.post(
         f"/routes/{route_id}/students",
@@ -1615,7 +1607,7 @@ def test_student_assignment_update_succeeds_via_valid_shared_district_planning_a
     district_id = _create_district_in_db(db_engine, "Shared Student Update District")
 
     _logout(client)
-    _login(client, owner_driver_id)
+    _login(client, owner_operator_id)
 
     school = client.post(
         f"/districts/{district_id}/schools",
@@ -1658,7 +1650,7 @@ def test_student_assignment_update_succeeds_via_valid_shared_district_planning_a
     _share_route(client, route_id, shared_operator_id)
 
     _logout(client)
-    _login(client, shared_driver_id)
+    _login(client, shared_operator_id)
 
     update = client.put(
         f"/students/{student_id}/assignment",
@@ -2110,7 +2102,7 @@ def test_pretrip_create_and_read_are_operator_scoped(client, db_engine):
     driver_b_id = _create_driver_in_db(db_engine, operator_b_id, "Driver B", "driver-b@test.com")
 
     # --- Operator A creates a bus and a pretrip ---
-    _login(client, driver_a_id)
+    _login(client, operator_a_id)
     bus_a = client.post(
         "/buses/",
         json={"bus_number": "PT-BUS-A", "license_plate": "PT-A-001", "capacity": 48, "size": "full"},
@@ -2124,7 +2116,7 @@ def test_pretrip_create_and_read_are_operator_scoped(client, db_engine):
 
     # --- Operator B cannot read operator A's pretrip by ID ---
     _logout(client)
-    _login(client, driver_b_id)
+    _login(client, operator_b_id)
 
     read_cross = client.get(f"/pretrips/{pretrip_a_id}")
     assert read_cross.status_code == 404, (
@@ -2157,7 +2149,7 @@ def test_pretrip_correct_is_operator_scoped(client, db_engine):
     driver_b_id = _create_driver_in_db(db_engine, operator_b_id, "Correct Driver B", "correct-b@test.com")
 
     # Operator A creates bus and pretrip
-    _login(client, driver_a_id)
+    _login(client, operator_a_id)
     bus_a = client.post(
         "/buses/",
         json={"bus_number": "CORR-BUS-A", "license_plate": "CORR-A-001", "capacity": 48, "size": "full"},
@@ -2170,7 +2162,7 @@ def test_pretrip_correct_is_operator_scoped(client, db_engine):
 
     # Operator B tries to correct operator A's pretrip — must get 404
     _logout(client)
-    _login(client, driver_b_id)
+    _login(client, operator_b_id)
 
     correct_payload = _pretrip_payload("CORR-BUS-A", "CORR-A-001")
     correct_payload["corrected_by"] = "attacker"
@@ -2192,7 +2184,7 @@ def test_pretrip_uniqueness_cannot_block_another_operator(client, db_engine):
     driver_b_id = _create_driver_in_db(db_engine, operator_b_id, "Uniq Driver B", "uniq-b@test.com")
 
     # Operator A creates its bus
-    _login(client, driver_a_id)
+    _login(client, operator_a_id)
     bus_a = client.post(
         "/buses/",
         json={"bus_number": "UNIQ-BUS-A", "license_plate": "UNIQ-A-001", "capacity": 48, "size": "full"},
@@ -2202,7 +2194,7 @@ def test_pretrip_uniqueness_cannot_block_another_operator(client, db_engine):
 
     # Operator B tries to create a pretrip for Operator A's bus_id — must be 404 (bus not found in B's scope)
     _logout(client)
-    _login(client, driver_b_id)
+    _login(client, operator_b_id)
 
     attack_payload = _pretrip_payload("UNIQ-BUS-A", "UNIQ-A-001")
     attack_payload["bus_id"] = bus_a_id
@@ -2216,7 +2208,7 @@ def test_pretrip_uniqueness_cannot_block_another_operator(client, db_engine):
 
     # Operator A can still file its own pretrip without conflict
     _logout(client)
-    _login(client, driver_a_id)
+    _login(client, operator_a_id)
 
     own_pretrip = client.post("/pretrips/", json=_pretrip_payload("UNIQ-BUS-A", "UNIQ-A-001"))
     assert own_pretrip.status_code in (200, 201), (
@@ -2236,7 +2228,7 @@ def test_bus_uniqueness_does_not_leak_across_operators(client, db_engine):
     driver_b_id = _create_driver_in_db(db_engine, operator_b_id, "Bus Driver B", "bus-b@test.com")
 
     # Operator A creates a bus with number "FLEET-001"
-    _login(client, driver_a_id)
+    _login(client, operator_a_id)
     bus_a = client.post(
         "/buses/",
         json={"bus_number": "FLEET-001", "license_plate": "AAA-001", "capacity": 48, "size": "full"},
@@ -2245,7 +2237,7 @@ def test_bus_uniqueness_does_not_leak_across_operators(client, db_engine):
 
     # Operator B must be able to create a bus with the same number — not a 409
     _logout(client)
-    _login(client, driver_b_id)
+    _login(client, operator_b_id)
 
     bus_b = client.post(
         "/buses/",

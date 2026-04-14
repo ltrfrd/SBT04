@@ -153,14 +153,14 @@ def test_driver_crud(client):
 def test_login_logout(client):
     client.post("/drivers/", json={"name": "Login Test", "email": "login@test.com", "phone": "999", "pin": "1234"})
 
-    r = client.post("/login", json={"driver_id": 1, "pin": "1234"})
+    r = client.post("/session/operator", json={"operator_id": 1})
     assert r.status_code == 200
     assert r.json()["operator_id"] == 1
 
     r = client.get("/driver_run/1")
     assert r.status_code == 200
 
-    r = client.post("/logout")
+    r = client.post("/session/logout")
     assert r.status_code == 200
 
     r = client.get("/driver_run/1")
@@ -219,7 +219,7 @@ def test_driver_run_workspace_shows_route_run_stop_student_hierarchy(client):
     )
     assert student.status_code in (200, 201)
 
-    login = client.post("/login", json={"driver_id": driver_id, "pin": "1234"})
+    login = client.post("/session/operator", json={"operator_id": 1})
     assert login.status_code == 200
 
     response = client.get(f"/driver_run/{driver_id}?route_id={route_id}")
@@ -277,7 +277,7 @@ def test_driver_run_workspace_uses_assigned_bus_values_without_route_fallback(cl
     assigned = client.post(f"/routes/{route_id}/assign_bus/{bus.json()['id']}")
     assert assigned.status_code == 200
 
-    login = client.post("/login", json={"driver_id": driver_id, "pin": "1234"})
+    login = client.post("/session/operator", json={"operator_id": 1})
     assert login.status_code == 200
 
     assigned_response = client.get(f"/driver_run/{driver_id}?route_id={route_id}")
@@ -384,7 +384,7 @@ def test_route_report_uses_assigned_bus_values_without_route_fallback(client, db
 
 def test_websocket_gps(client):
     client.post("/drivers/", json={"name": "D", "email": "d@d.com", "phone": "000", "pin": "1234"})
-    client.post("/login", json={"driver_id": 1, "pin": "1234"})
+    client.post("/session/operator", json={"operator_id": 1})
 
     route = _create_route_with_assignment_flow(client, "R1", "Test", driver_id=1)
     route_id = route["id"]
@@ -410,7 +410,7 @@ def test_alerts(client):
     assert r.status_code in (200, 201)
     driver_id = r.json()["id"]
 
-    client.post("/login", json={"driver_id": driver_id, "pin": "1234"})
+    client.post("/session/operator", json={"operator_id": 1})
 
     route = _create_route_with_assignment_flow(client, "R1", "Bus-01", driver_id=driver_id)
     route_id = route["id"]

@@ -40,7 +40,7 @@ from backend.models import driver, school, student, route, run, dispatch        
 from backend.models import associations                                            # Ensure StudentRunAssignment is registered
 from backend.models.operator import Operator                                        # Operator model for direct DB bootstrap
 from backend.models.driver import Driver                                          # Driver model for direct DB bootstrap
-from backend.utils.auth import hash_driver_pin                                    # PIN hashing for DB-direct driver creation
+from backend.models.yard import Yard
 
 
 # =============================================================================
@@ -66,17 +66,28 @@ def _create_driver_in_db(
     operator_id: int,
     name: str,
     email: str,
-    pin: str = TEST_DRIVER_PIN,
 ) -> int:
-    """Create a driver directly in the DB, bypassing the API, for test session bootstrap."""
+    """Create a driver directly in the DB for fixture setup."""
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
     db = TestingSessionLocal()
     try:
+        yard = (
+            db.query(Yard)
+            .filter(Yard.operator_id == operator_id)
+            .order_by(Yard.id.asc())
+            .first()
+        )
+        if yard is None:
+            yard = Yard(name="Main Yard", operator_id=operator_id)
+            db.add(yard)
+            db.flush()
+
         d = Driver(
             name=name,
             email=email,
             operator_id=operator_id,
-            pin_hash=hash_driver_pin(pin),
+            yard_id=yard.id,
+            pin_hash="test-hash",
         )
         db.add(d)
         db.commit()
@@ -84,6 +95,12 @@ def _create_driver_in_db(
         return d.id
     finally:
         db.close()
+
+
+def _set_operator_session(client, operator_id: int):
+    response = client.post("/session/operator", json={"operator_id": operator_id})
+    assert response.status_code == 200, f"Operator session bootstrap failed: {response.text}"
+    return response
 
 
 # =============================================================================
@@ -363,18 +380,18 @@ def client(db_engine):
     with TestClient(app) as c:
         legacy = LegacyAwareClient(c)
 
-        # Bootstrap: create default operator + driver directly in DB, then login.
+        # Bootstrap: create default operator + driver directly in DB, then set the
+        # transitional operator session required by get_operator_context().
         # get_operator_context now requires a valid session (no unauthenticated fallback),
         # so every test must start with an authenticated session.
         default_operator_id = _create_operator_in_db(db_engine, "Default Operator")
-        default_driver_id = _create_driver_in_db(
+        _create_driver_in_db(
             db_engine,
             default_operator_id,
             "Default Driver",
             TEST_DEFAULT_DRIVER_EMAIL,
         )
-        login_r = c.post("/login", json={"driver_id": default_driver_id, "pin": TEST_DRIVER_PIN})
-        assert login_r.status_code == 200, f"Test bootstrap login failed: {login_r.text}"
+        _set_operator_session(c, default_operator_id)
 
         yield legacy
 

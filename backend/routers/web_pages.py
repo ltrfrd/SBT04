@@ -27,8 +27,8 @@ from backend.models.operator import Operator, OperatorRouteAccess
 from backend.models.yard import Yard
 from backend.models.associations import RouteDriverAssignment, StudentRunAssignment
 from backend.utils import reports_generator
-from backend.utils.auth import get_current_driver
 from backend.utils.operator_scope import get_operator_context
+from backend.utils.operator_scope import get_operator_scoped_driver_or_404
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
 from backend.utils.driver_workspace import _build_route_workspace
 from backend.utils.planning_scope import accessible_route_filter, accessible_school_filter, accessible_student_filter
@@ -121,18 +121,15 @@ def driver_run_view(
     route_id: int | None = None,
     run_id: int | None = None,
     db: Session = Depends(get_db),
-    current_driver: driver_model.Driver = Depends(get_current_driver),
+    operator: Operator = Depends(get_operator_context),
 ):
     """Render the route-first driver workspace."""
-    # -----------------------------------------------------------
-    # - Validate driver access
-    # - Require an authenticated driver to open their own workspace
-    # -----------------------------------------------------------
-    if not current_driver:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    if current_driver.id != driver_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+    current_driver = get_operator_scoped_driver_or_404(
+        db=db,
+        driver_id=driver_id,
+        operator_id=operator.id,
+        detail="Driver not found",
+    )
 
     # -----------------------------------------------------------
     # - Load active run
@@ -143,7 +140,7 @@ def driver_run_view(
         .options(joinedload(run_model.Run.route))
         .filter(run_model.Run.driver_id == driver_id)
         .join(route_model.Route, route_model.Route.id == run_model.Run.route_id)
-        .filter(route_model.Route.operator_id == current_driver.operator_id)
+        .filter(route_model.Route.operator_id == operator.id)
         .filter(run_model.Run.start_time.is_not(None))
         .filter(run_model.Run.end_time.is_(None))
         .first()
@@ -169,8 +166,8 @@ def driver_run_view(
             RouteDriverAssignment.active.is_(True),
         )))
         .filter(
-            (route_model.Route.operator_id == current_driver.operator_id)
-            | route_model.Route.operator_access.any(OperatorRouteAccess.operator_id == current_driver.operator_id)
+            (route_model.Route.operator_id == operator.id)
+            | route_model.Route.operator_access.any(OperatorRouteAccess.operator_id == operator.id)
         )
         .order_by(route_model.Route.route_number.asc(), route_model.Route.id.asc())
         .all()
