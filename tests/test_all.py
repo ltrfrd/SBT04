@@ -3791,22 +3791,22 @@ def test_school_confirmation_persists_into_school_reports(client):
 
 
 # -----------------------------------------------------------
-# - Dispatch reports compatibility naming
-# - Keep payroll as an internal alias while dispatch stays canonical
+# - Dispatch reports generation
+# - Keep dispatch as the canonical report type
 # -----------------------------------------------------------
-def test_generate_reports_accepts_payroll_as_dispatch_alias(db_engine):
+def test_generate_reports_accepts_dispatch_type(db_engine):
     with Session(db_engine) as db:
-        operator = Operator(name="Dispatch Alias Operator")
+        operator = Operator(name="Dispatch Reports Operator")
         db.add(operator)
         db.flush()
 
-        yard = Yard(name="Dispatch Alias Yard", operator_id=operator.id)
+        yard = Yard(name="Dispatch Reports Yard", operator_id=operator.id)
         db.add(yard)
         db.flush()
 
         driver = Driver(
-            name="Dispatch Alias Driver",
-            email="dispatch-alias@test.com",
+            name="Dispatch Reports Driver",
+            email="dispatch-reports@test.com",
             phone="5551234",
             yard_id=yard.id,
             pin_hash="test-hash",
@@ -3832,15 +3832,7 @@ def test_generate_reports_accepts_payroll_as_dispatch_alias(db_engine):
             end=date(2026, 4, 12),
             operator_id=operator.id,
         )
-        payroll_result = reports_generator.generate_reports(
-            db,
-            "payroll",
-            start=date(2026, 4, 12),
-            end=date(2026, 4, 12),
-            operator_id=operator.id,
-        )
 
-    assert dispatch_result == payroll_result
     assert dispatch_result == [
         {
             "driver_id": dispatch_result[0]["driver_id"],

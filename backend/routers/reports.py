@@ -1,5 +1,5 @@
 # - Reports router
-# - Expose reports endpoints and keep deprecated attendance aliases
+# - Expose reports endpoints
 # -----------------------------------------------------------
 from datetime import date, datetime, timezone   # Date filter type # UTC timestamp for confirmation save
 from datetime import timedelta # Date arithmetic
@@ -172,14 +172,6 @@ def get_run_reports(
 # - Driver dispatch summary
 # - Return dispatch work summary for a date range
 # -----------------------------------------------------------
-@router.get(
-    "/payroll",                                                # Deprecated endpoint path
-    status_code=status.HTTP_200_OK,                            # HTTP 200 on success
-    summary="Driver dispatch summary",                         # Swagger title
-    description="Deprecated alias. Return driver dispatch summary for the selected date range.",  # Swagger description
-    response_description="Driver dispatch summary",            # Swagger response text
-    deprecated=True,
-)
 @router.get(
     "/dispatch-summary",                                       # Canonical endpoint path
     status_code=status.HTTP_200_OK,                            # HTTP 200 on success

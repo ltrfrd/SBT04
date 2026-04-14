@@ -184,15 +184,13 @@ def generate_reports(
     end: date = None,
     operator_id: int | None = None,
 ):
-    normalized_reports_type = "dispatch" if reports_type == "payroll" else reports_type  # Keep payroll as a compatibility alias
-
-    if normalized_reports_type == "driver" and ref_id:
+    if reports_type == "driver" and ref_id:
         return driver_summary(db, ref_id, operator_id=operator_id)  # Return driver reports summary
-    if normalized_reports_type == "route" and ref_id:
+    if reports_type == "route" and ref_id:
         return route_summary(db, ref_id, operator_id=operator_id)  # Return route reports summary
-    if normalized_reports_type == "dispatch" and start and end:
+    if reports_type == "dispatch" and start and end:
         return dispatch_summary(db, start, end, operator_id=operator_id)  # Return dispatch summary
-    if normalized_reports_type == "run" and ref_id:
+    if reports_type == "run" and ref_id:
         run = db.get(Run, ref_id)  # Load run for run-level reports
         if not run:
             return {"error": "Run not found"}  # Preserve error-style contract
@@ -224,9 +222,9 @@ def generate_reports(
             events,
             absence_lookup,
         )  # Return run reports summary
-    if normalized_reports_type == "date" and start and end:
+    if reports_type == "date" and start and end:
         return date_summary(db, start, end, operator_id=operator_id)
-    if normalized_reports_type == "school" and ref_id:
+    if reports_type == "school" and ref_id:
         return school_reports_summary(db, ref_id, operator_id=operator_id)
     return {"error": "Invalid reports type or parameters"}  # Preserve error-style contract
 

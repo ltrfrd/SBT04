@@ -21,10 +21,9 @@ def generate_attendance(
     operator_id=None,
 ):
     """Deprecated compatibility wrapper. Use generate_reports instead."""
-    reports_type = "dispatch" if attendance_type == "payroll" else attendance_type
     return generate_reports(
         db=db,
-        reports_type=reports_type,
+        reports_type=attendance_type,
         ref_id=ref_id,
         start=start,
         end=end,
