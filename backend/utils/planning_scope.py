@@ -14,21 +14,29 @@ from backend.utils.operator_scope import get_operator_scoped_route_or_404
 def planning_relationship_matches(
     *,
     primary_district_id: int | None,
-    primary_operator_id: int,
+    primary_operator_id: int | None,
     secondary_district_id: int | None,
-    secondary_operator_id: int,
+    secondary_operator_id: int | None,
 ) -> bool:
-    if primary_district_id is not None and secondary_district_id is not None:
-        return primary_district_id == secondary_district_id
-    return primary_operator_id == secondary_operator_id
+    if primary_district_id is not None or secondary_district_id is not None:
+        return (
+            primary_district_id is not None
+            and secondary_district_id is not None
+            and primary_district_id == secondary_district_id
+        )
+    return (
+        primary_operator_id is not None
+        and secondary_operator_id is not None
+        and primary_operator_id == secondary_operator_id
+    )
 
 
 def validate_planning_alignment(
     *,
     primary_district_id: int | None,
-    primary_operator_id: int,
+    primary_operator_id: int | None,
     secondary_district_id: int | None,
-    secondary_operator_id: int,
+    secondary_operator_id: int | None,
     detail: str,
 ) -> None:
     if not planning_relationship_matches(
@@ -49,7 +57,7 @@ def accessible_route_filter(operator_id: int):
 
 def accessible_school_filter(operator_id: int):
     return or_(
-        School.operator_id == operator_id,
+        School.district_id.is_not(None),
         School.routes.any(accessible_route_filter(operator_id)),
     )
 
@@ -58,7 +66,6 @@ def accessible_student_filter(operator_id: int):
     return or_(
         Student.operator_id == operator_id,
         Student.route.has(accessible_route_filter(operator_id)),
-        Student.school.has(accessible_school_filter(operator_id)),
     )
 
 
@@ -125,7 +132,7 @@ def validate_route_school_alignment(
         primary_district_id=route_district_id,
         primary_operator_id=route_operator_id,
         secondary_district_id=school.district_id,
-        secondary_operator_id=school.operator_id,
+        secondary_operator_id=None,
         detail=detail,
     )
 

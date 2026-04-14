@@ -49,7 +49,7 @@ def _validate_student_school_planning_alignment(
         primary_district_id=student_district_id,
         primary_operator_id=student_operator_id,
         secondary_district_id=school.district_id,
-        secondary_operator_id=school.operator_id,
+        secondary_operator_id=None,
         detail="School does not match student district",
     )
 

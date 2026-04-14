@@ -338,10 +338,10 @@ def create_route_record(
     district_id: int | None = None,
 ) -> Route:
     payload = route.model_dump(exclude_unset=True)               # Read validated route payload
-    if district_id is not None:
-        payload.pop("district_id", None)
+    payload_district_id = payload.get("district_id")
+    payload.pop("district_id", None)
     school_ids = payload.pop("school_ids", [])                   # Separate school assignment ids
-    effective_district_id = district_id if district_id is not None else payload.get("district_id")
+    effective_district_id = district_id if district_id is not None else payload_district_id
 
     existing_route = _get_conflicting_route_or_none(
         db=db,

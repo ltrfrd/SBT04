@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from backend import schemas
+from backend.models.district import District
 from backend.models.operator import Operator
 from backend.models import route as route_model
 from backend.models import school as school_model
@@ -81,12 +82,11 @@ def _get_school_route_link_context_or_404(
 def create_school(
     school: schemas.SchoolCreate,
     db: Session = Depends(get_db),
-    operator: Operator = Depends(get_operator_context),
+    _: Operator = Depends(get_operator_context),
 ):
     new_school = create_school_record(
         school=school,
         db=db,
-        operator_id=operator.id,
     )
     db.commit()
     db.refresh(new_school)
@@ -97,16 +97,19 @@ def create_school_record(
     *,
     school: schemas.SchoolCreate,
     db: Session,
-    operator_id: int,
     district_id: int | None = None,
 ) -> school_model.School:
     payload = school.model_dump()
     payload.pop("district_id", None)
     effective_district_id = district_id if district_id is not None else school.district_id
+    if effective_district_id is None:
+        raise HTTPException(status_code=400, detail="district_id is required")
+    district = db.get(District, effective_district_id)
+    if not district:
+        raise HTTPException(status_code=404, detail="District not found")
     new_school = school_model.School(
         **payload,
         district_id=effective_district_id,
-        operator_id=operator_id,
     )
     db.add(new_school)
     return new_school
@@ -175,12 +178,17 @@ def update_school(
 
     update_data = school_in.model_dump(exclude_unset=True)
     target_district_id = update_data.get("district_id", school.district_id)
+    if target_district_id is None:
+        raise HTTPException(status_code=400, detail="district_id is required")
+    district = db.get(District, target_district_id)
+    if not district:
+        raise HTTPException(status_code=404, detail="District not found")
     for route in school.routes:
         validate_planning_alignment(
             primary_district_id=route.district_id,
             primary_operator_id=route.operator_id,
             secondary_district_id=target_district_id,
-            secondary_operator_id=school.operator_id,
+            secondary_operator_id=None,
             detail="School does not match route district",
         )
     for key, value in update_data.items():

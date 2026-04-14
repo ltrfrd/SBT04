@@ -431,7 +431,6 @@ def test_create_school_under_district_context_sets_district_and_operator(client,
         school = db.get(School, school_id)
         assert school is not None
         assert school.district_id == district_id
-        assert school.operator_id == 1
 
 
 def test_create_school_under_district_context_returns_404_for_missing_district(client):
@@ -1271,11 +1270,16 @@ def test_student_list_returns_combined_operator_and_district_owned_students(clie
         json={"route_number": "COMBINED-DISTRICT-STUDENT-ROUTE"},
     )
     assert district_route.status_code == 201
-    assign = client.post(f"/schools/{school.json()['id']}/assign_route/{district_route.json()['id']}")
+    district_school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "Combined District Student School", "address": "33 Student Way"},
+    )
+    assert district_school.status_code == 201
+    assign = client.post(f"/schools/{district_school.json()['id']}/assign_route/{district_route.json()['id']}")
     assert assign.status_code == 200
     district_student = client.post(
         f"/routes/{district_route.json()['id']}/students",
-        json={"name": "Combined District Student", "grade": "6", "school_id": school.json()["id"]},
+        json={"name": "Combined District Student", "grade": "6", "school_id": district_school.json()["id"]},
     )
     assert district_student.status_code == 201
 
@@ -1287,7 +1291,7 @@ def test_student_list_returns_combined_operator_and_district_owned_students(clie
     assert district_student.json()["id"] in student_ids
 
 
-def test_district_owned_school_requires_route_access_for_other_operator(client, db_engine):
+def test_district_owned_school_is_visible_without_route_access_for_other_operator(client, db_engine):
     owner_operator_id = _create_operator_in_db(db_engine, "District School Owner")
     other_operator_id = _create_operator_in_db(db_engine, "District School Other")
     owner_driver_id = _create_driver_in_db(db_engine, owner_operator_id, "District School Owner Driver", "district-school-owner@test.com")
@@ -1309,10 +1313,10 @@ def test_district_owned_school_requires_route_access_for_other_operator(client, 
     school_list = client.get("/schools/")
     assert school_list.status_code == 200
     school_ids = {item["id"] for item in school_list.json()}
-    assert school_id not in school_ids
+    assert school_id in school_ids
 
     school_detail = client.get(f"/schools/{school_id}")
-    assert school_detail.status_code == 404
+    assert school_detail.status_code == 200
 
 
 def test_school_becomes_visible_when_linked_to_shared_route(client, db_engine):

@@ -113,13 +113,12 @@ def create_district_school(
     district_id: int,
     school: schemas.SchoolCreate,
     db: Session = Depends(get_db),
-    operator: Operator = Depends(get_operator_context),
+    _: Operator = Depends(get_operator_context),
 ):
     _get_district_or_404(db=db, district_id=district_id)
     new_school = create_school_record(
         school=school,
         db=db,
-        operator_id=operator.id,
         district_id=district_id,
     )
     db.commit()

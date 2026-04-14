@@ -40,6 +40,7 @@ from backend.models import driver, school, student, route, run, dispatch        
 from backend.models import associations                                            # Ensure StudentRunAssignment is registered
 from backend.models.operator import Operator                                        # Operator model for direct DB bootstrap
 from backend.models.driver import Driver                                          # Driver model for direct DB bootstrap
+from backend.models.district import District
 from backend.models.yard import Yard
 
 
@@ -100,6 +101,25 @@ def _set_operator_session(client, operator_id: int):
     response = client.post("/session/operator", json={"operator_id": operator_id})
     assert response.status_code == 200, f"Operator session bootstrap failed: {response.text}"
     return response
+
+
+def _get_or_create_test_district_id(db_engine, operator_id: int) -> int:
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+    db = TestingSessionLocal()
+    try:
+        district = (
+            db.query(District)
+            .order_by(District.id.asc())
+            .first()
+        )
+        if district is None:
+            district = District(name=f"Test District {operator_id}")
+            db.add(district)
+            db.commit()
+            db.refresh(district)
+        return district.id
+    finally:
+        db.close()
 
 
 # =============================================================================
@@ -237,6 +257,96 @@ def client(db_engine):
     class LegacyAwareClient:
         def __init__(self, wrapped_client):
             self._wrapped_client = wrapped_client
+            self._school_district_ids: dict[int, int] = {}
+
+        def _current_operator_id(self):
+            return 1
+
+        def _ensure_school_payload_has_district(self, payload: dict) -> dict:
+            school_payload = dict(payload)
+            if school_payload.get("district_id") is None:
+                school_payload["district_id"] = _get_or_create_test_district_id(
+                    db_engine,
+                    self._current_operator_id(),
+                )
+            return school_payload
+
+        def _get_existing_school_payload_district(self, school_id: int) -> int | None:
+            return self._get_school_district_id(school_id)
+
+        def _remember_school_district(self, response):
+            if response.status_code not in (200, 201):
+                return response
+            body = response.json()
+            school_id = body.get("id")
+            if school_id is not None:
+                district_id = self._get_school_district_id(school_id)
+                if district_id is not None:
+                    self._school_district_ids[school_id] = district_id
+            return response
+
+        def _get_school_district_id(self, school_id: int) -> int | None:
+            if school_id in self._school_district_ids:
+                return self._school_district_ids[school_id]
+            TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+            db = TestingSessionLocal()
+            try:
+                school_row = db.get(school.School, school_id)
+                district_id = school_row.district_id if school_row else None
+                if district_id is not None:
+                    self._school_district_ids[school_id] = district_id
+                return district_id
+            finally:
+                db.close()
+
+        def _get_route_district_id(self, route_id: int) -> int | None:
+            TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+            db = TestingSessionLocal()
+            try:
+                route_row = db.get(route.Route, route_id)
+                return route_row.district_id if route_row else None
+            finally:
+                db.close()
+
+        def _ensure_route_payload_has_district(self, payload: dict) -> dict:
+            route_payload = dict(payload)
+            if route_payload.get("district_id") is not None:
+                return route_payload
+            school_ids = route_payload.get("school_ids") or []
+            if school_ids:
+                district_id = self._get_school_district_id(int(school_ids[0]))
+                if district_id is not None:
+                    route_payload["district_id"] = district_id
+            return route_payload
+
+        def _ensure_route_matches_school_district(self, school_id: int, route_id: int):
+            school_district_id = self._get_school_district_id(school_id)
+            if school_district_id is None:
+                return
+            current_route_district_id = self._get_route_district_id(route_id)
+            if current_route_district_id is not None:
+                return
+            route_response = self._wrapped_client.get(f"/routes/{route_id}")
+            if route_response.status_code != 200:
+                return
+            route_body = route_response.json()
+            update_response = self._wrapped_client.put(
+                f"/routes/{route_id}",
+                json={
+                    "route_number": route_body["route_number"],
+                    "district_id": school_district_id,
+                    "school_ids": route_body.get("school_ids", []),
+                },
+            )
+            assert update_response.status_code == 200
+
+        def _ensure_route_matches_payload_school(self, route_id: int, payload: dict | None):
+            if not isinstance(payload, dict):
+                return
+            school_id = payload.get("school_id")
+            if school_id is None:
+                return
+            self._ensure_route_matches_school_district(int(school_id), route_id)
 
         def __getattr__(self, name):
             return getattr(self._wrapped_client, name)
@@ -250,8 +360,18 @@ def client(db_engine):
                 enriched.setdefault("scheduled_end_time", "08:00:00")
                 return enriched
 
+            if url == "/schools/" and isinstance(payload, dict):
+                school_payload = self._ensure_school_payload_has_district(payload)
+                response = self._wrapped_client.post(
+                    url,
+                    *args,
+                    json=school_payload,
+                    **{k: v for k, v in kwargs.items() if k != "json"},
+                )
+                return self._remember_school_district(response)
+
             if url == "/routes/" and isinstance(payload, dict) and "driver_id" in payload:
-                route_payload = dict(payload)
+                route_payload = self._ensure_route_payload_has_district(payload)
                 driver_id = route_payload.pop("driver_id")
                 response = self._wrapped_client.post(url, *args, json=route_payload, **{k: v for k, v in kwargs.items() if k != "json"})
 
@@ -261,6 +381,27 @@ def client(db_engine):
                         self._wrapped_client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
 
                 return response
+
+            if url == "/routes/" and isinstance(payload, dict):
+                route_payload = self._ensure_route_payload_has_district(payload)
+                return self._wrapped_client.post(
+                    url,
+                    *args,
+                    json=route_payload,
+                    **{k: v for k, v in kwargs.items() if k != "json"},
+                )
+
+            if url.startswith("/schools/") and "/assign_route/" in url:
+                path_parts = url.strip("/").split("/")
+                school_id = int(path_parts[1])
+                route_id = int(path_parts[3])
+                self._ensure_route_matches_school_district(school_id, route_id)
+                return self._wrapped_client.post(url, *args, **kwargs)
+
+            if url.startswith("/routes/") and url.endswith("/students"):
+                route_id = int(url.strip("/").split("/")[1])
+                self._ensure_route_matches_payload_school(route_id, payload)
+                return self._wrapped_client.post(url, *args, **kwargs)
 
             if url == "/runs/" and isinstance(payload, dict) and "driver_id" in payload:
                 run_payload = _with_default_run_schedule(payload)
@@ -298,6 +439,7 @@ def client(db_engine):
             if url == "/students/" and isinstance(payload, dict) and "route_id" in payload:
                 student_payload = dict(payload)
                 route_id = student_payload.pop("route_id", None)
+                self._ensure_route_matches_payload_school(route_id, student_payload)
                 student_payload.pop("district_id", None)
                 return self._wrapped_client.post(f"/routes/{route_id}/students", *args, json=student_payload, **{k: v for k, v in kwargs.items() if k != "json"})
 
@@ -362,8 +504,25 @@ def client(db_engine):
         def put(self, url, *args, **kwargs):
             payload = kwargs.get("json")
 
+            if url.startswith("/schools/") and isinstance(payload, dict):
+                school_payload = dict(payload)
+                if school_payload.get("district_id") is None:
+                    school_id = int(url.strip("/").split("/")[1])
+                    existing_district_id = self._get_existing_school_payload_district(school_id)
+                    if existing_district_id is not None:
+                        school_payload["district_id"] = existing_district_id
+                    else:
+                        school_payload = self._ensure_school_payload_has_district(school_payload)
+                response = self._wrapped_client.put(
+                    url,
+                    *args,
+                    json=school_payload,
+                    **{k: v for k, v in kwargs.items() if k != "json"},
+                )
+                return self._remember_school_district(response)
+
             if url.startswith("/routes/") and isinstance(payload, dict) and "driver_id" in payload:
-                route_payload = dict(payload)
+                route_payload = self._ensure_route_payload_has_district(payload)
                 driver_id = route_payload.pop("driver_id")
                 response = self._wrapped_client.put(url, *args, json=route_payload, **{k: v for k, v in kwargs.items() if k != "json"})
 
@@ -373,6 +532,15 @@ def client(db_engine):
                         self._wrapped_client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
 
                 return response
+
+            if url.startswith("/routes/") and isinstance(payload, dict):
+                route_payload = self._ensure_route_payload_has_district(payload)
+                return self._wrapped_client.put(
+                    url,
+                    *args,
+                    json=route_payload,
+                    **{k: v for k, v in kwargs.items() if k != "json"},
+                )
 
             return self._wrapped_client.put(url, *args, **kwargs)
 
