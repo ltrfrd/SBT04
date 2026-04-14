@@ -2,6 +2,7 @@
 # - Reports generator
 # - Build reports-layer summaries behind canonical /reports endpoints
 # -----------------------------------------------------------
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session  # Database session type
 from datetime import date, datetime, time # Date filter type
 from backend.models import (  # Existing summary data sources
@@ -12,6 +13,7 @@ from backend.models import (  # Existing summary data sources
     associations as assoc_model,
     student as student_model,
 )
+from backend.models.yard import Yard
 
 from backend.models.run import Run  # Import locally to avoid circular dependency
 from backend.models.run_event import RunEvent  # Run event history
@@ -150,7 +152,16 @@ def dispatch_summary(db: Session, start: date, end: date, operator_id: int | Non
         query = (
             query
             .join(driver_model.Driver, driver_model.Driver.id == dispatch_model.DispatchRecord.driver_id)
-            .filter(driver_model.Driver.operator_id == operator_id)
+            .outerjoin(driver_model.Driver.yard)
+            .filter(
+                or_(
+                    Yard.operator_id == operator_id,
+                    and_(
+                        driver_model.Driver.yard_id.is_(None),
+                        driver_model.Driver.operator_id == operator_id,
+                    ),
+                )
+            )
         )
     records = query.all()  # Load dispatch rows inside the requested range
 

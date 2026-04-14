@@ -7,21 +7,49 @@ from datetime import date, time  # For date/time fields
 from typing import List  # List typing
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status  # FastAPI helpers
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session  # DB session
 
 from backend import schemas  # Dispatch schemas
 from backend.models.operator import Operator
 from backend.models import dispatch as dispatch_model  # Dispatch module model
 from backend.models import driver as driver_model  # Validate driver link
+from backend.models.yard import Yard
 from database import get_db  # DB dependency
 from backend.utils.operator_scope import get_operator_context
-from backend.utils.operator_scope import get_operator_scoped_record_or_404
 
 
 # -----------------------------------------------------------
 # Router setup
 # -----------------------------------------------------------
 router = APIRouter(prefix="/dispatch", tags=["Dispatch"])
+
+
+def _get_dispatch_scoped_driver_or_404(
+    *,
+    db: Session,
+    driver_id: int,
+    operator_id: int,
+    detail: str,
+):
+    driver = (
+        db.query(driver_model.Driver)
+        .outerjoin(driver_model.Driver.yard)
+        .filter(driver_model.Driver.id == driver_id)
+        .filter(
+            or_(
+                Yard.operator_id == operator_id,
+                and_(
+                    driver_model.Driver.yard_id.is_(None),
+                    driver_model.Driver.operator_id == operator_id,
+                ),
+            )
+        )
+        .first()
+    )
+    if not driver:
+        raise HTTPException(status_code=404, detail=detail)
+    return driver
 
 
 # -----------------------------------------------------------
@@ -56,10 +84,9 @@ def log_charter_hours(
     operator: Operator = Depends(get_operator_context),
 ):
     """Drivers submit charter start/end; hours auto-calculated."""
-    get_operator_scoped_record_or_404(
+    _get_dispatch_scoped_driver_or_404(
         db=db,
-        model=driver_model.Driver,
-        record_id=driver_id,
+        driver_id=driver_id,
         operator_id=operator.id,
         detail="Driver not found",
     )
@@ -89,7 +116,16 @@ def get_all_dispatch_records(
     return (
         db.query(dispatch_model.DispatchRecord)
         .join(driver_model.Driver, driver_model.Driver.id == dispatch_model.DispatchRecord.driver_id)
-        .filter(driver_model.Driver.operator_id == operator.id)
+        .outerjoin(driver_model.Driver.yard)
+        .filter(
+            or_(
+                Yard.operator_id == operator.id,
+                and_(
+                    driver_model.Driver.yard_id.is_(None),
+                    driver_model.Driver.operator_id == operator.id,
+                ),
+            )
+        )
         .all()
     )
 
@@ -105,10 +141,9 @@ def get_driver_dispatch_records(
     operator: Operator = Depends(get_operator_context),
 ):
     """Return all dispatch records for a driver."""
-    get_operator_scoped_record_or_404(
+    _get_dispatch_scoped_driver_or_404(
         db=db,
-        model=driver_model.Driver,
-        record_id=driver_id,
+        driver_id=driver_id,
         operator_id=operator.id,
         detail="Driver not found",
     )
@@ -133,10 +168,9 @@ def approve_dispatch_record(
     record = db.get(dispatch_model.DispatchRecord, dispatch_id)
     if not record:
         raise HTTPException(status_code=404, detail="Dispatch record not found")
-    get_operator_scoped_record_or_404(
+    _get_dispatch_scoped_driver_or_404(
         db=db,
-        model=driver_model.Driver,
-        record_id=record.driver_id,
+        driver_id=record.driver_id,
         operator_id=operator.id,
         detail="Dispatch record not found",
     )

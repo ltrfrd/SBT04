@@ -9,7 +9,7 @@ from datetime import date, datetime
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, joinedload
 
 from database import get_db
@@ -24,6 +24,7 @@ from backend.models import (
     student as student_model,
 )
 from backend.models.operator import Operator, OperatorRouteAccess
+from backend.models.yard import Yard
 from backend.models.associations import RouteDriverAssignment, StudentRunAssignment
 from backend.utils import reports_generator
 from backend.utils.auth import get_current_driver
@@ -263,7 +264,16 @@ def summary_report(
     records = (
         db.query(dispatch_model.DispatchRecord)
         .join(driver_model.Driver, driver_model.Driver.id == dispatch_model.DispatchRecord.driver_id)
-        .filter(driver_model.Driver.operator_id == operator.id)
+        .outerjoin(driver_model.Driver.yard)
+        .filter(
+            or_(
+                Yard.operator_id == operator.id,
+                and_(
+                    driver_model.Driver.yard_id.is_(None),
+                    driver_model.Driver.operator_id == operator.id,
+                ),
+            )
+        )
         .filter(dispatch_model.DispatchRecord.work_date.between(start, end))
         .all()
     )
