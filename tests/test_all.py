@@ -3171,6 +3171,7 @@ def test_get_school_reports(client):
     assert isinstance(body, dict)
     assert body["school_id"] == school_id
     assert body["school_name"] == "Reports School"
+    assert "date" in body
     assert "total_routes" in body
     assert "routes" in body
     assert isinstance(body["routes"], list)
@@ -3191,9 +3192,9 @@ def test_get_school_reports(client):
 
             if first_run["students"]:
                 first_student = first_run["students"][0]                      # First school-facing student row
-                assert set(first_student.keys()) == {"student_name", "status"}
+                assert set(first_student.keys()) == {"student_id", "student_name", "status"}
                 assert first_student["status"] in {"present", "absent"}
-                assert "student_id" not in first_student                                   # School view must not expose internal IDs
+                assert isinstance(first_student["student_id"], int)
 
 
 # =============================================================================

@@ -42,7 +42,7 @@ from backend.models.operator import Operator
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_operator_scoped_record_or_404
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
-from backend.utils.planning_scope import accessible_student_filter, get_school_for_planning_or_404
+from backend.utils.planning_scope import accessible_route_filter, accessible_student_filter, get_school_for_planning_or_404
 
 from pydantic import BaseModel  # Small request body schema
 
@@ -54,6 +54,39 @@ router = APIRouter(prefix="/reports", tags=["Reports"])
 # -----------------------------------------------------------
 class SchoolConfirmationRequest(BaseModel):
     confirmed_by: str | None = None  # Optional school staff name
+
+
+def _build_absence_row(*, absence, stop_name: str | None = None) -> dict:
+    return {
+        "student_id": absence.student_id,
+        "student_name": absence.student.name if absence.student else None,
+        "date": absence.date,
+        "run_type": absence.run_type,
+        "status": "planned_absent",
+        "source": absence.source,
+        "stop_name": stop_name,
+    }
+
+
+def _build_absence_response(*, context_type: str, context_value, absences: list[dict]) -> dict:
+    return {
+        "context": {
+            "type": context_type,
+            "value": context_value,
+        },
+        "total_absences": len(absences),
+        "absences": absences,
+    }
+
+
+def _serialize_school_report_summary(summary: dict, target_date: date | None = None) -> dict:
+    return {
+        "school_id": summary["school_id"],
+        "school_name": summary["school_name"],
+        "date": target_date,
+        "total_routes": summary.get("total_routes", 0),
+        "routes": summary.get("routes", []),
+    }
 
 # -----------------------------------------------------------
 # - Driver reports summary
@@ -255,12 +288,13 @@ def get_school_reports(
         school_id=school_id,
         detail="School not found",
     )
-    return reports_generator.generate_reports(
+    reports_data = reports_generator.generate_reports(
         db=db,                                                # Pass DB session
         reports_type="school",
         ref_id=school_id,                                     # School reference ID
         operator_id=operator.id,
     )
+    return _serialize_school_report_summary(reports_data)
 
 # -----------------------------------------------------------
 # - Confirm school reports
@@ -375,22 +409,14 @@ def get_absences_by_date(
 
     for absence in absences:                                                          # Build response rows
         results.append(
-            {
-                "absence_id": absence.id,                                             # Absence record ID
-                "student_id": absence.student_id,                                     # Student ID
-                "student_name": absence.student.name if absence.student else None,    # Student name
-                "date": absence.date,                                                 # Absence date
-                "run_type": absence.run_type,                                         # Flexible run label
-                "source": absence.source,                                             # Parent / school / system
-                "created_at": absence.created_at,                                     # Creation timestamp
-            }
+            _build_absence_row(absence=absence)
         )
 
-    return {
-        "date": target_date,                                                          # Requested date
-        "total_absences": len(results),                                               # Total absences
-        "absences": results,                                                          # Absence list
-    }
+    return _build_absence_response(
+        context_type="date",
+        context_value=target_date,
+        absences=results,
+    )
 
 # -----------------------------------------------------------
 # - Absences by school
@@ -427,18 +453,14 @@ def get_absences_by_school(
 
     for absence in absences:                                                       # Build response rows
         results.append(
-            {
-                "student_name": absence.student.name if absence.student else None, # Student name
-                "date": absence.date,                                              # Absence date
-                "run_type": absence.run_type,                                      # Flexible run label
-            }
+            _build_absence_row(absence=absence)
         )
 
-    return {
-        "school_id": school_id,                                                    # Requested school
-        "total_absences": len(results),                                            # Total rows
-        "absences": results,                                                       # Absence list
-    }
+    return _build_absence_response(
+        context_type="school",
+        context_value=school_id,
+        absences=results,
+    )
 
 # -----------------------------------------------------------
 # - Absences by run
@@ -496,19 +518,17 @@ def get_absences_by_run(
 
     for absence in absences:                                                      # Build response rows
         results.append(
-            {
-                "student_name": absence.student.name if absence.student else None,            # Student name
-                "stop_name": absence.student.stop.name if absence.student and absence.student.stop else None,  # Stop name
-            }
+            _build_absence_row(
+                absence=absence,
+                stop_name=absence.student.stop.name if absence.student and absence.student.stop else None,
+            )
         )
 
-    return {
-        "route_number": run.route.route_number if run.route else None,            # Route number
-        "run_type": run.run_type,                                                 # Flexible run label
-        "date": run.start_time.date(),                                            # Run service date
-        "total_absences": len(results),                                           # Total absences
-        "absences": results,                                                      # Absence list
-    }
+    return _build_absence_response(
+        context_type="run",
+        context_value=run_id,
+        absences=results,
+    )
 
 # -----------------------------------------------------------
 # - School reports by date
@@ -536,14 +556,16 @@ def get_school_reports_by_date(
 
     runs = (
         db.query(Run)                                                            # Query runs
+        .join(Route, Route.id == Run.route_id)
         .filter(Run.route.has(Route.schools.any(School.id == school_id)))        # Only runs whose route includes this school       
+        .filter(accessible_route_filter(operator.id))
         .filter(Run.start_time >= target_date)                                   # On or after start of requested day
         .filter(Run.start_time < (target_date + timedelta(days=1)))              # Before next day
         .order_by(Run.start_time.asc(), Run.id.asc())                            # Stable ordering
         .all()                                                                   # Materialize list
     )
 
-    results = []                                                                 # Final student reports rows
+    routes_map = {}
 
     for run in runs:                                                             # Process each school run
         assignments = (
@@ -554,19 +576,53 @@ def get_school_reports_by_date(
             .all()                                                               # Materialize list
         )
 
+        route = run.route
+        route_id = route.id if route else None
+        if route_id not in routes_map:
+            routes_map[route_id] = {
+                "route_id": route_id,
+                "route_number": route.route_number if route else None,
+                "total_runs": 0,
+                "runs": [],
+            }
+
+        students = []
         for assignment in assignments:                                           # Build school-facing rows
-            results.append(
+            students.append(
                 {
+                    "student_id": assignment.student_id,
                     "student_name": assignment.student.name if assignment.student else None,  # Student name
                     "status": "present" if assignment.picked_up else "absent",                # School-facing status
-                    "run_type": run.run_type,                                                  # Flexible run label
                 }
             )
+        routes_map[route_id]["runs"].append(
+            {
+                "run_id": run.id,
+                "run_type": run.run_type,
+                "date": run.start_time.date() if run.start_time else target_date,
+                "students": students,
+                "total_students": len(students),
+                "total_present": sum(1 for student in students if student["status"] == "present"),
+                "total_absent": sum(1 for student in students if student["status"] == "absent"),
+            }
+        )
+        routes_map[route_id]["total_runs"] += 1
+
+    routes = sorted(
+        routes_map.values(),
+        key=lambda route: route.get("route_number") or "",
+    )
+    for route_data in routes:
+        route_data["runs"].sort(
+            key=lambda run_data: (run_data.get("date") or target_date, run_data.get("run_type") or "")
+        )
+
     return {
+        "school_id": school.id,
         "school_name": school.name,                                             # School name
         "date": target_date,                                                    # Requested date
-        "total_students": len(results),                                         # Total students evaluated
-        "students": results,
+        "total_routes": len(routes),
+        "routes": routes,
     }
 
 # -----------------------------------------------------------

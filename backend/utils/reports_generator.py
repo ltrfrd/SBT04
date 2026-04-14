@@ -21,6 +21,7 @@ from backend.utils.student_bus_absence import has_student_bus_absence  # Absence
 from backend.models import school as school_model  # School model
 from backend.models import SchoolAttendanceVerification  # School confirmation state
 from backend.utils.operator_scope import get_route_access_level
+from backend.utils.planning_scope import accessible_route_filter, accessible_school_filter
 from backend.utils.route_driver_assignment import get_route_driver_name, resolve_route_driver_assignment
 
 def driver_summary(db: Session, driver_id: int, operator_id: int | None = None) -> dict:
@@ -408,27 +409,21 @@ def normalize_school_status(status: str) -> str:
 # - Build school-facing reports grouped by route and run
 # -----------------------------------------------------------
 def school_reports_summary(db: Session, school_id: int, operator_id: int | None = None):
-    school = (  # Load school once for final payload
-        db.query(school_model.School)
-        .filter(school_model.School.id == school_id)
-        .first()
-    )
+    school_query = db.query(school_model.School).filter(school_model.School.id == school_id)
+    if operator_id is not None:
+        school_query = school_query.filter(accessible_school_filter(operator_id))
+    school = school_query.first()  # Load school once for final payload
     if not school:
         return {"error": "School not found"}
 
-    routes = (  # Load routes serving the school
+    routes_query = (  # Load routes serving the school
         db.query(route_model.Route)  # Query routes
         .join(route_model.route_schools)  # Join route-school association
         .filter(route_model.route_schools.c.school_id == school_id)  # Keep only this school's routes
-        .all()  # Execute query
     )
     if operator_id is not None:
-        routes = [
-            route for route in routes
-            if get_route_access_level(route, operator_id) is not None
-        ]
-        if school.operator_id != operator_id and not routes:
-            return {"error": "School not found"}
+        routes_query = routes_query.filter(accessible_route_filter(operator_id))
+    routes = routes_query.all()  # Execute query
 
     results = []  # Collect run reports summaries
 

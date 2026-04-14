@@ -360,8 +360,10 @@ def test_absences_by_date_includes_accessible_shared_students(client, db_engine)
     _login(client, context["shared_operator_id"])
     response = client.get(f"/reports/absences/date/{date.today().isoformat()}")
     assert response.status_code == 200
+    assert response.json()["context"] == {"type": "date", "value": date.today().isoformat()}
     assert response.json()["total_absences"] == 1
     assert response.json()["absences"][0]["student_id"] == context["student_id"]
+    assert response.json()["absences"][0]["status"] == "planned_absent"
 
 
 # ---------------------------------------------------------------------------
@@ -1460,6 +1462,9 @@ def test_shared_operator_can_view_school_reports_by_date_and_mobile_for_district
     by_date = client.get(f"/reports/school/{context['school_id']}/reports/{context['run_date']}")
     assert by_date.status_code == 200
     assert by_date.json()["school_name"] == "Shared Reports School"
+    assert by_date.json()["school_id"] == context["school_id"]
+    assert by_date.json()["date"] == context["run_date"]
+    assert "routes" in by_date.json()
 
     summary = client.get(f"/reports/school/{context['school_id']}")
     assert summary.status_code == 200
