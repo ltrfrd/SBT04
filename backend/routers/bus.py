@@ -18,14 +18,31 @@ from backend.models import run as run_model
 from backend.models import student as student_model
 from backend.models.operator import Operator
 from backend.models.route import Route
+from backend.models.yard import Yard
 from backend.schemas.bus import BusUpdate
 from backend.routers.route import _serialize_route_detail
 from backend.utils.operator_scope import get_operator_context
-from backend.utils.operator_scope import get_operator_scoped_record_or_404
+from backend.utils.operator_scope import get_operator_scoped_bus_or_404
 from backend.utils.operator_scope import get_route_access_level
 
 
 router = APIRouter(prefix="/buses", tags=["Buses"])
+
+
+def _get_or_create_operator_yard(db: Session, operator_id: int) -> Yard:
+    yard = (
+        db.query(Yard)
+        .filter(Yard.operator_id == operator_id)
+        .order_by(Yard.id.asc())
+        .first()
+    )
+    if yard:
+        return yard
+
+    yard = Yard(name="Main Yard", operator_id=operator_id)
+    db.add(yard)
+    db.flush()
+    return yard
 
 
 # -----------------------------------------------------------
@@ -43,8 +60,9 @@ def _validate_bus_uniqueness(
     if unit_number is not None:
         query = (
             db.query(bus_model.Bus)
+            .join(bus_model.Bus.yard)
             .filter(bus_model.Bus.unit_number == unit_number)
-            .filter(bus_model.Bus.operator_id == operator_id)
+            .filter(Yard.operator_id == operator_id)
         )
         if exclude_bus_id is not None:
             query = query.filter(bus_model.Bus.id != exclude_bus_id)
@@ -55,8 +73,9 @@ def _validate_bus_uniqueness(
     if license_plate is not None:
         query = (
             db.query(bus_model.Bus)
+            .join(bus_model.Bus.yard)
             .filter(bus_model.Bus.license_plate == license_plate)
-            .filter(bus_model.Bus.operator_id == operator_id)
+            .filter(Yard.operator_id == operator_id)
         )
         if exclude_bus_id is not None:
             query = query.filter(bus_model.Bus.id != exclude_bus_id)
@@ -83,6 +102,7 @@ def create_bus(
     operator: Operator = Depends(get_operator_context),
 ):
     payload = bus.model_dump()
+    yard = _get_or_create_operator_yard(db, operator.id)
     _validate_bus_uniqueness(
         db=db,
         operator_id=operator.id,
@@ -92,6 +112,7 @@ def create_bus(
 
     new_bus = bus_model.Bus(
         operator_id=operator.id,
+        yard_id=yard.id,
         unit_number=payload["bus_number"],
         license_plate=payload["license_plate"],
         capacity=payload["capacity"],
@@ -120,7 +141,8 @@ def get_buses(
 ):
     return (
         db.query(bus_model.Bus)
-        .filter(bus_model.Bus.operator_id == operator.id)
+        .join(bus_model.Bus.yard)
+        .filter(Yard.operator_id == operator.id)
         .order_by(bus_model.Bus.unit_number.asc(), bus_model.Bus.id.asc())
         .all()
     )
@@ -142,22 +164,20 @@ def get_bus(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    bus = (
-        db.query(bus_model.Bus)
-        .options(
-            selectinload(bus_model.Bus.routes).selectinload(Route.schools),  # Include linked schools
-            selectinload(bus_model.Bus.routes).selectinload(Route.driver_assignments).selectinload(RouteDriverAssignment.driver),  # Include driver assignments
-            selectinload(bus_model.Bus.routes).selectinload(Route.runs).selectinload(run_model.Run.driver),  # Include run driver data
-            selectinload(bus_model.Bus.routes).selectinload(Route.runs).selectinload(run_model.Run.stops),  # Include run stops
-            selectinload(bus_model.Bus.routes).selectinload(Route.runs).selectinload(run_model.Run.student_assignments).selectinload(StudentRunAssignment.stop),  # Include assigned runtime stops
-            selectinload(bus_model.Bus.routes).selectinload(Route.runs).selectinload(run_model.Run.student_assignments).selectinload(StudentRunAssignment.student).selectinload(student_model.Student.school),  # Include assigned students and schools
-        )
-        .filter(bus_model.Bus.id == bus_id)
-        .filter(bus_model.Bus.operator_id == operator.id)
-        .first()
+    bus = get_operator_scoped_bus_or_404(
+        db=db,
+        bus_id=bus_id,
+        operator_id=operator.id,
+        detail="Bus not found",
+        options=[
+            selectinload(bus_model.Bus.routes).selectinload(Route.schools),
+            selectinload(bus_model.Bus.routes).selectinload(Route.driver_assignments).selectinload(RouteDriverAssignment.driver),
+            selectinload(bus_model.Bus.routes).selectinload(Route.runs).selectinload(run_model.Run.driver),
+            selectinload(bus_model.Bus.routes).selectinload(Route.runs).selectinload(run_model.Run.stops),
+            selectinload(bus_model.Bus.routes).selectinload(Route.runs).selectinload(run_model.Run.student_assignments).selectinload(StudentRunAssignment.stop),
+            selectinload(bus_model.Bus.routes).selectinload(Route.runs).selectinload(run_model.Run.student_assignments).selectinload(StudentRunAssignment.student).selectinload(student_model.Student.school),
+        ],
     )
-    if not bus:
-        raise HTTPException(status_code=404, detail="Bus not found")
 
     return schemas.BusDetailOut(
         id=bus.id,
@@ -168,7 +188,7 @@ def get_bus(
         assigned_routes=[
             _serialize_route_detail(route)
             for route in sorted(bus.routes, key=lambda route: (route.route_number, route.id))
-            if get_route_access_level(route, operator.id) is not None
+            if bus.yard and get_route_access_level(route, bus.yard.operator_id) is not None
         ],
     )
 
@@ -190,10 +210,9 @@ def update_bus(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    bus = get_operator_scoped_record_or_404(
+    bus = get_operator_scoped_bus_or_404(
         db=db,
-        model=bus_model.Bus,
-        record_id=bus_id,
+        bus_id=bus_id,
         operator_id=operator.id,
         detail="Bus not found",
     )
@@ -235,10 +254,9 @@ def delete_bus(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    bus = get_operator_scoped_record_or_404(
+    bus = get_operator_scoped_bus_or_404(
         db=db,
-        model=bus_model.Bus,
-        record_id=bus_id,
+        bus_id=bus_id,
         operator_id=operator.id,
         detail="Bus not found",
     )

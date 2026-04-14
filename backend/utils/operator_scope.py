@@ -2,6 +2,7 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session, selectinload
 
 from database import get_db
+from backend.models import bus as bus_model
 from backend.models import driver as driver_model
 from backend.models.operator import Operator
 from backend.models.operator import OperatorRouteAccess
@@ -84,6 +85,29 @@ def get_operator_scoped_driver_or_404(
     if not driver:
         raise HTTPException(status_code=404, detail=detail)
     return driver
+
+
+def get_operator_scoped_bus_or_404(
+    *,
+    db: Session,
+    bus_id: int,
+    operator_id: int,
+    detail: str,
+    options: list | None = None,
+):
+    query = db.query(bus_model.Bus).join(bus_model.Bus.yard)
+    if options:
+        query = query.options(*options)
+
+    bus = (
+        query
+        .filter(bus_model.Bus.id == bus_id)
+        .filter(Yard.operator_id == operator_id)
+        .first()
+    )
+    if not bus:
+        raise HTTPException(status_code=404, detail=detail)
+    return bus
 
 
 def _route_access_satisfies(access_level: str | None, required_access: str) -> bool:
