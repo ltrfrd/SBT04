@@ -25,8 +25,23 @@ from backend.utils.operator_scope import get_route_access_level
 from backend.utils.route_driver_assignment import get_route_driver_name, resolve_route_driver_assignment
 
 def driver_summary(db: Session, driver_id: int, operator_id: int | None = None) -> dict:
-    drv = db.get(driver_model.Driver, driver_id)  # Load driver
-    if not drv or (operator_id is not None and drv.operator_id != operator_id):
+    driver_query = db.query(driver_model.Driver).filter(driver_model.Driver.id == driver_id)
+    if operator_id is not None:
+        driver_query = (
+            driver_query
+            .outerjoin(driver_model.Driver.yard)
+            .filter(
+                or_(
+                    Yard.operator_id == operator_id,
+                    and_(
+                        driver_model.Driver.yard_id.is_(None),
+                        driver_model.Driver.operator_id == operator_id,
+                    ),
+                )
+            )
+        )
+    drv = driver_query.first()  # Load driver with optional operator scope
+    if not drv:
         return {"error": "Driver not found"}  # Return stable missing-driver payload
 
     total_runs = (

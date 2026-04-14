@@ -50,7 +50,20 @@ def dashboard(
 ):
     """Renders admin dashboard summary with record counts."""
     counts = {
-        "driver_count": db.query(driver_model.Driver).filter(driver_model.Driver.operator_id == operator.id).count(),
+        "driver_count": (
+            db.query(driver_model.Driver)
+            .outerjoin(driver_model.Driver.yard)
+            .filter(
+                or_(
+                    Yard.operator_id == operator.id,
+                    and_(
+                        driver_model.Driver.yard_id.is_(None),
+                        driver_model.Driver.operator_id == operator.id,
+                    ),
+                )
+            )
+            .count()
+        ),
         "school_count": db.query(school_model.School).filter(accessible_school_filter(operator.id)).count(),
         "route_count": db.query(route_model.Route).filter(accessible_route_filter(operator.id)).count(),
         "student_count": db.query(student_model.Student).filter(accessible_student_filter(operator.id)).count(),
