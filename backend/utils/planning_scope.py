@@ -11,6 +11,9 @@ from backend.models.student import Student
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
 
 
+# -----------------------------------------------------------
+# School-domain planning scope helpers
+# -----------------------------------------------------------
 def planning_relationship_matches(
     *,
     primary_district_id: int | None,

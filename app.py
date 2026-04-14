@@ -23,8 +23,23 @@ import backend.models  # noqa: F401
 
 # ---------- ROUTERS ----------
 from backend.routers import (
-    bus, district, driver, school, student, route, stop, run, dispatch, reports, student_run_assignment, web_pages, ws, pretrip, posttrip, session
-)  # Import active routers through reports ownership
+    bus,
+    district,
+    dispatch,
+    driver,
+    posttrip,
+    pretrip,
+    reports,
+    route,
+    run,
+    school,
+    session,
+    stop,
+    student,
+    student_run_assignment,
+    ws,
+)
+from backend.web import web_pages
 
 
 # -----------------------------------------------------------
@@ -64,24 +79,28 @@ app.mount("/static", StaticFiles(directory="backend/templates/static"), name="st
 # -----------------------------------------------------------
 # ROUTERS REGISTRATION
 # -----------------------------------------------------------
-# Each router defines its own endpoints (CRUD APIs)
-app.include_router(driver.router)  # Register driver endpoints
-app.include_router(bus.router)  # Register bus endpoints
-app.include_router(district.router)  # Register district planning entry points
-app.include_router(school.router)  # Register school endpoints
-app.include_router(student.router)  # Register student endpoints
-app.include_router(route.router)  # Register route endpoints
-app.include_router(stop.router)  # Register stop endpoints
-app.include_router(run.router)  # Register run endpoints
-app.include_router(dispatch.router)  # Register dispatch endpoints
-app.include_router(reports.router)  # Register reports endpoints
-app.include_router(student_run_assignment.router)  # Register student run assignment endpoints
-app.include_router(reports.student_bus_absence_router)  # Register absence endpoints through reports ownership
-app.include_router(pretrip.router)  # Register pre-trip inspection endpoints
-app.include_router(posttrip.router)  # Register post-trip inspection endpoints
-app.include_router(web_pages.router)  # Register HTML page endpoints
-app.include_router(session.router)  # Register temporary operator session endpoints
-app.include_router(ws.router)  # Register websocket endpoints
+# Yard domain routers
+app.include_router(driver.router)
+app.include_router(bus.router)
+app.include_router(dispatch.router)
+app.include_router(pretrip.router)
+app.include_router(posttrip.router)
+app.include_router(reports.router)
+app.include_router(session.router)
+
+# School domain routers
+app.include_router(district.router)
+app.include_router(school.router)
+app.include_router(student.router)
+app.include_router(route.router)
+app.include_router(stop.router)
+app.include_router(run.router)
+app.include_router(student_run_assignment.router)
+app.include_router(reports.student_bus_absence_router)
+
+# UI and realtime routers
+app.include_router(web_pages.router)
+app.include_router(ws.router)
 
 
 # -----------------------------------------------------------

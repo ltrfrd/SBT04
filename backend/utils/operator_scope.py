@@ -10,6 +10,9 @@ from backend.models.route import Route
 from backend.models.yard import Yard
 
 
+# -----------------------------------------------------------
+# Yard-domain operator scope helpers
+# -----------------------------------------------------------
 DEFAULT_OPERATOR_NAME = "Default Operator"
 ROUTE_ACCESS_PRIORITY = {
     "read": 1,

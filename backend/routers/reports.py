@@ -133,8 +133,9 @@ def get_route_reports(
         raise HTTPException(status_code=404, detail=reports_data["error"])
     return reports_data
 
+
 # -----------------------------------------------------------
-# - Run reports summary
+# - School-scope run reports
 # - Return reports status for each student in a run
 # -----------------------------------------------------------
 @router.get(
@@ -244,8 +245,9 @@ def get_yard_time_cards(
         "drivers": reports_data,
     }  # Yard-scoped grouped time card payload
 
+
 # -----------------------------------------------------------
-# - Date reports summary
+# - School-scope reports
 # - Return reports aggregation for one date
 # -----------------------------------------------------------
 @router.get(
@@ -825,8 +827,6 @@ def update_school_status_for_assignment(
         "school_status": status_value,
     }
 
-
-get_driver_work_summary = get_yard_time_cards
 
 student_bus_absence_router = student_bus_absence.router
 

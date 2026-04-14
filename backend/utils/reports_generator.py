@@ -24,6 +24,10 @@ from backend.utils.operator_scope import get_route_access_level
 from backend.utils.planning_scope import accessible_route_filter, accessible_school_filter
 from backend.utils.route_driver_assignment import get_route_driver_name, resolve_route_driver_assignment
 
+
+# -----------------------------------------------------------
+# Yard-scope report helpers
+# -----------------------------------------------------------
 def driver_summary(db: Session, driver_id: int, operator_id: int | None = None) -> dict:
     driver_query = db.query(driver_model.Driver).filter(driver_model.Driver.id == driver_id)
     if operator_id is not None:
@@ -193,6 +197,9 @@ def dispatch_summary(
     return list(driver_records.values())
 
 
+# -----------------------------------------------------------
+# Shared report entrypoint
+# -----------------------------------------------------------
 def generate_reports(
     db: Session,
     reports_type: str,
@@ -335,8 +342,7 @@ def run_reports_summary(db, run, assignments, events, absence_lookup):
     }
 
 # -----------------------------------------------------------
-# - Date reports summary
-# - Build reports output for one requested date window
+# School-scope report helpers
 # -----------------------------------------------------------
 def date_summary(db: Session, start: date, end: date, operator_id: int | None = None):        # Build reports for a specific date
     day_start = datetime.combine(start, time.min)             # Start of requested day
