@@ -66,7 +66,6 @@ def create_driver(
     yard = _get_or_create_operator_yard(db, operator.id)
     new_driver = driver_model.Driver(
         **payload,
-        operator_id=operator.id,
         yard_id=yard.id,
         pin_hash=hash_driver_pin(pin),
     )

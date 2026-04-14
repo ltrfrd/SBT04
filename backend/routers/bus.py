@@ -53,7 +53,7 @@ def _get_or_create_operator_yard(db: Session, operator_id: int) -> Yard:
 def _validate_bus_uniqueness(
     *,
     db: Session,
-    operator_id: int,
+    yard_id: int,
     unit_number: str | None = None,
     license_plate: str | None = None,
     exclude_bus_id: int | None = None,
@@ -61,9 +61,8 @@ def _validate_bus_uniqueness(
     if unit_number is not None:
         query = (
             db.query(bus_model.Bus)
-            .join(bus_model.Bus.yard)
+            .filter(bus_model.Bus.yard_id == yard_id)
             .filter(bus_model.Bus.unit_number == unit_number)
-            .filter(Yard.operator_id == operator_id)
         )
         if exclude_bus_id is not None:
             query = query.filter(bus_model.Bus.id != exclude_bus_id)
@@ -74,9 +73,8 @@ def _validate_bus_uniqueness(
     if license_plate is not None:
         query = (
             db.query(bus_model.Bus)
-            .join(bus_model.Bus.yard)
+            .filter(bus_model.Bus.yard_id == yard_id)
             .filter(bus_model.Bus.license_plate == license_plate)
-            .filter(Yard.operator_id == operator_id)
         )
         if exclude_bus_id is not None:
             query = query.filter(bus_model.Bus.id != exclude_bus_id)
@@ -106,13 +104,12 @@ def create_bus(
     yard = _get_or_create_operator_yard(db, operator.id)
     _validate_bus_uniqueness(
         db=db,
-        operator_id=operator.id,
+        yard_id=yard.id,
         unit_number=payload["bus_number"],
         license_plate=payload["license_plate"],
     )
 
     new_bus = bus_model.Bus(
-        operator_id=operator.id,
         yard_id=yard.id,
         unit_number=payload["bus_number"],
         license_plate=payload["license_plate"],
@@ -223,7 +220,7 @@ def update_bus(
     update_data = bus_in.model_dump(exclude_unset=True)
     _validate_bus_uniqueness(
         db=db,
-        operator_id=operator.id,
+        yard_id=bus.yard_id,
         unit_number=update_data.get("bus_number"),
         license_plate=update_data.get("license_plate"),
         exclude_bus_id=bus_id,

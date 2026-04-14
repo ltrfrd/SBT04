@@ -3808,7 +3808,6 @@ def test_generate_reports_accepts_payroll_as_dispatch_alias(db_engine):
             name="Dispatch Alias Driver",
             email="dispatch-alias@test.com",
             phone="5551234",
-            operator_id=operator.id,
             yard_id=yard.id,
             pin_hash="test-hash",
         )

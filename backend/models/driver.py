@@ -17,7 +17,6 @@ class Driver(Base):
     __tablename__ = "drivers"  # Database table name
 
     id = Column(Integer, primary_key=True, index=True)  # Unique driver ID
-    operator_id = Column(Integer, ForeignKey("operators.id", ondelete="CASCADE"), nullable=False, index=True)
     yard_id = Column(Integer, ForeignKey("yards.id"), nullable=True)
     name = Column(String(100), nullable=False)  # Full name of the driver
     email = Column(String(120), unique=True, index=True, nullable=False)  # Contact email
@@ -27,7 +26,6 @@ class Driver(Base):
     # -------------------------------------------------------
     # Relationships
     # -------------------------------------------------------
-    operator = relationship("Operator", back_populates="drivers")
     yard = relationship("Yard", back_populates="drivers")
     route_assignments = relationship(
         "RouteDriverAssignment",

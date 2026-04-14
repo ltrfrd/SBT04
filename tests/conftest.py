@@ -85,7 +85,6 @@ def _create_driver_in_db(
         d = Driver(
             name=name,
             email=email,
-            operator_id=operator_id,
             yard_id=yard.id,
             pin_hash="test-hash",
         )

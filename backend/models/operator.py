@@ -10,8 +10,6 @@ class Operator(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(150), nullable=False, unique=True, index=True)
 
-    drivers = relationship("Driver", back_populates="operator")
-    buses = relationship("Bus", back_populates="operator")
     yards = relationship("Yard", back_populates="operator")
     schools = relationship("School", back_populates="operator")
     students = relationship("Student", back_populates="operator")
