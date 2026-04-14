@@ -9,7 +9,7 @@ from datetime import date, datetime
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import and_, or_
+from sqlalchemy import and_
 from sqlalchemy.orm import Session, joinedload
 
 from database import get_db
@@ -52,16 +52,8 @@ def dashboard(
     counts = {
         "driver_count": (
             db.query(driver_model.Driver)
-            .outerjoin(driver_model.Driver.yard)
-            .filter(
-                or_(
-                    Yard.operator_id == operator.id,
-                    and_(
-                        driver_model.Driver.yard_id.is_(None),
-                        driver_model.Driver.operator_id == operator.id,
-                    ),
-                )
-            )
+            .join(driver_model.Driver.yard)
+            .filter(Yard.operator_id == operator.id)
             .count()
         ),
         "school_count": db.query(school_model.School).filter(accessible_school_filter(operator.id)).count(),
@@ -274,16 +266,8 @@ def summary_report(
     records = (
         db.query(dispatch_model.DispatchRecord)
         .join(driver_model.Driver, driver_model.Driver.id == dispatch_model.DispatchRecord.driver_id)
-        .outerjoin(driver_model.Driver.yard)
-        .filter(
-            or_(
-                Yard.operator_id == operator.id,
-                and_(
-                    driver_model.Driver.yard_id.is_(None),
-                    driver_model.Driver.operator_id == operator.id,
-                ),
-            )
-        )
+        .join(driver_model.Driver.yard)
+        .filter(Yard.operator_id == operator.id)
         .filter(dispatch_model.DispatchRecord.work_date.between(start, end))
         .all()
     )

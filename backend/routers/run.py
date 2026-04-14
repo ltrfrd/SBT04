@@ -42,6 +42,7 @@ from backend.utils.route_driver_assignment import resolve_route_driver_assignmen
 from backend.utils.db_errors import raise_conflict_if_unique
 from backend.utils.pretrip_alerts import create_missing_pretrip_alert_if_needed
 from backend.utils.operator_scope import get_operator_context
+from backend.utils.operator_scope import get_operator_scoped_driver_or_404
 from backend.utils.operator_scope import get_operator_scoped_record_or_404
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
 from backend.utils.operator_scope import get_route_access_level
@@ -901,10 +902,9 @@ def end_run_by_driver(
     # -------------------------------------------------------------------------
     # Validate driver exists
     # -------------------------------------------------------------------------
-    driver = get_operator_scoped_record_or_404(
+    driver = get_operator_scoped_driver_or_404(
         db=db,
-        model=driver_model.Driver,
-        record_id=driver_id,
+        driver_id=driver_id,
         operator_id=operator.id,
         detail="Driver not found",
     )
@@ -1015,10 +1015,9 @@ def get_active_run(
     # -------------------------------------------------------------------------
     # Validate driver exists
     # -------------------------------------------------------------------------
-    get_operator_scoped_record_or_404(
+    get_operator_scoped_driver_or_404(
         db=db,
-        model=driver_model.Driver,
-        record_id=driver_id,
+        driver_id=driver_id,
         operator_id=operator.id,
         detail="Driver not found",
     )

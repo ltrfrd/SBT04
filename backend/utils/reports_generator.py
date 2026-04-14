@@ -2,7 +2,6 @@
 # - Reports generator
 # - Build reports-layer summaries behind canonical /reports endpoints
 # -----------------------------------------------------------
-from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session  # Database session type
 from datetime import date, datetime, time # Date filter type
 from backend.models import (  # Existing summary data sources
@@ -29,16 +28,8 @@ def driver_summary(db: Session, driver_id: int, operator_id: int | None = None) 
     if operator_id is not None:
         driver_query = (
             driver_query
-            .outerjoin(driver_model.Driver.yard)
-            .filter(
-                or_(
-                    Yard.operator_id == operator_id,
-                    and_(
-                        driver_model.Driver.yard_id.is_(None),
-                        driver_model.Driver.operator_id == operator_id,
-                    ),
-                )
-            )
+            .join(driver_model.Driver.yard)
+            .filter(Yard.operator_id == operator_id)
         )
     drv = driver_query.first()  # Load driver with optional operator scope
     if not drv:
@@ -167,16 +158,8 @@ def dispatch_summary(db: Session, start: date, end: date, operator_id: int | Non
         query = (
             query
             .join(driver_model.Driver, driver_model.Driver.id == dispatch_model.DispatchRecord.driver_id)
-            .outerjoin(driver_model.Driver.yard)
-            .filter(
-                or_(
-                    Yard.operator_id == operator_id,
-                    and_(
-                        driver_model.Driver.yard_id.is_(None),
-                        driver_model.Driver.operator_id == operator_id,
-                    ),
-                )
-            )
+            .join(driver_model.Driver.yard)
+            .filter(Yard.operator_id == operator_id)
         )
     records = query.all()  # Load dispatch rows inside the requested range
 

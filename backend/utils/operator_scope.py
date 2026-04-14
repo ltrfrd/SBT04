@@ -57,6 +57,21 @@ def get_operator_scoped_record_or_404(
     operator_id: int,
     detail: str,
 ):
+    if model is driver_model.Driver:
+        return get_operator_scoped_driver_or_404(
+            db=db,
+            driver_id=record_id,
+            operator_id=operator_id,
+            detail=detail,
+        )
+    if model is bus_model.Bus:
+        return get_operator_scoped_bus_or_404(
+            db=db,
+            bus_id=record_id,
+            operator_id=operator_id,
+            detail=detail,
+        )
+
     record = (
         db.query(model)
         .filter(model.id == record_id)
@@ -110,6 +125,26 @@ def get_operator_scoped_bus_or_404(
     return bus
 
 
+def get_driver_operator_id(driver: driver_model.Driver) -> int:
+    if not driver.yard:
+        raise HTTPException(status_code=400, detail="Driver is missing yard assignment")
+    return driver.yard.operator_id
+
+
+def get_bus_operator_id(bus: bus_model.Bus) -> int:
+    if not bus.yard:
+        raise HTTPException(status_code=400, detail="Bus is missing yard assignment")
+    return bus.yard.operator_id
+
+
+def get_record_operator_id(record) -> int:
+    if isinstance(record, driver_model.Driver):
+        return get_driver_operator_id(record)
+    if isinstance(record, bus_model.Bus):
+        return get_bus_operator_id(record)
+    return record.operator_id
+
+
 def _route_access_satisfies(access_level: str | None, required_access: str) -> bool:
     if access_level == "owner":
         return True
@@ -157,7 +192,7 @@ def ensure_route_owner(route: Route, operator_id: int) -> None:
 
 
 def ensure_same_operator(*records) -> None:
-    operator_ids = {record.operator_id for record in records}
+    operator_ids = {get_record_operator_id(record) for record in records}
     if len(operator_ids) > 1:
         raise HTTPException(status_code=400, detail="Cross-operator association is not allowed")
 

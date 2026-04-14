@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker                   # DB session 
 from backend.models.associations import StudentRunAssignment       # Runtime assignment model
 from backend.models.driver import Driver                           # Driver model for dispatch compatibility checks
 from backend.models.operator import Operator                       # Operator model for dispatch compatibility checks
+from backend.models.yard import Yard                               # Yard model for dispatch compatibility checks
 from backend.models import run as run_model                        # Direct run verification model
 from backend.models.route import Route                             # Direct route verification model
 from backend.models.student import Student                         # Direct student verification model
@@ -3799,8 +3800,18 @@ def test_generate_reports_accepts_payroll_as_dispatch_alias(db_engine):
         db.add(operator)
         db.flush()
 
-        driver = Driver(name="Dispatch Alias Driver", email="dispatch-alias@test.com", phone="5551234", operator_id=1, pin_hash="test-hash")
-        driver.operator_id = operator.id
+        yard = Yard(name="Dispatch Alias Yard", operator_id=operator.id)
+        db.add(yard)
+        db.flush()
+
+        driver = Driver(
+            name="Dispatch Alias Driver",
+            email="dispatch-alias@test.com",
+            phone="5551234",
+            operator_id=operator.id,
+            yard_id=yard.id,
+            pin_hash="test-hash",
+        )
         db.add(driver)
         db.flush()
 

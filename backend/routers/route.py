@@ -46,7 +46,9 @@ from backend.utils.route_driver_assignment import (
     resolve_route_driver_assignment,
 )
 from backend.utils.operator_scope import create_operator_route_access
+from backend.utils.operator_scope import get_bus_operator_id
 from backend.utils.operator_scope import ensure_route_owner
+from backend.utils.operator_scope import get_driver_operator_id
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
 from backend.utils.operator_scope import get_route_access_level
@@ -1052,7 +1054,8 @@ def assign_bus_to_route(
     bus = db.get(Bus, bus_id)
     if not bus:
         raise HTTPException(status_code=404, detail="Bus not found")
-    if bus.operator_id != route.operator_id and get_route_access_level(route, bus.operator_id) != "operate":
+    bus_operator_id = get_bus_operator_id(bus)
+    if bus_operator_id != route.operator_id and get_route_access_level(route, bus_operator_id) != "operate":
         raise HTTPException(status_code=400, detail="Bus is not allowed for this route")
 
     route.active_bus_id = bus.id                               # Assign the active operational bus
@@ -1092,7 +1095,8 @@ def set_primary_bus_for_route(
     bus = db.get(Bus, bus_id)
     if not bus:
         raise HTTPException(status_code=404, detail="Bus not found")
-    if bus.operator_id != route.operator_id and get_route_access_level(route, bus.operator_id) != "operate":
+    bus_operator_id = get_bus_operator_id(bus)
+    if bus_operator_id != route.operator_id and get_route_access_level(route, bus_operator_id) != "operate":
         raise HTTPException(status_code=400, detail="Bus is not allowed for this route")
 
     route.primary_bus_id = bus.id                              # Set the default/base route bus
@@ -1133,7 +1137,8 @@ def set_active_bus_for_route(
     bus = db.get(Bus, bus_id)
     if not bus:
         raise HTTPException(status_code=404, detail="Bus not found")
-    if bus.operator_id != route.operator_id and get_route_access_level(route, bus.operator_id) != "operate":
+    bus_operator_id = get_bus_operator_id(bus)
+    if bus_operator_id != route.operator_id and get_route_access_level(route, bus_operator_id) != "operate":
         raise HTTPException(status_code=400, detail="Bus is not allowed for this route")
 
     route.active_bus_id = bus.id                               # Set the current operational bus
@@ -1253,7 +1258,8 @@ def _assign_driver_to_route(
     driver = db.get(Driver, driver_id)                           # Validate driver exists
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
-    if driver.operator_id != route.operator_id and get_route_access_level(route, driver.operator_id) != "operate":
+    driver_operator_id = get_driver_operator_id(driver)
+    if driver_operator_id != route.operator_id and get_route_access_level(route, driver_operator_id) != "operate":
         raise HTTPException(status_code=400, detail="Driver is not allowed for this route")
 
     _assert_route_driver_assignment_integrity(route)             # Fail safely on invalid legacy active/primary state

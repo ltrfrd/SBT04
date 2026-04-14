@@ -5,7 +5,6 @@
 from datetime import date, datetime, timezone  # Date and timestamp helpers
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status  # FastAPI router helpers
-from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, selectinload  # SQLAlchemy session and eager loading
 
 from database import get_db  # Shared DB session dependency
@@ -22,20 +21,6 @@ from backend.utils.pretrip_alerts import sync_pretrip_issue_alerts  # Pre-trip a
 router = APIRouter(prefix="/pretrips", tags=["Pre-Trip Inspection"])
 
 
-# -----------------------------------------------------------
-# - Pre-trip helpers
-# - Keep duplicate checks and correction snapshots explicit
-# -----------------------------------------------------------
-def _bus_scope_filter(operator_id: int):
-    return or_(
-        Yard.operator_id == operator_id,
-        and_(
-            Bus.yard_id.is_(None),
-            Bus.operator_id == operator_id,
-        ),
-    )
-
-
 def _get_pretrip_or_404(pretrip_id: int, db: Session, operator_id: int) -> PreTripInspection:
     inspection = (
         db.query(PreTripInspection)
@@ -44,9 +29,9 @@ def _get_pretrip_or_404(pretrip_id: int, db: Session, operator_id: int) -> PreTr
             selectinload(PreTripInspection.defects),
         )
         .join(Bus, PreTripInspection.bus_id == Bus.id)
-        .outerjoin(Bus.yard)
+        .join(Bus.yard)
         .filter(PreTripInspection.id == pretrip_id)
-        .filter(_bus_scope_filter(operator_id))
+        .filter(Yard.operator_id == operator_id)
         .first()
     )                                                          # Load one inspection with nested defects, operator-scoped
     if not inspection:
@@ -57,9 +42,9 @@ def _get_pretrip_or_404(pretrip_id: int, db: Session, operator_id: int) -> PreTr
 def _get_bus_by_number_or_404(bus_number: str, db: Session, operator_id: int) -> Bus:
     bus = (
         db.query(Bus)
-        .outerjoin(Bus.yard)
+        .join(Bus.yard)
         .filter(Bus.unit_number == bus_number)
-        .filter(_bus_scope_filter(operator_id))
+        .filter(Yard.operator_id == operator_id)
         .first()
     )                                                          # Resolve the user-facing bus number within operator only
     if not bus:
@@ -75,9 +60,9 @@ def _resolve_bus_or_404(
     if payload.bus_id is not None:
         bus = (
             db.query(Bus)
-            .outerjoin(Bus.yard)
+            .join(Bus.yard)
             .filter(Bus.id == payload.bus_id)
-            .filter(_bus_scope_filter(operator_id))
+            .filter(Yard.operator_id == operator_id)
             .first()
         )                                                      # Scope bus_id resolution to operator
         if not bus:
@@ -235,16 +220,16 @@ def list_pretrips(
             selectinload(PreTripInspection.defects),
         )
         .join(Bus, PreTripInspection.bus_id == Bus.id)
-        .outerjoin(Bus.yard)
-        .filter(_bus_scope_filter(operator.id))
+        .join(Bus.yard)
+        .filter(Yard.operator_id == operator.id)
     )                                                          # Base pre-trip query scoped to operator
 
     if bus_id is not None:
         bus = (
             db.query(Bus)
-            .outerjoin(Bus.yard)
+            .join(Bus.yard)
             .filter(Bus.id == bus_id)
-            .filter(_bus_scope_filter(operator.id))
+            .filter(Yard.operator_id == operator.id)
             .first()
         )
         if not bus:
@@ -301,9 +286,9 @@ def get_bus_pretrip_today(
 ):
     bus = (
         db.query(Bus)
-        .outerjoin(Bus.yard)
+        .join(Bus.yard)
         .filter(Bus.id == bus_id)
-        .filter(_bus_scope_filter(operator.id))
+        .filter(Yard.operator_id == operator.id)
         .first()
     )
     if not bus:
@@ -343,9 +328,9 @@ def list_bus_pretrips(
 ):
     bus = (
         db.query(Bus)
-        .outerjoin(Bus.yard)
+        .join(Bus.yard)
         .filter(Bus.id == bus_id)
-        .filter(_bus_scope_filter(operator.id))
+        .filter(Yard.operator_id == operator.id)
         .first()
     )
     if not bus:

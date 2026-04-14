@@ -21,6 +21,7 @@ from backend.models.route import Route
 from backend.models.yard import Yard
 from backend.schemas.bus import BusUpdate
 from backend.routers.route import _serialize_route_detail
+from backend.utils.operator_scope import get_bus_operator_id
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_operator_scoped_bus_or_404
 from backend.utils.operator_scope import get_route_access_level
@@ -179,6 +180,8 @@ def get_bus(
         ],
     )
 
+    bus_operator_id = get_bus_operator_id(bus)
+
     return schemas.BusDetailOut(
         id=bus.id,
         bus_number=bus.unit_number,
@@ -188,7 +191,7 @@ def get_bus(
         assigned_routes=[
             _serialize_route_detail(route)
             for route in sorted(bus.routes, key=lambda route: (route.route_number, route.id))
-            if bus.yard and get_route_access_level(route, bus.yard.operator_id) is not None
+            if get_route_access_level(route, bus_operator_id) is not None
         ],
     )
 

@@ -18,6 +18,7 @@ from backend.routers.route import _serialize_route
 from backend.models.operator import Operator
 from backend.utils.auth import hash_driver_pin
 from backend.utils.operator_scope import get_operator_context
+from backend.utils.operator_scope import get_driver_operator_id
 from backend.utils.operator_scope import get_operator_scoped_driver_or_404
 from backend.utils.operator_scope import get_route_access_level
 
@@ -159,10 +160,11 @@ def get_driver_routes(
         .distinct()
         .all()
     )
+    driver_operator_id = get_driver_operator_id(driver)
     routes = [
         route
         for route in candidate_routes
-        if driver.yard and get_route_access_level(route, driver.yard.operator_id) is not None
+        if get_route_access_level(route, driver_operator_id) is not None
     ]
     return [_serialize_route(route) for route in routes]
 
