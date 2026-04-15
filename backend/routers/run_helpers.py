@@ -1,7 +1,7 @@
 # ===========================================================
-# backend/routers/run/helpers.py - FleetOS Run Router Helpers
+# backend/routers/run_helpers.py - FleetOS Run Router Helpers
 # -----------------------------------------------------------
-# Shared internal run helpers extracted from the run router.
+# Shared internal helpers extracted from the run router.
 # ===========================================================
 
 from fastapi import HTTPException, status
@@ -15,29 +15,28 @@ from backend.models import run as run_model
 from backend.models import stop as stop_model
 from backend.models import student as student_model
 from backend.models.associations import StudentRunAssignment
-from backend.models.run import Run
-from backend.models.run_event import RunEvent
-from backend.models.student import Student
+from backend.models.run import Run                            # Run model
+from backend.models.run_event import RunEvent                  # Run timeline event model
+from backend.models.student import Student                      # Student model
 from backend.schemas.run import (
-    RunDetailDriverOut,
+    RunOut,
     RunDetailOut,
     RunDetailRouteOut,
+    RunDetailDriverOut,
     RunDetailStopOut,
     RunDetailStudentOut,
     RunListOut,
-    RunOut,
-    RunningBoardStop,
-    RunningBoardStudent,
     normalize_run_type,
 )
-from backend.utils.operator_scope import get_operator_scoped_route_or_404
-from backend.utils.planning_scope import (
-    get_school_for_planning_or_404,
-    validate_route_school_alignment,
+from backend.schemas.run import (  # Running board response schemas
+    RunningBoardStop,
+    RunningBoardStudent,
 )
-from backend.utils.route_driver_assignment import resolve_route_driver_assignment
-from backend.utils.run_setup import get_run_stop_context_or_404
 from backend.utils.student_bus_absence import apply_run_absence_filter
+from backend.utils.planning_scope import get_school_for_planning_or_404, validate_route_school_alignment
+from backend.utils.route_driver_assignment import resolve_route_driver_assignment
+from backend.utils.operator_scope import get_operator_scoped_route_or_404
+from backend.utils.run_setup import get_run_stop_context_or_404
 
 
 # -----------------------------------------------------------
@@ -121,7 +120,7 @@ def _require_posttrip_phase2_completed(run_id: int, db: Session) -> None:
         db.query(posttrip_model.PostTripInspection)
         .filter(posttrip_model.PostTripInspection.run_id == run_id)
         .first()
-    )  # One post-trip row may exist per run
+    )                                                          # One post-trip row may exist per run
     if not inspection or inspection.phase2_completed is not True:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -134,23 +133,23 @@ def _require_posttrip_phase2_completed(run_id: int, db: Session) -> None:
 # - Keep flexible stop execution and rider validation consistent
 # -----------------------------------------------------------
 def _get_runtime_run_or_404(run_id: int, db: Session) -> Run:
-    run = db.get(run_model.Run, run_id)  # Load run once for runtime actions
+    run = db.get(run_model.Run, run_id)                        # Load run once for runtime actions
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     return run
 
 
 def _require_active_runtime_run(run: Run) -> Run:
-    if run.is_completed:  # Completed runs are read-only
+    if run.is_completed:                                       # Completed runs are read-only
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Run is already completed",
         )
 
-    if run.start_time is None:  # Planned runs cannot accept live actions
+    if run.start_time is None:                                 # Planned runs cannot accept live actions
         raise HTTPException(status_code=400, detail="Run is not active")
 
-    if run.end_time is not None:  # Ended runs are no longer live
+    if run.end_time is not None:                               # Ended runs are no longer live
         raise HTTPException(status_code=400, detail="Run has already ended")
 
     return run
@@ -159,10 +158,10 @@ def _require_active_runtime_run(run: Run) -> Run:
 def _get_ordered_run_stops(run_id: int, db: Session) -> list[stop_model.Stop]:
     return (
         db.query(stop_model.Stop)
-        .filter(stop_model.Stop.run_id == run_id)  # Keep only this run's stops
+        .filter(stop_model.Stop.run_id == run_id)              # Keep only this run's stops
         .order_by(stop_model.Stop.sequence.asc(), stop_model.Stop.id.asc())
         .all()
-    )  # Stable stop order supports convenience navigation
+    )                                                          # Stable stop order supports convenience navigation
 
 
 def _resolve_runtime_stop_target_or_404(
@@ -186,7 +185,7 @@ def _resolve_runtime_stop_target_or_404(
             .filter(stop_model.Stop.run_id == run_id)
             .filter(stop_model.Stop.id == stop_id)
             .first()
-        )  # Resolve target by explicit stop id when provided
+        )                                                      # Resolve target by explicit stop id when provided
         if not stop:
             raise HTTPException(status_code=404, detail="Stop not found for this run")
 
@@ -196,7 +195,7 @@ def _resolve_runtime_stop_target_or_404(
             .filter(stop_model.Stop.run_id == run_id)
             .filter(stop_model.Stop.sequence == stop_sequence)
             .first()
-        )  # Preserve compatibility with stop_sequence callers
+        )                                                      # Preserve compatibility with stop_sequence callers
         if not sequence_stop:
             raise HTTPException(status_code=404, detail="Stop sequence not found for this run")
 
@@ -217,8 +216,8 @@ def _set_run_current_stop(
     stop: stop_model.Stop,
     db: Session,
 ) -> Run:
-    run.current_stop_id = stop.id  # Actual runtime location source of truth
-    run.current_stop_sequence = stop.sequence  # Preserve current stop sequence for read surfaces
+    run.current_stop_id = stop.id                              # Actual runtime location source of truth
+    run.current_stop_sequence = stop.sequence                  # Preserve current stop sequence for read surfaces
 
     db.add(
         RunEvent(
@@ -226,7 +225,7 @@ def _set_run_current_stop(
             stop_id=stop.id,
             event_type="ARRIVE",
         )
-    )  # Repeated ARRIVE events are valid for revisits and jumps
+    )                                                          # Repeated ARRIVE events are valid for revisits and jumps
 
     db.commit()
     db.refresh(run)
@@ -245,7 +244,7 @@ def _require_current_runtime_stop(run: Run, db: Session) -> stop_model.Stop:
         .filter(stop_model.Stop.run_id == run.id)
         .filter(stop_model.Stop.id == run.current_stop_id)
         .first()
-    )  # Validate the stored live stop still belongs to this run
+    )                                                          # Validate the stored live stop still belongs to this run
     if not current_stop:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -269,7 +268,7 @@ def _get_runtime_assignment_or_404(
             StudentRunAssignment.student_id == student_id,
         )
         .first()
-    )  # Load run-scoped student assignment once
+    )                                                          # Load run-scoped student assignment once
 
     if not assignment:
         raise HTTPException(
@@ -285,19 +284,19 @@ def _get_runtime_assignment_or_404(
 # - Block impossible pickup/dropoff transitions before writes
 # -----------------------------------------------------------
 def _assert_pickup_transition_allowed(assignment: StudentRunAssignment) -> None:
-    if assignment.dropped_off is True:  # Dropped-off riders cannot board again
+    if assignment.dropped_off is True:                        # Dropped-off riders cannot board again
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Student has already been dropped off",
         )
 
-    if assignment.picked_up is True:  # Prevent duplicate pickup events
+    if assignment.picked_up is True:                          # Prevent duplicate pickup events
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Student has already been picked up",
         )
 
-    if assignment.is_onboard is True:  # Guard impossible duplicate onboard state
+    if assignment.is_onboard is True:                         # Guard impossible duplicate onboard state
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Student is already onboard",
@@ -305,19 +304,19 @@ def _assert_pickup_transition_allowed(assignment: StudentRunAssignment) -> None:
 
 
 def _assert_dropoff_transition_allowed(assignment: StudentRunAssignment) -> None:
-    if assignment.dropped_off is True:  # Prevent duplicate dropoff events
+    if assignment.dropped_off is True:                        # Prevent duplicate dropoff events
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Student has already been dropped off",
         )
 
-    if assignment.picked_up is not True:  # Cannot exit before boarding
+    if assignment.picked_up is not True:                      # Cannot exit before boarding
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Student has not been picked up yet",
         )
 
-    if assignment.is_onboard is not True:  # Must still be onboard to drop off now
+    if assignment.is_onboard is not True:                     # Must still be onboard to drop off now
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Student is not currently onboard",
@@ -334,7 +333,7 @@ def _get_run_stop_or_404(run_id: int, stop_id: int, db: Session) -> tuple[run_mo
         stop_id=stop_id,
         db=db,
         require_planned=True,
-    )  # Shared run/stop validation keeps assignment writes aligned
+    )                                                          # Shared run/stop validation keeps assignment writes aligned
 
 
 def _get_run_stop_student_context_or_404(
@@ -343,9 +342,9 @@ def _get_run_stop_student_context_or_404(
     student_id: int,
     db: Session,
 ) -> tuple[run_model.Run, stop_model.Stop, student_model.Student, StudentRunAssignment]:
-    run, stop = _get_run_stop_or_404(run_id, stop_id, db)  # Reuse existing run-stop validation
+    run, stop = _get_run_stop_or_404(run_id, stop_id, db)        # Reuse existing run-stop validation
 
-    student = db.get(student_model.Student, student_id)  # Validate student exists
+    student = db.get(student_model.Student, student_id)          # Validate student exists
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
@@ -357,7 +356,7 @@ def _get_run_stop_student_context_or_404(
         .filter(StudentRunAssignment.run_id == run_id)
         .filter(StudentRunAssignment.student_id == student_id)
         .first()
-    )  # Validate the internal runtime assignment exists
+    )                                                            # Validate the internal runtime assignment exists
     if not assignment:
         raise HTTPException(status_code=400, detail="Student is not assigned to run")
 
@@ -439,8 +438,8 @@ def _group_running_board_students(
             [],
         ).append(
             RunningBoardStudent(
-                student_id=assignment.student.id,  # Stable student identifier
-                student_name=assignment.student.name,  # Driver-facing student display
+                student_id=assignment.student.id,              # Stable student identifier
+                student_name=assignment.student.name,          # Driver-facing student display
             )
         )
 
@@ -451,18 +450,18 @@ def _build_running_board_stops(
     stops: list[stop_model.Stop],
     assignments_by_stop: dict[int, list[RunningBoardStudent]],
 ) -> list[RunningBoardStop]:
-    running_stops: list[RunningBoardStop] = []  # Final ordered stop rows
-    cumulative_load = 0  # Running onboard total
+    running_stops: list[RunningBoardStop] = []                 # Final ordered stop rows
+    cumulative_load = 0                                        # Running onboard total
 
     for stop in stops:
-        stop_students = assignments_by_stop.get(stop.id, [])  # Students assigned to this stop
-        student_count = len(stop_students)  # Boardings sourced from runtime assignments
-        load_change = student_count  # Existing running board uses boarding count per stop
-        cumulative_load += load_change  # Preserve current cumulative behavior
+        stop_students = assignments_by_stop.get(stop.id, [])   # Students assigned to this stop
+        student_count = len(stop_students)                     # Boardings sourced from runtime assignments
+        load_change = student_count                            # Existing running board uses boarding count per stop
+        cumulative_load += load_change                         # Preserve current cumulative behavior
 
         is_school_stop = stop.type in {"SCHOOL_ARRIVE", "SCHOOL_DEPART"}
         if is_school_stop and stop.school:
-            display_name = stop.school.name  # School stop rows display school name when linked
+            display_name = stop.school.name                    # School stop rows display school name when linked
         else:
             display_name = stop.name or f"STOP {stop.sequence}"  # Fallback remains operator-friendly
 
@@ -553,26 +552,26 @@ def _create_planned_run(
     scheduled_end_time,
     db: Session,
 ) -> run_model.Run:
-    normalized_run_type = normalize_run_type(run_type)  # Store normalized flexible label
+    normalized_run_type = normalize_run_type(run_type)          # Store normalized flexible label
     _assert_unique_route_run_type(
         route_id=route.id,
         normalized_run_type=normalized_run_type,
         db=db,
     )
-    resolved_driver_id = _resolve_planned_run_driver(route)  # Planned runs may exist before a driver is assigned
+    resolved_driver_id = _resolve_planned_run_driver(route)     # Planned runs may exist before a driver is assigned
 
-    new_run = run_model.Run(
-        driver_id=resolved_driver_id,  # Inherit current route driver when available
-        route_id=route.id,  # Inherit route automatically
-        district_id=route.district_id,  # Inherit planning district when available
-        run_type=normalized_run_type,  # Store normalized flexible run label
-        scheduled_start_time=scheduled_start_time,  # Store fixed planned start time
-        scheduled_end_time=scheduled_end_time,  # Store fixed planned end time
-        start_time=None,  # Planned only until explicitly started
-        end_time=None,  # Not completed
-        current_stop_id=None,  # No live stop yet
-        current_stop_sequence=None,  # No live sequence yet
-    )  # Create run under current route context
+    new_run = run_model.Run(                                    # Create run under current route context
+        driver_id=resolved_driver_id,                           # Inherit current route driver when available
+        route_id=route.id,                                      # Inherit route automatically
+        district_id=route.district_id,                          # Inherit planning district when available
+        run_type=normalized_run_type,                           # Store normalized flexible run label
+        scheduled_start_time=scheduled_start_time,              # Store fixed planned start time
+        scheduled_end_time=scheduled_end_time,                  # Store fixed planned end time
+        start_time=None,                                        # Planned only until explicitly started
+        end_time=None,                                          # Not completed
+        current_stop_id=None,                                   # No live stop yet
+        current_stop_sequence=None,                             # No live sequence yet
+    )
     db.add(new_run)
     return new_run
 
@@ -609,7 +608,7 @@ def _serialize_run_detail(run: run_model.Run) -> RunDetailOut:
             stop.sequence if stop.sequence is not None else 999999,
             stop.id,
         ),
-    )  # Keep stop order stable
+    )                                                          # Keep stop order stable
 
     ordered_assignments = sorted(
         run.student_assignments,
@@ -618,7 +617,7 @@ def _serialize_run_detail(run: run_model.Run) -> RunDetailOut:
             assignment.student.name if assignment.student else "",
             assignment.id,
         ),
-    )  # Keep student rows grouped by stop order
+    )                                                          # Keep student rows grouped by stop order
 
     return RunDetailOut(
         id=run.id,
@@ -666,7 +665,7 @@ def _serialize_run_detail(run: run_model.Run) -> RunDetailOut:
             for assignment in ordered_assignments
             if assignment.student
         ],
-    )  # Return nested run detail
+    )                                                          # Return nested run detail
 
 
 # -----------------------------------------------------------
@@ -688,35 +687,4 @@ def _serialize_run_list_item(run: run_model.Run) -> RunListOut:
         is_completed=run.end_time is not None,
         stops_count=len(run.stops),
         students_count=len(run.student_assignments),
-    )  # Return run summary row
-
-
-__all__ = [
-    "_assert_dropoff_transition_allowed",
-    "_assert_pickup_transition_allowed",
-    "_assert_unique_route_run_type",
-    "_build_run_occupancy_counts",
-    "_build_running_board_stops",
-    "_create_planned_run",
-    "_create_stop_context_student",
-    "_get_operator_scoped_run_or_404",
-    "_get_ordered_run_stops",
-    "_get_run_assignments",
-    "_get_run_or_404",
-    "_get_run_stop_or_404",
-    "_get_run_stop_student_context_or_404",
-    "_get_runtime_assignment_or_404",
-    "_get_runtime_run_or_404",
-    "_group_running_board_students",
-    "_is_run_active",
-    "_require_active_runtime_run",
-    "_require_current_runtime_stop",
-    "_require_posttrip_phase2_completed",
-    "_resolve_planned_run_driver",
-    "_resolve_run_driver",
-    "_resolve_runtime_stop_target_or_404",
-    "_serialize_run",
-    "_serialize_run_detail",
-    "_serialize_run_list_item",
-    "_set_run_current_stop",
-]
+    )                                                          # Return run summary row
