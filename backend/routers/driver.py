@@ -14,7 +14,7 @@ from backend.models.associations import RouteDriverAssignment
 from backend.models.route import Route
 from backend.schemas.driver import DriverUpdate
 from backend.schemas.route import RouteOut
-from backend.routers.route import _serialize_route
+from backend.routers.route_helpers import _serialize_route
 from backend.models.operator import Operator
 from backend.utils.auth import hash_driver_pin
 from backend.utils.operator_scope import get_operator_context

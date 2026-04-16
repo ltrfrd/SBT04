@@ -10,7 +10,7 @@ from backend.models.route import Route
 from backend.models import run as run_model
 from backend.models.school import School
 from backend.models.student import Student
-from backend.routers.route import _serialize_route, create_route_record
+from backend.routers.route_helpers import _serialize_route, create_route_record
 from backend.routers.school import create_school_record
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.planning_scope import accessible_route_filter, accessible_school_filter

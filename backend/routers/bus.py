@@ -20,7 +20,7 @@ from backend.models.operator import Operator
 from backend.models.route import Route
 from backend.models.yard import Yard
 from backend.schemas.bus import BusUpdate
-from backend.routers.route import _serialize_route_detail
+from backend.routers.route_helpers import _serialize_route_detail
 from backend.utils.operator_scope import get_bus_operator_id
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_operator_scoped_bus_or_404
