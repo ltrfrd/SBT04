@@ -20,6 +20,7 @@ from starlette.middleware.sessions import SessionMiddleware
 # ---------- DB & MODELS ----------
 from database import Base, engine, get_db
 import backend.models  # noqa: F401
+from backend.config import settings
 
 # ---------- ROUTERS ----------
 from backend.routers import (
@@ -47,6 +48,7 @@ from backend.web import web_pages
 # -----------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
     Base.metadata.create_all(bind=engine)
     yield
 # -----------------------------------------------------------
@@ -73,7 +75,9 @@ app.add_middleware(
 )
 
 # Mount static folder (CSS, JS, images)
+os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
 app.mount("/static", StaticFiles(directory="backend/templates/static"), name="static")
+app.mount(settings.MEDIA_URL_PREFIX, StaticFiles(directory=settings.MEDIA_ROOT), name="media")
 
 
 # -----------------------------------------------------------

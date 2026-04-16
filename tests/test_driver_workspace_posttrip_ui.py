@@ -54,6 +54,20 @@ def test_driver_workspace_shows_posttrip_section_when_run_is_ready(client):
     assert "Post-Trip Inspection" in body
     assert "Complete Phase 1" in body
     assert "Complete Phase 2" in body
+    assert "Open Camera" in body
+    assert "Rear of bus photo (required)" in body
+    assert "Final rear of bus photo (required)" in body
+    assert "Cleared sign photo (required)" in body
+    assert 'data-capture-token="' in body
+    assert 'data-camera-field-name="phase1_rear_to_front_image"' in body
+    assert 'data-camera-field-name="phase2_rear_to_front_image"' in body
+    assert 'data-camera-field-name="phase2_cleared_sign_image"' in body
+    assert 'data-camera-photo-type="phase1_rear_photo"' in body
+    assert 'data-camera-photo-type="phase2_rear_photo"' in body
+    assert 'data-camera-photo-type="phase2_cleared_sign_photo"' in body
+    assert 'type="file"' not in body
+    assert 'data-camera-compat-input' not in body
+    assert "Compatibility path for browsers that cannot access the live camera" not in body
     assert f'/runs/{context["run"]["id"]}/posttrip/phase1' in body
     assert f'/runs/{context["run"]["id"]}/posttrip/phase2' in body
     assert 'data-posttrip-phase2-completed="false"' in body

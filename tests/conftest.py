@@ -12,8 +12,10 @@
 # =============================================================================
 
 import os  # Path utilities
+import shutil
 import sys  # Python import path control
 import tempfile
+from uuid import uuid4
 from datetime import date
 from urllib.parse import parse_qs, urlparse
 
@@ -36,6 +38,7 @@ from sqlalchemy.orm import sessionmaker  # Session factory
 
 from database import Base  # SQLAlchemy Base (root database.py)
 from app import app, get_db  # FastAPI app + DB dependency
+from backend.config import settings
 from backend.models import driver, school, student, route, run, dispatch          # Core models used by app
 from backend.models import associations                                            # Ensure StudentRunAssignment is registered
 from backend.models.operator import Operator                                        # Operator model for direct DB bootstrap
@@ -202,6 +205,10 @@ def db_engine():
 
     fd, test_db_path = tempfile.mkstemp(prefix="fleetos-tests-", suffix=".db", dir=PROJECT_ROOT)  # Stable per-test DB file without pytest tmp_path
     os.close(fd)
+    media_root = os.path.join(PROJECT_ROOT, "backend", "media", f"test_{uuid4().hex}")
+    os.makedirs(media_root, exist_ok=True)
+    previous_media_root = settings.MEDIA_ROOT
+    settings.MEDIA_ROOT = media_root
 
     engine = create_engine(
         f"sqlite:///{test_db_path}",  # File-based SQLite in temp directory
@@ -216,13 +223,17 @@ def db_engine():
         cursor.close()
     
     Base.metadata.create_all(bind=engine)  # Create tables
-    yield engine  # Provide engine to tests
-    Base.metadata.drop_all(bind=engine)  # Drop tables after test
-    engine.dispose()  # Release file handles (important on Windows)
     try:
-        os.remove(test_db_path)  # Best-effort cleanup without pytest tmpdir involvement
-    except FileNotFoundError:
-        pass
+        yield engine  # Provide engine to tests
+    finally:
+        Base.metadata.drop_all(bind=engine)  # Drop tables after test
+        engine.dispose()  # Release file handles (important on Windows)
+        settings.MEDIA_ROOT = previous_media_root
+        try:
+            os.remove(test_db_path)  # Best-effort cleanup without pytest tmpdir involvement
+        except FileNotFoundError:
+            pass
+        shutil.rmtree(media_root, ignore_errors=True)
 
 
 # =============================================================================

@@ -97,6 +97,7 @@ from .pretrip import (
     PreTripOut,
 )
 from .posttrip import (
+    PostTripPhotoOut,
     PostTripOut,
     PostTripPhase1Submit,
     PostTripPhase2Submit,
@@ -186,6 +187,7 @@ __all__ = [
     "PreTripOut",
     "PostTripPhase1Submit",
     "PostTripPhase2Submit",
+    "PostTripPhotoOut",
     "PostTripOut",
 
     "DispatchCreate",
@@ -195,7 +197,4 @@ __all__ = [
     "StudentRunAssignmentOut",
     "StudentBusAbsenceCreate",
     "StudentBusAbsenceOut",
-    
-    "RunOut",
-    "RunSummaryOut",
 ]

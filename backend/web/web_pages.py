@@ -5,12 +5,13 @@
 # ===========================================================
 
 from datetime import date, datetime
+import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import and_
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from database import get_db
 from backend.models import (
@@ -32,6 +33,7 @@ from backend.utils.operator_scope import get_operator_scoped_driver_or_404
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
 from backend.utils.driver_workspace import _build_route_workspace
 from backend.utils.planning_scope import accessible_route_filter, accessible_school_filter, accessible_student_filter
+from backend.utils.posttrip_photos import get_or_create_capture_token
 from backend.utils.route_driver_assignment import get_route_driver_name
 
 
@@ -208,9 +210,16 @@ def driver_run_view(
             workspace["pretrip_date"] = None
             workspace["pretrip_is_valid"] = False
     active_posttrip = None
+    posttrip_capture_token = None
     if workspace and workspace.get("active_run"):
+        posttrip_capture_token = get_or_create_capture_token(
+            request.session,
+            run_id=workspace["active_run"]["id"],
+            create_token=lambda: secrets.token_urlsafe(32),
+        )
         active_posttrip = (
             db.query(posttrip_model.PostTripInspection)
+            .options(selectinload(posttrip_model.PostTripInspection.photos))
             .filter(posttrip_model.PostTripInspection.run_id == workspace["active_run"]["id"])
             .first()
         )
@@ -227,6 +236,7 @@ def driver_run_view(
             "active_run_id": active_run.id if active_run else None,
             "active_route_id": active_run.route_id if active_run else None,
             "active_posttrip": active_posttrip,
+            "posttrip_capture_token": posttrip_capture_token,
             "selected_run_id": run_id,
             "today": datetime.now().date().isoformat(),
         }

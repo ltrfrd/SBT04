@@ -14,7 +14,7 @@ from .associations import route_schools, StudentRunAssignment, RouteDriverAssign
 from .student_bus_absence import StudentBusAbsence, StudentBusAbsenceSource
 from .school_attendance_verification import SchoolAttendanceVerification  # New school confirmation model
 from .pretrip import PreTripInspection, PreTripDefect
-from .posttrip import PostTripInspection
+from .posttrip import PostTripInspection, PostTripPhoto
 from .dispatch_alert import DispatchAlert
 __all__ = [
     "Driver",
@@ -40,6 +40,7 @@ __all__ = [
     "PreTripInspection",
     "PreTripDefect",
     "PostTripInspection",
+    "PostTripPhoto",
     "DispatchAlert",
 ]
 

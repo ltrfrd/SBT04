@@ -5,10 +5,17 @@ from __future__ import annotations
 
 from datetime import datetime  # Datetime types used in API schemas
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator  # Pydantic schema helpers
+from fastapi import Form  # Multipart form field helpers
+from fastapi.exceptions import RequestValidationError  # Preserve FastAPI 422 behavior for multipart form parsing
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator  # Pydantic schema helpers
 
 
 VALID_EXTERIOR_STATUSES = {"clear", "minor", "major"}  # Supported exterior condition labels
+EXTERNAL_PHOTO_TYPE_MAP = {
+    "phase1_rear_to_front": "phase1_rear_photo",
+    "phase2_rear_to_front": "phase2_rear_photo",
+    "phase2_cleared_sign": "phase2_cleared_sign_photo",
+}  # Safe outward mapping from internal photo categories to driver/API-facing photo labels
 
 
 def _normalize_required_description(value: str, field_name: str) -> str:
@@ -37,6 +44,22 @@ class PostTripPhase1Submit(BaseModel):
         if not self.phase1_checked_sign_hung:
             raise ValueError("phase1_checked_sign_hung must be true")
         return self
+
+    @classmethod
+    def as_form(
+        cls,
+        phase1_no_students_remaining: bool = Form(...),
+        phase1_belongings_checked: bool = Form(...),
+        phase1_checked_sign_hung: bool = Form(...),
+    ) -> "PostTripPhase1Submit":
+        try:
+            return cls(
+                phase1_no_students_remaining=phase1_no_students_remaining,
+                phase1_belongings_checked=phase1_belongings_checked,
+                phase1_checked_sign_hung=phase1_checked_sign_hung,
+            )
+        except ValidationError as exc:
+            raise RequestValidationError(exc.errors()) from exc
 
 
 # -----------------------------------------------------------
@@ -81,6 +104,51 @@ class PostTripPhase2Submit(BaseModel):
             self.exterior_description = None
         return self
 
+    @classmethod
+    def as_form(
+        cls,
+        phase2_full_internal_recheck: bool = Form(...),
+        phase2_checked_to_cleared_switched: bool = Form(...),
+        phase2_rear_button_triggered: bool = Form(...),
+        exterior_status: str = Form(...),
+        exterior_description: str | None = Form(None),
+    ) -> "PostTripPhase2Submit":
+        try:
+            return cls(
+                phase2_full_internal_recheck=phase2_full_internal_recheck,
+                phase2_checked_to_cleared_switched=phase2_checked_to_cleared_switched,
+                phase2_rear_button_triggered=phase2_rear_button_triggered,
+                exterior_status=exterior_status,
+                exterior_description=exterior_description,
+            )
+        except ValidationError as exc:
+            raise RequestValidationError(exc.errors()) from exc
+
+
+# -----------------------------------------------------------
+# - Post-trip photo output
+# -----------------------------------------------------------
+class PostTripPhotoOut(BaseModel):
+    id: int  # Photo identifier
+    phase: str  # phase1 / phase2
+    photo_type: str  # Driver/API-facing photo category
+    file_path: str  # Relative media path
+    mime_type: str  # Stored MIME type
+    file_size_bytes: int  # Stored file size in bytes
+    source: str  # Driver capture source
+    captured_at: datetime  # Driver capture timestamp
+    captured_lat: float | None = None  # Optional capture latitude
+    captured_lng: float | None = None  # Optional capture longitude
+    created_at: datetime  # Persistence timestamp
+    updated_at: datetime  # Last update timestamp
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid", populate_by_name=True)
+
+    @field_validator("photo_type", mode="before")
+    @classmethod
+    def map_photo_type(cls, value: str) -> str:
+        return EXTERNAL_PHOTO_TYPE_MAP.get(value, value)
+
 
 # -----------------------------------------------------------
 # - Post-trip output
@@ -116,7 +184,8 @@ class PostTripOut(BaseModel):
     minutes_since_phase2_pending: float | None = None  # Minutes since phase 2 became pending
     minutes_since_driver_activity: float | None = None  # Minutes since last post-trip driver activity
     minutes_since_location_update: float | None = None  # Minutes since last GPS update
+    photos: list[PostTripPhotoOut] = Field(default_factory=list)  # Current stored post-trip photo rows
     created_at: datetime  # Record creation timestamp
     updated_at: datetime  # Record update timestamp
 
-    model_config = ConfigDict(from_attributes=True, extra="forbid")
+    model_config = ConfigDict(from_attributes=True, extra="forbid", populate_by_name=True)

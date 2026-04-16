@@ -53,3 +53,38 @@ class PostTripInspection(Base):
     bus = relationship("Bus")  # Load linked bus when needed
     route = relationship("Route")  # Load linked route when needed
     driver = relationship("Driver")  # Load linked driver when needed
+    photos = relationship(
+        "PostTripPhoto",
+        back_populates="inspection",
+        cascade="all, delete-orphan",
+        order_by="PostTripPhoto.id.asc()",
+    )  # Driver-captured photo rows for both post-trip phases
+
+
+# -----------------------------------------------------------
+# - Post-trip photos
+# -----------------------------------------------------------
+class PostTripPhoto(Base):
+    __tablename__ = "posttrip_photos"  # Persist auditable phase photos separate from checklist state
+
+    id = Column(Integer, primary_key=True, index=True)  # Unique photo identifier
+    posttrip_inspection_id = Column(Integer, ForeignKey("posttrip_inspections.id", ondelete="CASCADE"), nullable=False, index=True)  # Parent post-trip inspection
+    run_id = Column(Integer, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True)  # Linked run for audit and uniqueness
+    phase = Column(String(20), nullable=False, index=True)  # phase1 / phase2
+    photo_type = Column(String(50), nullable=False, index=True)  # Required photo category inside the phase
+    file_path = Column(String(255), nullable=False)  # Relative media path only
+    mime_type = Column(String(100), nullable=False)  # Accepted stored image MIME type
+    file_size_bytes = Column(Integer, nullable=False)  # Stored file size in bytes
+    source = Column(String(20), nullable=False, default="camera")  # camera / compatibility_camera
+    captured_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))  # Driver capture time
+    captured_lat = Column(Float, nullable=True)  # Optional capture latitude when available
+    captured_lng = Column(Float, nullable=True)  # Optional capture longitude when available
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))  # Naive UTC creation time
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))  # Naive UTC update time
+
+    __table_args__ = (
+        UniqueConstraint("run_id", "photo_type", name="uq_posttrip_photos_run_type"),  # One active photo row per run and photo type
+    )
+
+    inspection = relationship("PostTripInspection", back_populates="photos")  # Parent post-trip inspection
+    run = relationship("Run")  # Linked run when photos are reviewed later

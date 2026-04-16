@@ -32,6 +32,13 @@ class Settings:
     # -------------------------------------------------------
     ENV: str = os.getenv("ENV", "dev")  # Default environment label
 
+    # -------------------------------------------------------
+    # MEDIA STORAGE
+    # - Stable local storage area for driver-captured photos
+    # -------------------------------------------------------
+    MEDIA_ROOT: str = os.getenv("MEDIA_ROOT", os.path.join("backend", "media"))  # Local media base directory
+    MEDIA_URL_PREFIX: str = os.getenv("MEDIA_URL_PREFIX", "/media")  # Mounted media URL prefix
+
 
 # -----------------------------------------------------------
 # Singleton settings instance

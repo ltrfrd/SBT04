@@ -1,10 +1,14 @@
 import json
+from base64 import b64decode
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+import re
 
 from sqlalchemy.orm import Session
 
+from backend.config import settings
 from backend.models.dispatch_alert import DispatchAlert
-from backend.models.posttrip import PostTripInspection
+from backend.models.posttrip import PostTripInspection, PostTripPhoto
 
 from tests.conftest import ensure_prepared_run_student
 
@@ -90,81 +94,177 @@ def _create_started_run_ready_for_posttrip(client, *, route_number: str = "POSTT
     }
 
 
-def _submit_phase1(client, run_id: int):
-    response = client.post(
-        f"/runs/{run_id}/posttrip/phase1",
-        json={
-            "phase1_no_students_remaining": True,
-            "phase1_belongings_checked": True,
-            "phase1_checked_sign_hung": True,
-        },
+def _make_test_image(filename: str, color: tuple[int, int, int]) -> tuple[str, bytes, str]:
+    del color
+    jpeg_bytes = b64decode(
+        "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBxAQEBUQEBAVFRUVFRUVFRUVFRUVFRUVFRUWFhUV"
+        "FRUYHSggGBolHRUVITEhJSkrLi4uFx8zODMsNygtLisBCgoKDg0OGxAQGi0lHyUtLS0tLS0tLS0tLS0t"
+        "LS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLf/AABEIAAEAAQMBIgACEQEDEQH/xAAVAAEBAAAA"
+        "AAAAAAAAAAAAAAABAv/EABQBAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhADEAAAAdAf/8QAFBABAAAA"
+        "AAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAEP/aAAgBAwEBPwF//8QA"
+        "FBEBAAAAAAAAAAAAAAAAAAAAEP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAEP/aAAgBAQAG"
+        "PwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAEP/aAAgBAQABPyF//9k="
     )
-    assert response.status_code == 200
+    return filename, jpeg_bytes, "image/jpeg"
+
+
+def _get_posttrip_capture_token_for_run(client, run_id: int) -> str:
+    run_response = client.get(f"/runs/{run_id}")
+    assert run_response.status_code == 200
+    run_body = run_response.json()
+
+    workspace_response = client.get(
+        f"/driver_run/{run_body['driver_id']}?route_id={run_body['route_id']}"
+    )
+    assert workspace_response.status_code == 200
+
+    match = re.search(r'data-capture-token="([^"]+)"', workspace_response.text)
+    assert match is not None
+    return match.group(1)
+
+
+def _submit_phase1(client, run_id: int, *, include_image: bool = True, capture_token: str | None = None):
+    data = {
+        "phase1_no_students_remaining": "true",
+        "phase1_belongings_checked": "true",
+        "phase1_checked_sign_hung": "true",
+        "capture_token": capture_token or _get_posttrip_capture_token_for_run(client, run_id),
+    }
+    files = {}
+    if include_image:
+        files["phase1_rear_to_front_image"] = _make_test_image("phase1.jpg", (40, 90, 150))
+    response = client.post(f"/runs/{run_id}/posttrip/phase1", data=data, files=files or None)
     return response
 
 
-def _submit_phase2(client, run_id: int, *, exterior_status: str = "clear", exterior_description: str | None = None):
-    payload = {
-        "phase2_full_internal_recheck": True,
-        "phase2_checked_to_cleared_switched": True,
-        "phase2_rear_button_triggered": True,
+def _submit_phase2(
+    client,
+    run_id: int,
+    *,
+    include_rear_image: bool = True,
+    include_cleared_sign_image: bool = True,
+    exterior_status: str = "clear",
+    exterior_description: str | None = None,
+    capture_token: str | None = None,
+):
+    data = {
+        "phase2_full_internal_recheck": "true",
+        "phase2_checked_to_cleared_switched": "true",
+        "phase2_rear_button_triggered": "true",
         "exterior_status": exterior_status,
+        "capture_token": capture_token or _get_posttrip_capture_token_for_run(client, run_id),
     }
     if exterior_description is not None:
-        payload["exterior_description"] = exterior_description
+        data["exterior_description"] = exterior_description
 
-    response = client.post(f"/runs/{run_id}/posttrip/phase2", json=payload)
-    assert response.status_code == 200
+    files = {}
+    if include_rear_image:
+        files["phase2_rear_to_front_image"] = _make_test_image("phase2-rear.jpg", (10, 120, 80))
+    if include_cleared_sign_image:
+        files["phase2_cleared_sign_image"] = _make_test_image("phase2-cleared.jpg", (220, 220, 40))
+
+    response = client.post(f"/runs/{run_id}/posttrip/phase2", data=data, files=files or None)
     return response
 
 
-def test_posttrip_endpoints_are_reachable_and_phase1_updates_single_record(client):
-    context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-REACH")
+def test_posttrip_phase1_fails_without_required_rear_photo(client):
+    context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-P1-NO-PHOTO")
     run_id = context["run"]["id"]
 
-    first = _submit_phase1(client, run_id).json()
-    second = _submit_phase1(client, run_id).json()
+    response = _submit_phase1(client, run_id, include_image=False)
 
-    assert first["id"] == second["id"]
-    assert second["run_id"] == run_id
-    assert second["phase1_completed"] is True
-    assert second["phase2_completed"] is False
-    assert second["phase2_status"] == "pending"
-    assert second["phase2_pending_since"] is not None
-
-    fetched = client.get(f"/runs/{run_id}/posttrip")
-    assert fetched.status_code == 200
-    assert fetched.json()["phase2_decision_status"] in {
-        "pending_recent_activity",
-        "pending_no_recent_location",
-        "pending_no_recent_driver_activity",
-        "pending_low_confidence_inactive",
-    }
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Required photo missing: rear of bus photo"
 
 
-def test_posttrip_phase2_requires_description_for_non_clear_status(client):
-    context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-VALIDATE")
+def test_posttrip_phase1_succeeds_with_required_rear_photo(client):
+    context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-P1-WITH-PHOTO")
     run_id = context["run"]["id"]
-    _submit_phase1(client, run_id)
+
+    response = _submit_phase1(client, run_id)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["phase1_completed"] is True
+    assert body["phase2_completed"] is False
+    assert body["phase2_status"] == "pending"
+    assert body["phase2_pending_since"] is not None
+    assert len(body["photos"]) == 1
+    assert body["photos"][0]["photo_type"] == "phase1_rear_photo"
+    assert body["photos"][0]["source"] == "camera"
+    assert body["photos"][0]["file_path"].startswith("posttrip/run_")
+
+
+def test_posttrip_backend_rejects_phase1_without_driver_workspace_capture_token(client):
+    context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-P1-NO-TOKEN")
+    run_id = context["run"]["id"]
 
     response = client.post(
-        f"/runs/{run_id}/posttrip/phase2",
-        json={
-            "phase2_full_internal_recheck": True,
-            "phase2_checked_to_cleared_switched": True,
-            "phase2_rear_button_triggered": True,
-            "exterior_status": "major",
+        f"/runs/{run_id}/posttrip/phase1",
+        data={
+            "phase1_no_students_remaining": "true",
+            "phase1_belongings_checked": "true",
+            "phase1_checked_sign_hung": "true",
+            "capture_token": "invalid-token",
         },
+        files={"phase1_rear_to_front_image": _make_test_image("phase1.jpg", (40, 90, 150))},
     )
 
-    assert response.status_code == 422
-    assert "exterior_description is required" in response.text
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Invalid photo submission"
+
+
+def test_posttrip_phase2_fails_without_phase1_complete(client):
+    context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-P2-NO-P1")
+    run_id = context["run"]["id"]
+
+    response = _submit_phase2(client, run_id)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Post-Trip Inspection Phase 1 must be completed first"
+
+
+def test_posttrip_phase2_fails_if_any_required_image_is_missing(client):
+    context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-P2-MISSING-ONE")
+    run_id = context["run"]["id"]
+    phase1 = _submit_phase1(client, run_id)
+    assert phase1.status_code == 200
+
+    missing_rear = _submit_phase2(client, run_id, include_rear_image=False)
+    assert missing_rear.status_code == 400
+    missing_rear_body = missing_rear.json()
+    assert missing_rear_body["detail"] == "Required photo missing: final rear of bus photo"
+
+    missing_sign = _submit_phase2(client, run_id, include_cleared_sign_image=False)
+    assert missing_sign.status_code == 400
+    assert missing_sign.json()["detail"] == "Required photo missing: cleared sign photo"
+
+
+def test_posttrip_phase2_succeeds_with_both_required_images(client):
+    context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-P2-SUCCESS")
+    run_id = context["run"]["id"]
+    phase1 = _submit_phase1(client, run_id)
+    assert phase1.status_code == 200
+
+    response = _submit_phase2(client, run_id)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["phase2_completed"] is True
+    assert body["phase2_status"] == "completed"
+    photo_types = {item["photo_type"] for item in body["photos"]}
+    assert photo_types == {
+        "phase1_rear_photo",
+        "phase2_rear_photo",
+        "phase2_cleared_sign_photo",
+    }
 
 
 def test_run_end_is_blocked_without_phase2_but_complete_endpoint_remains_legacy_compatible(client):
     context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-END-BLOCK")
     run_id = context["run"]["id"]
-    _submit_phase1(client, run_id)
+    phase1 = _submit_phase1(client, run_id)
+    assert phase1.status_code == 200
 
     end_response = client.post(f"/runs/end?run_id={run_id}")
     assert end_response.status_code == 400
@@ -183,11 +283,10 @@ def test_run_end_is_blocked_without_phase2_but_complete_endpoint_remains_legacy_
 def test_run_end_is_allowed_after_phase2_completion(client):
     context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-END-ALLOW")
     run_id = context["run"]["id"]
-    _submit_phase1(client, run_id)
-    phase2 = _submit_phase2(client, run_id).json()
-
-    assert phase2["phase2_completed"] is True
-    assert phase2["phase2_status"] == "completed"
+    phase1 = _submit_phase1(client, run_id)
+    assert phase1.status_code == 200
+    phase2 = _submit_phase2(client, run_id)
+    assert phase2.status_code == 200
 
     end_response = client.post(f"/runs/end?run_id={run_id}")
     assert end_response.status_code == 200
@@ -195,16 +294,107 @@ def test_run_end_is_allowed_after_phase2_completion(client):
     assert end_response.json()["end_time"] is not None
 
 
+def test_driver_cannot_replace_photo_after_phase_completion(client, db_engine):
+    context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-P1-LOCK")
+    run_id = context["run"]["id"]
+    response = _submit_phase1(client, run_id)
+    assert response.status_code == 200
+
+    locked_response = _submit_phase1(client, run_id)
+    assert locked_response.status_code == 400
+    assert locked_response.json()["detail"] == "Post-Trip Phase 1 is already completed and photo replacement is locked"
+
+    with Session(db_engine) as db:
+        photo_rows = db.query(PostTripPhoto).filter(PostTripPhoto.run_id == run_id).all()
+        assert len(photo_rows) == 1
+
+
+def test_pre_phase_retake_replacement_updates_existing_photo_cleanly(client, db_engine):
+    context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-P1-RETAKE")
+    run_id = context["run"]["id"]
+
+    with Session(db_engine) as db:
+        inspection = PostTripInspection(
+            run_id=run_id,
+            bus_id=context["bus"]["id"],
+            route_id=context["route"]["id"],
+            driver_id=context["driver"]["id"],
+            phase1_completed=False,
+            phase2_completed=False,
+            phase2_status="not_started",
+        )
+        db.add(inspection)
+        db.flush()
+
+        old_relative_path = "posttrip/run_{}/phase1/phase1_rear_to_front_existing.jpg".format(run_id)
+        old_absolute_path = Path(settings.MEDIA_ROOT) / old_relative_path
+        old_absolute_path.parent.mkdir(parents=True, exist_ok=True)
+        old_absolute_path.write_bytes(_make_test_image("existing.jpg", (200, 10, 10))[1])
+
+        photo = PostTripPhoto(
+            posttrip_inspection_id=inspection.id,
+            run_id=run_id,
+            phase="phase1",
+            photo_type="phase1_rear_to_front",
+            file_path=old_relative_path,
+            mime_type="image/jpeg",
+            file_size_bytes=old_absolute_path.stat().st_size,
+            source="camera",
+            captured_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        )
+        db.add(photo)
+        db.commit()
+        photo_id = photo.id
+
+    response = _submit_phase1(client, run_id)
+    assert response.status_code == 200
+
+    with Session(db_engine) as db:
+        photo_rows = db.query(PostTripPhoto).filter(PostTripPhoto.run_id == run_id).all()
+        assert len(photo_rows) == 1
+        assert photo_rows[0].id == photo_id
+        assert photo_rows[0].file_path != old_relative_path
+        assert not (Path(settings.MEDIA_ROOT) / old_relative_path).exists()
+        assert (Path(settings.MEDIA_ROOT) / photo_rows[0].file_path).exists()
+
+
+def test_posttrip_output_includes_photo_metadata(client):
+    context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-OUTPUT")
+    run_id = context["run"]["id"]
+    assert _submit_phase1(client, run_id).status_code == 200
+    assert _submit_phase2(client, run_id).status_code == 200
+
+    response = client.get(f"/runs/{run_id}/posttrip")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "photos" in body
+    assert len(body["photos"]) == 3
+    first = body["photos"][0]
+    assert {"id", "phase", "photo_type", "file_path", "mime_type", "file_size_bytes", "source", "captured_at"} <= set(first.keys())
+
+
+def test_posttrip_phase2_requires_description_for_non_clear_status(client):
+    context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-VALIDATE")
+    run_id = context["run"]["id"]
+    assert _submit_phase1(client, run_id).status_code == 200
+
+    response = _submit_phase2(client, run_id, exterior_status="major", exterior_description=None)
+
+    assert response.status_code == 422
+    assert "exterior_description is required" in response.text
+
+
 def test_posttrip_major_defect_alert_is_created_once_and_is_per_run(client, db_engine):
     context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-MAJOR")
     run_id = context["run"]["id"]
-    _submit_phase1(client, run_id)
+    assert _submit_phase1(client, run_id).status_code == 200
 
     first = _submit_phase2(client, run_id, exterior_status="major", exterior_description="Damaged body panel")
     second = _submit_phase2(client, run_id, exterior_status="major", exterior_description="Damaged body panel")
 
     assert first.status_code == 200
-    assert second.status_code == 200
+    assert second.status_code == 400
 
     with Session(db_engine) as db:
         alerts = (
@@ -264,7 +454,7 @@ def test_posttrip_neglect_alert_is_only_triggered_by_get_flow(client, db_engine)
 def test_websocket_gps_persists_posttrip_activity_fields_when_posttrip_exists(client, db_engine):
     context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-WS")
     run_id = context["run"]["id"]
-    _submit_phase1(client, run_id)
+    assert _submit_phase1(client, run_id).status_code == 200
 
     with client._wrapped_client.websocket_connect(f"/ws/gps/{run_id}") as websocket:
         websocket.send_text(json.dumps({"lat": 39.7392, "lng": -104.9903}))

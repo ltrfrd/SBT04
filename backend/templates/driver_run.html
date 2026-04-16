@@ -47,6 +47,11 @@
     .posttrip-message { border: 1px solid #e3e8ee; border-radius: 12px; background: #f8fafc; }
     .posttrip-phase { border: 1px solid #e7ecf2; border-radius: 14px; background: #fbfcfd; }
     .posttrip-error { border: 1px solid #f5c2c7; background: #fff5f5; color: #842029; border-radius: 12px; }
+    .camera-capture-card { border: 1px solid #dfe7f1; border-radius: 14px; background: #fff; }
+    .camera-video,
+    .camera-preview-image { width: 100%; border-radius: 12px; background: #101820; aspect-ratio: 4 / 3; object-fit: cover; }
+    .camera-placeholder { border: 1px dashed #cbd5e1; border-radius: 12px; background: #f8fafc; min-height: 180px; display: flex; align-items: center; justify-content: center; text-align: center; color: #6c757d; padding: 1rem; }
+    .camera-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
     #map { height: 320px; border-radius: 16px; }
     .toast-stack { position: fixed; bottom: 1rem; right: 1rem; z-index: 9999; min-width: 320px; }
   </style>
@@ -315,6 +320,8 @@
         data-posttrip-get-endpoint="/runs/{{ workspace.active_run.id }}/posttrip"
         data-phase1-endpoint="/runs/{{ workspace.active_run.id }}/posttrip/phase1"
         data-phase2-endpoint="/runs/{{ workspace.active_run.id }}/posttrip/phase2"
+        data-capture-token="{{ posttrip_capture_token or '' }}"
+        data-media-prefix="/media"
       >
         <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-3">
           <div>
@@ -347,7 +354,7 @@
 
         <div class="posttrip-phase p-3 mb-3" id="postTripPhase1Section">
           <div class="fw-semibold mb-2">Phase 1</div>
-          <div class="text-muted small mb-3">Confirm the bus is clear before moving into the final post-trip checks.</div>
+          <div class="text-muted small mb-3">Confirm the bus is clear before moving into the final post-trip checks. Photo required: one rear-to-front bus-empty photo from the very back of the bus facing the front.</div>
           <div class="form-check mb-2">
             <input class="form-check-input" type="checkbox" id="postTripPhase1NoStudents" {% if active_posttrip and active_posttrip.phase1_no_students_remaining %}checked{% endif %}>
             <label class="form-check-label" for="postTripPhase1NoStudents">No students remaining</label>
@@ -360,12 +367,33 @@
             <input class="form-check-input" type="checkbox" id="postTripPhase1Sign" {% if active_posttrip and active_posttrip.phase1_checked_sign_hung %}checked{% endif %}>
             <label class="form-check-label" for="postTripPhase1Sign">"Checked" sign placed</label>
           </div>
+          <div
+            class="camera-capture-card p-3 mb-3"
+            data-camera-slot="phase1_rear_to_front"
+            data-camera-phase="phase1"
+            data-camera-field-name="phase1_rear_to_front_image"
+            data-camera-photo-type="phase1_rear_photo"
+          >
+            <div class="fw-semibold mb-1">Rear of bus photo (required)</div>
+            <div class="small text-muted mb-3">Stand at the very back of the bus and capture the full view facing the front. Gallery selection is not part of the main workflow.</div>
+            <video class="camera-video d-none mb-3" playsinline muted></video>
+            <canvas class="d-none"></canvas>
+            <img class="camera-preview-image d-none mb-3" alt="Phase 1 rear-of-bus photo preview">
+            <div class="camera-placeholder mb-3">No Phase 1 rear-to-front image captured yet.</div>
+            <div class="camera-actions mb-3">
+              <button type="button" class="btn btn-outline-primary btn-sm" data-camera-action="start">Open Camera</button>
+              <button type="button" class="btn btn-primary btn-sm d-none" data-camera-action="capture">Capture Photo</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm d-none" data-camera-action="retake">Retake</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm d-none" data-camera-action="stop">Stop Camera</button>
+            </div>
+            <div class="small text-muted" data-camera-status>Camera not started.</div>
+          </div>
           <button type="button" class="btn btn-primary btn-sm" id="postTripPhase1Button">Complete Phase 1</button>
         </div>
 
         <div class="posttrip-phase p-3" id="postTripPhase2Section">
           <div class="fw-semibold mb-2">Phase 2</div>
-          <div class="text-muted small mb-3">Final interior and exterior confirmation is required before End Run is unlocked.</div>
+          <div class="text-muted small mb-3">Final interior and exterior confirmation is required before End Run is unlocked. Photos required: one final rear-to-front photo and one close photo showing the sign flipped to CLEARED.</div>
           <div class="form-check mb-2">
             <input class="form-check-input" type="checkbox" id="postTripPhase2Recheck" {% if active_posttrip and active_posttrip.phase2_full_internal_recheck %}checked{% endif %}>
             <label class="form-check-label" for="postTripPhase2Recheck">Full internal re-check completed</label>
@@ -377,6 +405,50 @@
           <div class="form-check mb-3">
             <input class="form-check-input" type="checkbox" id="postTripPhase2RearButton" {% if active_posttrip and active_posttrip.phase2_rear_button_triggered %}checked{% endif %}>
             <label class="form-check-label" for="postTripPhase2RearButton">Rear button triggered</label>
+          </div>
+
+          <div
+            class="camera-capture-card p-3 mb-3"
+            data-camera-slot="phase2_rear_to_front"
+            data-camera-phase="phase2"
+            data-camera-field-name="phase2_rear_to_front_image"
+            data-camera-photo-type="phase2_rear_photo"
+          >
+            <div class="fw-semibold mb-1">Final rear of bus photo (required)</div>
+            <div class="small text-muted mb-3">Stand at the very back of the bus and capture the final re-check view facing the front.</div>
+            <video class="camera-video d-none mb-3" playsinline muted></video>
+            <canvas class="d-none"></canvas>
+            <img class="camera-preview-image d-none mb-3" alt="Phase 2 rear-of-bus photo preview">
+            <div class="camera-placeholder mb-3">No Phase 2 rear-to-front image captured yet.</div>
+            <div class="camera-actions mb-3">
+              <button type="button" class="btn btn-outline-primary btn-sm" data-camera-action="start">Open Camera</button>
+              <button type="button" class="btn btn-primary btn-sm d-none" data-camera-action="capture">Capture Photo</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm d-none" data-camera-action="retake">Retake</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm d-none" data-camera-action="stop">Stop Camera</button>
+            </div>
+            <div class="small text-muted" data-camera-status>Camera not started.</div>
+          </div>
+
+          <div
+            class="camera-capture-card p-3 mb-3"
+            data-camera-slot="phase2_cleared_sign"
+            data-camera-phase="phase2"
+            data-camera-field-name="phase2_cleared_sign_image"
+            data-camera-photo-type="phase2_cleared_sign_photo"
+          >
+            <div class="fw-semibold mb-1">Cleared sign photo (required)</div>
+            <div class="small text-muted mb-3">After flipping the sign to CLEARED, take a close photo that clearly shows the CLEARED state.</div>
+            <video class="camera-video d-none mb-3" playsinline muted></video>
+            <canvas class="d-none"></canvas>
+            <img class="camera-preview-image d-none mb-3" alt="Phase 2 cleared-sign photo preview">
+            <div class="camera-placeholder mb-3">No CLEARED sign image captured yet.</div>
+            <div class="camera-actions mb-3">
+              <button type="button" class="btn btn-outline-primary btn-sm" data-camera-action="start">Open Camera</button>
+              <button type="button" class="btn btn-primary btn-sm d-none" data-camera-action="capture">Capture Photo</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm d-none" data-camera-action="retake">Retake</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm d-none" data-camera-action="stop">Stop Camera</button>
+            </div>
+            <div class="small text-muted" data-camera-status>Camera not started.</div>
           </div>
 
           <label class="form-label" for="postTripExteriorStatus">Exterior status</label>
@@ -531,6 +603,281 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script>
     const activeRunId = Number("{{ workspace.active_run.id if workspace and workspace.active_run else '' }}") || null;
+    const postTripCameraSlots = {};
+    const postTripEvidenceRequirements = {
+      phase1: ["phase1_rear_to_front"],
+      phase2: ["phase2_rear_to_front", "phase2_cleared_sign"]
+    };
+
+    function buildPhotoMap(inspection) {
+      const photoRows = inspection && Array.isArray(inspection.photos) ? inspection.photos : [];
+      return photoRows.reduce((map, photo) => {
+        map[photo.photo_type] = photo;
+        return map;
+      }, {});
+    }
+
+    function revokeSlotObjectUrl(slot) {
+      if (slot && slot.localObjectUrl) {
+        URL.revokeObjectURL(slot.localObjectUrl);
+        slot.localObjectUrl = null;
+      }
+    }
+
+    function stopCameraStream(slot) {
+      if (!slot || !slot.stream) {
+        return;
+      }
+
+      slot.stream.getTracks().forEach((track) => track.stop());
+      slot.stream = null;
+      slot.video.srcObject = null;
+    }
+
+    function setCameraSlotStatus(slot, message) {
+      if (slot && slot.status) {
+        slot.status.textContent = message;
+      }
+    }
+
+    function renderCameraSlot(slot) {
+      if (!slot) {
+        return;
+      }
+
+      const hasPreview = Boolean(slot.localObjectUrl || slot.persistedUrl);
+      const previewUrl = slot.localObjectUrl || slot.persistedUrl || "";
+      const showVideo = Boolean(slot.stream) && !slot.locked;
+      const canCapture = slot.canCapture && !slot.locked;
+      const hasCapturedBlob = Boolean(slot.blob);
+
+      slot.video.classList.toggle("d-none", !showVideo);
+      slot.captureButton.classList.toggle("d-none", !showVideo);
+      slot.stopButton.classList.toggle("d-none", !showVideo);
+      slot.preview.classList.toggle("d-none", !hasPreview);
+      slot.placeholder.classList.toggle("d-none", showVideo || hasPreview);
+      slot.retakeButton.classList.toggle("d-none", !hasPreview);
+
+      if (hasPreview) {
+        slot.preview.src = previewUrl;
+      } else {
+        slot.preview.removeAttribute("src");
+      }
+
+      slot.startButton.disabled = !canCapture;
+      slot.captureButton.disabled = !canCapture;
+      slot.retakeButton.disabled = !canCapture;
+      slot.stopButton.disabled = !canCapture;
+
+      if (slot.locked) {
+        setCameraSlotStatus(slot, "Photo locked after phase completion.");
+      } else if (showVideo) {
+        setCameraSlotStatus(slot, "Camera live. Take the required photo when it is clearly visible.");
+      } else if (hasCapturedBlob) {
+        setCameraSlotStatus(slot, "Photo captured. Retake if needed before submitting this phase.");
+      } else if (hasPreview) {
+        setCameraSlotStatus(slot, "Saved photo loaded.");
+      } else if (canCapture) {
+        setCameraSlotStatus(slot, "Camera not started.");
+      } else {
+        setCameraSlotStatus(slot, "This photo unlocks when the phase becomes available.");
+      }
+    }
+
+    async function setCameraSlotBlob(slot, blob) {
+      if (!slot || !blob) {
+        return;
+      }
+
+      stopCameraStream(slot);
+      revokeSlotObjectUrl(slot);
+      slot.blob = blob;
+      slot.localObjectUrl = URL.createObjectURL(blob);
+      slot.persistedUrl = "";
+      renderCameraSlot(slot);
+      setCameraSlotStatus(slot, "Photo captured. Retake if needed before submitting this phase.");
+    }
+
+    async function startCameraForSlot(slot) {
+      if (!slot || slot.locked || !slot.canCapture) {
+        return;
+      }
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setCameraSlotStatus(slot, "Live camera access is not available in this browser. A supported camera-enabled browser is required.");
+        return;
+      }
+
+      stopCameraStream(slot);
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: "environment" }
+          },
+          audio: false
+        });
+        slot.stream = stream;
+        slot.video.srcObject = stream;
+        await slot.video.play();
+        renderCameraSlot(slot);
+      } catch (error) {
+        setCameraSlotStatus(slot, "Camera permission was denied or the camera is unavailable. Live camera capture is required for this photo.");
+      }
+    }
+
+    function captureCameraFrame(slot) {
+      if (!slot || !slot.stream || slot.locked || !slot.canCapture) {
+        return;
+      }
+
+      const videoWidth = slot.video.videoWidth || 1280;
+      const videoHeight = slot.video.videoHeight || 960;
+      slot.canvas.width = videoWidth;
+      slot.canvas.height = videoHeight;
+      slot.canvas.getContext("2d").drawImage(slot.video, 0, 0, videoWidth, videoHeight);
+
+      slot.canvas.toBlob(async (blob) => {
+        if (!blob) {
+          setCameraSlotStatus(slot, "Unable to capture a photo. Try again.");
+          return;
+        }
+        await setCameraSlotBlob(slot, blob);
+      }, "image/jpeg", 0.92);
+    }
+
+    function clearCameraDraftForSlot(slot) {
+      if (!slot) {
+        return;
+      }
+
+      stopCameraStream(slot);
+      revokeSlotObjectUrl(slot);
+      slot.blob = null;
+      slot.persistedUrl = "";
+      renderCameraSlot(slot);
+    }
+
+    function clearPhaseCameraDrafts(phase) {
+      Object.values(postTripCameraSlots).forEach((slot) => {
+        if (slot.phase === phase) {
+          clearCameraDraftForSlot(slot);
+        }
+      });
+    }
+
+    function syncCameraSlotsForPhase(phase, photoMap, options) {
+      Object.values(postTripCameraSlots).forEach((slot) => {
+        if (slot.phase !== phase) {
+          return;
+        }
+
+        const photo = photoMap[slot.photoType] || null;
+        slot.locked = Boolean(options.locked);
+        slot.canCapture = Boolean(options.canCapture);
+
+        if (slot.locked || !slot.blob) {
+          revokeSlotObjectUrl(slot);
+          slot.blob = null;
+          slot.localObjectUrl = null;
+          slot.persistedUrl = photo ? `${options.mediaPrefix}/${photo.file_path}` : "";
+        }
+
+        if (!slot.canCapture || slot.locked) {
+          stopCameraStream(slot);
+        }
+
+        renderCameraSlot(slot);
+      });
+    }
+
+    function initializePostTripCameraSlots() {
+      document.querySelectorAll("[data-camera-slot]").forEach((element) => {
+        const slotName = element.dataset.cameraSlot;
+        if (postTripCameraSlots[slotName]) {
+          return;
+        }
+        const slot = {
+          element,
+          phase: element.dataset.cameraPhase,
+          fieldName: element.dataset.cameraFieldName,
+          photoType: element.dataset.cameraPhotoType,
+          video: element.querySelector(".camera-video"),
+          canvas: element.querySelector("canvas"),
+          preview: element.querySelector(".camera-preview-image"),
+          placeholder: element.querySelector(".camera-placeholder"),
+          startButton: element.querySelector('[data-camera-action="start"]'),
+          captureButton: element.querySelector('[data-camera-action="capture"]'),
+          retakeButton: element.querySelector('[data-camera-action="retake"]'),
+          stopButton: element.querySelector('[data-camera-action="stop"]'),
+          status: element.querySelector("[data-camera-status]"),
+          stream: null,
+          blob: null,
+          localObjectUrl: null,
+          persistedUrl: "",
+          canCapture: false,
+          locked: false
+        };
+
+        slot.startButton.addEventListener("click", async () => {
+          await startCameraForSlot(slot);
+        });
+        slot.captureButton.addEventListener("click", () => {
+          captureCameraFrame(slot);
+        });
+        slot.retakeButton.addEventListener("click", async () => {
+          if (!slot.canCapture || slot.locked) {
+            return;
+          }
+          slot.blob = null;
+          slot.persistedUrl = "";
+          await startCameraForSlot(slot);
+        });
+        slot.stopButton.addEventListener("click", () => {
+          stopCameraStream(slot);
+          renderCameraSlot(slot);
+        });
+
+        postTripCameraSlots[slotName] = slot;
+        renderCameraSlot(slot);
+      });
+    }
+
+    function buildPostTripFormData(phase) {
+      const formData = new FormData();
+      const postTripPanel = document.getElementById("postTripPanel");
+      const captureToken = postTripPanel ? postTripPanel.dataset.captureToken : "";
+      if (!captureToken) {
+        throw new Error("Driver workspace capture token is missing. Refresh the page and try again.");
+      }
+      formData.append("capture_token", captureToken);
+
+      if (phase === "phase1") {
+        formData.append("phase1_no_students_remaining", String(document.getElementById("postTripPhase1NoStudents").checked));
+        formData.append("phase1_belongings_checked", String(document.getElementById("postTripPhase1Belongings").checked));
+        formData.append("phase1_checked_sign_hung", String(document.getElementById("postTripPhase1Sign").checked));
+      } else {
+        formData.append("phase2_full_internal_recheck", String(document.getElementById("postTripPhase2Recheck").checked));
+        formData.append("phase2_checked_to_cleared_switched", String(document.getElementById("postTripPhase2Sign").checked));
+        formData.append("phase2_rear_button_triggered", String(document.getElementById("postTripPhase2RearButton").checked));
+        formData.append("exterior_status", document.getElementById("postTripExteriorStatus").value);
+        const exteriorDescription = document.getElementById("postTripExteriorDescription").value.trim();
+        if (exteriorDescription) {
+          formData.append("exterior_description", exteriorDescription);
+        }
+      }
+
+      const requiredSlots = postTripEvidenceRequirements[phase] || [];
+      for (const slotName of requiredSlots) {
+        const slot = postTripCameraSlots[slotName];
+        if (!slot || !slot.blob) {
+          throw new Error("Required photo missing.");
+        }
+        formData.append(slot.fieldName, slot.blob, `${slot.photoType}.jpg`);
+      }
+
+      return formData;
+    }
 
     function showAlert(message, tone = "primary") {
       const container = document.getElementById("alert-container");
@@ -946,10 +1293,14 @@
       }
 
       const hasInspection = Boolean(inspection);
+      const photoMap = buildPhotoMap(inspection);
+      const mediaPrefix = (postTripPanel.dataset.mediaPrefix || "/media").replace(/\/$/, "");
       setPostTripVisibility(isReadyForPostTrip || hasInspection);
       postTripPanel.dataset.posttripReady = isReadyForPostTrip ? "true" : "false";
 
       if (!isReadyForPostTrip && !hasInspection) {
+        syncCameraSlotsForPhase("phase1", photoMap, { canCapture: false, locked: false, mediaPrefix });
+        syncCameraSlotsForPhase("phase2", photoMap, { canCapture: false, locked: false, mediaPrefix });
         setEndRunAvailability(false, "End Run stays locked until all assigned rider actions are finished and Post-Trip Phase 2 is complete.");
         showInlineError("");
         return;
@@ -973,6 +1324,16 @@
       });
       phase2Inputs.forEach((input) => {
         input.disabled = phase2Completed || !phase1Completed;
+      });
+      syncCameraSlotsForPhase("phase1", photoMap, {
+        canCapture: !phase1Completed && isReadyForPostTrip,
+        locked: phase1Completed,
+        mediaPrefix
+      });
+      syncCameraSlotsForPhase("phase2", photoMap, {
+        canCapture: !phase2Completed && phase1Completed,
+        locked: phase2Completed,
+        mediaPrefix
       });
 
       if (phase1Button) {
@@ -1009,11 +1370,11 @@
 
       if (statusMessage) {
         if (phase2Completed) {
-          statusMessage.textContent = "Post-Trip completed.";
+          statusMessage.textContent = "Post-Trip completed with required photos saved.";
         } else if (phase1Completed) {
-          statusMessage.textContent = "Phase 1 completed. Phase 2 is still required before End Run becomes available.";
+          statusMessage.textContent = "Phase 1 completed with the rear-of-bus photo. Phase 2 and both final photos are still required before End Run becomes available.";
         } else {
-          statusMessage.textContent = "Phase 1 pending.";
+          statusMessage.textContent = "Phase 1 pending. Take the rear-of-bus photo before submitting.";
         }
       }
 
@@ -1227,14 +1588,10 @@
         setButtonBusy(postTripPhase1Button, true, "Saving...");
 
         try {
+          const formData = buildPostTripFormData("phase1");
           const response = await fetch(postTripPanel.dataset.phase1Endpoint, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              phase1_no_students_remaining: document.getElementById("postTripPhase1NoStudents").checked,
-              phase1_belongings_checked: document.getElementById("postTripPhase1Belongings").checked,
-              phase1_checked_sign_hung: document.getElementById("postTripPhase1Sign").checked
-            })
+            body: formData
           });
 
           const body = await readJsonResponse(response);
@@ -1242,6 +1599,7 @@
             throw new Error(getErrorMessage(body, "Unable to complete Post-Trip Phase 1."));
           }
 
+          clearPhaseCameraDrafts("phase1");
           await refreshPostTripState();
           showAlert("Post-Trip Phase 1 completed.", "success");
         } catch (error) {
@@ -1266,22 +1624,10 @@
         setButtonBusy(postTripPhase2Button, true, "Saving...");
 
         try {
-          const payload = {
-            phase2_full_internal_recheck: document.getElementById("postTripPhase2Recheck").checked,
-            phase2_checked_to_cleared_switched: document.getElementById("postTripPhase2Sign").checked,
-            phase2_rear_button_triggered: document.getElementById("postTripPhase2RearButton").checked,
-            exterior_status: document.getElementById("postTripExteriorStatus").value
-          };
-
-          const exteriorDescription = document.getElementById("postTripExteriorDescription").value.trim();
-          if (exteriorDescription) {
-            payload.exterior_description = exteriorDescription;
-          }
-
+          const formData = buildPostTripFormData("phase2");
           const response = await fetch(postTripPanel.dataset.phase2Endpoint, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
+            body: formData
           });
 
           const body = await readJsonResponse(response);
@@ -1289,6 +1635,7 @@
             throw new Error(getErrorMessage(body, "Unable to complete Post-Trip Phase 2."));
           }
 
+          clearPhaseCameraDrafts("phase2");
           await refreshPostTripState();
           showAlert("Post-Trip Phase 2 completed.", "success");
         } catch (error) {
@@ -1334,6 +1681,7 @@
 
       document.addEventListener("DOMContentLoaded", () => {
         initMap();
+        initializePostTripCameraSlots();
         refreshPostTripState();
         setInterval(refreshPostTripState, 10000);
 
@@ -1366,7 +1714,15 @@
     }
 
     document.addEventListener("DOMContentLoaded", () => {
+      initializePostTripCameraSlots();
       refreshPreTripState();
+    });
+
+    window.addEventListener("beforeunload", () => {
+      Object.values(postTripCameraSlots).forEach((slot) => {
+        stopCameraStream(slot);
+        revokeSlotObjectUrl(slot);
+      });
     });
   </script>
 </body>

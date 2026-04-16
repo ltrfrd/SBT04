@@ -30,6 +30,11 @@ from backend.schemas.route import (
 )
 from backend.schemas.run import RouteRunCreate, RunUpdate
 from backend.schemas.stop import RunStopCreate, StopOut, StopUpdate
+from backend.routers.run_helpers import (
+    _create_planned_run,
+    _serialize_run,
+    _assert_unique_route_run_type,
+)
 from backend.utils.planning_scope import (
     accessible_route_filter,
     get_route_run_or_404,
@@ -549,8 +554,6 @@ def create_route_run(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    from backend.routers import run as run_router  # Local import avoids circular import at module load time
-
     route = get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
@@ -559,7 +562,7 @@ def create_route_run(
         options=[joinedload(Route.driver_assignments).joinedload(RouteDriverAssignment.driver)],
     )
 
-    new_run = run_router._create_planned_run(                   # Reuse shared run creation rules
+    new_run = _create_planned_run(                              # Reuse shared run creation rules
         route=route,                                            # Parent route context
         run_type=payload.run_type,                              # Normalized run label
         scheduled_start_time=payload.scheduled_start_time,      # Fixed planned start time
@@ -568,7 +571,7 @@ def create_route_run(
     )
     db.commit()
     db.refresh(new_run)
-    return run_router._serialize_run(new_run)
+    return _serialize_run(new_run)
 
 
 # -----------------------------------------------------------
@@ -587,8 +590,6 @@ def get_route_runs(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    from backend.routers import run as run_router  # Local import avoids circular import at module load time
-
     route = get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
@@ -602,7 +603,7 @@ def get_route_runs(
         .order_by(run_model.Run.id.asc())
         .all()
     )
-    return [run_router._serialize_run(run) for run in runs]
+    return [_serialize_run(run) for run in runs]
 
 
 # -----------------------------------------------------------
@@ -623,8 +624,6 @@ def update_route_run(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    from backend.routers import run as run_router  # Local import avoids circular import at module load time
-
     route = get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
@@ -636,7 +635,7 @@ def update_route_run(
     if run.start_time is not None:
         raise HTTPException(status_code=400, detail="Only planned runs can be updated")
 
-    run_router._assert_unique_route_run_type(
+    _assert_unique_route_run_type(
         route_id=route.id,
         normalized_run_type=payload.run_type,
         db=db,
@@ -650,7 +649,7 @@ def update_route_run(
 
     db.commit()
     db.refresh(run)
-    return run_router._serialize_run(run)
+    return _serialize_run(run)
 
 
 # -----------------------------------------------------------
