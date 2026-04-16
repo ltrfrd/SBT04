@@ -403,8 +403,6 @@ def update_run(
             joinedload(run_model.Run.route),
         ],
     )
-    if run.route and run.route.operator_id != operator.id:
-        raise HTTPException(status_code=404, detail="Run not found")
 
     # -------------------------------------------------------------------------
     # Only planned runs may be updated
@@ -450,8 +448,6 @@ def delete_run(
     # Load run
     # -------------------------------------------------------------------------
     run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read")
-    if run.route and run.route.operator_id != operator.id:
-        raise HTTPException(status_code=404, detail="Run not found")
 
     # -------------------------------------------------------------------------
     # Only planned runs may be deleted

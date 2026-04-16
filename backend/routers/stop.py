@@ -378,8 +378,6 @@ def force_normalize_run(
     try:
         run = get_run_or_404(run_id, db)
         route = get_operator_scoped_route_or_404(db=db, route_id=run.route_id, operator_id=operator.id, required_access="read")
-        if route.operator_id != operator.id:
-            raise HTTPException(status_code=404, detail="Run not found")
         normalize_run_sequences(db, run_id)
         db.commit()
 
@@ -494,8 +492,6 @@ def update_stop(
 ):
     try:
         stop = _get_operator_scoped_stop_or_404(stop_id, db, operator.id, "read")
-        if stop.run and stop.run.route and stop.run.route.operator_id != operator.id:
-            raise HTTPException(status_code=404, detail="Stop not found")
         ensure_run_is_planned_for_setup(get_run_or_404(stop.run_id, db))  # Legacy compatibility update must stay planned-only
 
         stop = _update_stop_record(
@@ -578,8 +574,6 @@ def delete_stop(
 ):
     try:
         stop = _get_operator_scoped_stop_or_404(stop_id, db, operator.id, "read")
-        if stop.run and stop.run.route and stop.run.route.operator_id != operator.id:
-            raise HTTPException(status_code=404, detail="Stop not found")
 
         run_id = stop.run_id
 
@@ -621,8 +615,6 @@ def reorder_stop(
 ):
     try:
         stop = _get_operator_scoped_stop_or_404(stop_id, db, operator.id, "read")
-        if stop.run and stop.run.route and stop.run.route.operator_id != operator.id:
-            raise HTTPException(status_code=404, detail="Stop not found")
 
         run_id = stop.run_id
         old_seq = stop.sequence

@@ -8,6 +8,7 @@ __pycache__/
 .pytest_cache/
 .coverage
 htmlcov/
+alembic/**/__pycache__/
 
 # -----------------------------------------------------------
 # Virtual environments
@@ -38,6 +39,12 @@ ENV/
 *.bak
 
 # -----------------------------------------------------------
+# Build artifacts
+# -----------------------------------------------------------
+dist/
+build/
+
+# -----------------------------------------------------------
 # IDE / OS
 # -----------------------------------------------------------
 .vscode/
@@ -46,28 +53,19 @@ ENV/
 Thumbs.db
 
 # -----------------------------------------------------------
-# Alembic cache
+# Markdown docs
 # -----------------------------------------------------------
-alembic/**/__pycache__/
-
-# -----------------------------------------------------------
-# Build artifacts
-# -----------------------------------------------------------
-dist/
-build/
-
-README.md
-structure.txt
-DEFERRED_FEATURES.md
-
-# Ignore all markdown docs
 *.md
 
+# -----------------------------------------------------------
 # AI / planning
+# -----------------------------------------------------------
 .claude/
 claude/
 
+# -----------------------------------------------------------
 # Temp test artifacts
+# -----------------------------------------------------------
 tests/pytest_tmp/
 tests/pytest_run_tmp/
 tests/pytest_tmp_api_one/
@@ -75,14 +73,9 @@ tests/pytest_tmp_progress_one/
 tests/pytest_tmp_runfix/
 tests/pytest_tmp_run_2/
 tests/*-tests-*/
-tatus
 
-# Logs / temp
-*.log
-*.tmp
-
-# OS / editor
-.vscode/
-.DS_Store
-Thumbs.db
-*.db
+# -----------------------------------------------------------
+# Local / dev-only files
+# -----------------------------------------------------------
+codex_runner.py
+structure.txt
