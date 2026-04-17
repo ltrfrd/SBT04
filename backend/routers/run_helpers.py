@@ -391,7 +391,7 @@ def _create_stop_context_student(
         raise HTTPException(status_code=400, detail="School is not assigned to the run route")
     validate_route_school_alignment(
         route_district_id=route.district_id,
-        route_operator_id=route.operator_id,
+        route_operator_id=None,
         school=school,
     )
 
@@ -399,7 +399,6 @@ def _create_stop_context_student(
         name=payload.name,
         grade=payload.grade,
         district_id=run.route.district_id if run.route else None,
-        operator_id=operator_id,
         school_id=payload.school_id,
         route_id=run.route_id,
         stop_id=stop.id,

@@ -160,11 +160,16 @@ def get_route_access_level(route: Route, operator_id: int) -> str | None:
     if route.operator_id == operator_id:
         return "owner"
 
+    resolved_access_level = None
     for grant in route.operator_access:
         if grant.operator_id == operator_id:
-            return grant.access_level
+            if resolved_access_level is None:
+                resolved_access_level = grant.access_level
+                continue
+            if ROUTE_ACCESS_PRIORITY.get(grant.access_level, 0) > ROUTE_ACCESS_PRIORITY.get(resolved_access_level, 0):
+                resolved_access_level = grant.access_level
 
-    return None
+    return resolved_access_level
 
 
 def get_operator_scoped_route_or_404(
@@ -190,7 +195,7 @@ def get_operator_scoped_route_or_404(
 
 
 def ensure_route_owner(route: Route, operator_id: int) -> None:
-    if route.operator_id != operator_id:
+    if not _route_access_satisfies(get_route_access_level(route, operator_id), "operate"):
         raise HTTPException(status_code=404, detail="Route not found")
 
 

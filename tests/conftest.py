@@ -328,6 +328,11 @@ def client(db_engine):
                 district_id = self._get_school_district_id(int(school_ids[0]))
                 if district_id is not None:
                     route_payload["district_id"] = district_id
+                    return route_payload
+            route_payload["district_id"] = _get_or_create_test_district_id(
+                db_engine,
+                self._current_operator_id(),
+            )
             return route_payload
 
         def _ensure_route_matches_school_district(self, school_id: int, route_id: int):
@@ -514,6 +519,7 @@ def client(db_engine):
 
         def put(self, url, *args, **kwargs):
             payload = kwargs.get("json")
+            path_parts = [part for part in url.strip("/").split("/") if part]
 
             if url.startswith("/schools/") and isinstance(payload, dict):
                 school_payload = dict(payload)
@@ -544,7 +550,7 @@ def client(db_engine):
 
                 return response
 
-            if url.startswith("/routes/") and isinstance(payload, dict):
+            if len(path_parts) == 2 and path_parts[0] == "routes" and isinstance(payload, dict):
                 route_payload = self._ensure_route_payload_has_district(payload)
                 return self._wrapped_client.put(
                     url,

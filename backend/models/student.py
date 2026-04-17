@@ -8,7 +8,7 @@ class Student(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     district_id = Column(Integer, ForeignKey("districts.id", ondelete="SET NULL"), nullable=True, index=True)
-    operator_id = Column(Integer, ForeignKey("operators.id", ondelete="CASCADE"), nullable=False, index=True)
+    operator_id = Column(Integer, ForeignKey("operators.id", ondelete="SET NULL"), nullable=True, index=True)
     name = Column(String(100), nullable=False)
     grade = Column(String(10))
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False)
@@ -37,7 +37,7 @@ class Student(Base):
     )
 
     @property
-    def planning_owner(self) -> int:
+    def planning_owner(self) -> int | None:
         return self.district_id if self.district_id is not None else self.operator_id
 
     @property

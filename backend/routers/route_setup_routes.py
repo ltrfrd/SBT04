@@ -278,7 +278,6 @@ def create_route_student(
         route_id=route.id,
         stop_id=stop.id if stop is not None else None,
         district_id=route.district_id,
-        operator_id=operator.id,
     )
     db.add(new_student)
     db.commit()

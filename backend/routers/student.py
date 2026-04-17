@@ -42,12 +42,11 @@ router = APIRouter(
 def _validate_student_school_planning_alignment(
     *,
     student_district_id: int | None,
-    student_operator_id: int,
     school: school_model.School,
 ) -> None:
     validate_planning_alignment(
         primary_district_id=student_district_id,
-        primary_operator_id=student_operator_id,
+        primary_operator_id=None,
         secondary_district_id=school.district_id,
         secondary_operator_id=None,
         detail="School does not match student district",
@@ -57,12 +56,11 @@ def _validate_student_school_planning_alignment(
 def _validate_student_route_planning_alignment(
     *,
     student_district_id: int | None,
-    student_operator_id: int,
     route: route_model.Route,
 ) -> None:
     validate_planning_alignment(
         primary_district_id=student_district_id,
-        primary_operator_id=student_operator_id,
+        primary_operator_id=None,
         secondary_district_id=route.district_id,
         secondary_operator_id=route.operator_id,
         detail="Student does not match route district",
@@ -150,19 +148,17 @@ def _validate_compatibility_student_create_target(
 
     _validate_student_school_planning_alignment(
         student_district_id=student_district_id,
-        student_operator_id=operator_id,
         school=school,
     )
 
     if route is not None:
         _validate_student_route_planning_alignment(
             student_district_id=student_district_id,
-            student_operator_id=operator_id,
             route=route,
         )
         validate_route_school_alignment(
             route_district_id=route.district_id,
-            route_operator_id=route.operator_id,
+            route_operator_id=None,
             school=school,
         )
 
@@ -191,12 +187,11 @@ def _validate_student_assignment_target(
 
     _validate_student_route_planning_alignment(
         student_district_id=student.district_id,
-        student_operator_id=student.operator_id,
         route=route,
     )
     validate_route_school_alignment(
         route_district_id=route.district_id,
-        route_operator_id=route.operator_id,
+        route_operator_id=None,
         school=student.school,
     )
     _validate_route_school_membership(route, student.school_id)
@@ -276,19 +271,17 @@ def _update_student_record(
 
     _validate_student_school_planning_alignment(
         student_district_id=student.district_id,
-        student_operator_id=student.operator_id,
         school=school,
     )
 
     if route is not None:
         _validate_student_route_planning_alignment(
             student_district_id=student.district_id,
-            student_operator_id=student.operator_id,
             route=route,
         )
         validate_route_school_alignment(
             route_district_id=route.district_id,
-            route_operator_id=route.operator_id,
+            route_operator_id=None,
             school=school,
         )
         _validate_route_school_membership(route, school.id)

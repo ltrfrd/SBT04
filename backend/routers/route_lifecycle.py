@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session, joinedload
 from database import get_db
 
 from backend.models.associations import RouteDriverAssignment
+from backend.models.district import District
 from backend.models.operator import Operator
 from backend.models.route import Route
 from backend.routers.route_helpers import _get_conflicting_route_or_none
@@ -92,6 +93,11 @@ def update_route(
     schools = None
     new_route_number = update_data.get("route_number", route.route_number)
     target_district_id = update_data.get("district_id", route.district_id)
+    if target_district_id is None:
+        raise HTTPException(status_code=400, detail="district_id is required")
+    district = db.get(District, target_district_id)
+    if not district:
+        raise HTTPException(status_code=404, detail="District not found")
 
     if (
         new_route_number != route.route_number
@@ -121,7 +127,7 @@ def update_route(
 
     validate_route_school_links(
         route_district_id=target_district_id,
-        route_operator_id=route.operator_id,
+        route_operator_id=None,
         schools=schools if schools is not None else list(route.schools),
     )
 

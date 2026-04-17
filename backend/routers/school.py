@@ -65,7 +65,7 @@ def _get_school_route_link_context_or_404(
     )
     validate_route_school_alignment(
         route_district_id=route.district_id,
-        route_operator_id=route.operator_id,
+        route_operator_id=None,
         school=school,
     )
     return school, route
@@ -186,7 +186,7 @@ def update_school(
     for route in school.routes:
         validate_planning_alignment(
             primary_district_id=route.district_id,
-            primary_operator_id=route.operator_id,
+            primary_operator_id=None,
             secondary_district_id=target_district_id,
             secondary_operator_id=None,
             detail="School does not match route district",

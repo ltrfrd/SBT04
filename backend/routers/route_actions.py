@@ -18,9 +18,6 @@ from backend.utils.operator_scope import ensure_route_owner
 from backend.utils.operator_scope import get_bus_operator_id
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
-from backend.utils.operator_scope import get_route_access_level
-
-
 router = APIRouter(tags=["Routes"])
 
 
@@ -49,7 +46,7 @@ def assign_bus_to_route(
     if not bus:
         raise HTTPException(status_code=404, detail="Bus not found")
     bus_operator_id = get_bus_operator_id(bus)
-    if bus_operator_id != route.operator_id and get_route_access_level(route, bus_operator_id) != "operate":
+    if bus_operator_id != operator.id:
         raise HTTPException(status_code=400, detail="Bus is not allowed for this route")
 
     route.active_bus_id = bus.id
@@ -86,7 +83,7 @@ def set_primary_bus_for_route(
     if not bus:
         raise HTTPException(status_code=404, detail="Bus not found")
     bus_operator_id = get_bus_operator_id(bus)
-    if bus_operator_id != route.operator_id and get_route_access_level(route, bus_operator_id) != "operate":
+    if bus_operator_id != operator.id:
         raise HTTPException(status_code=400, detail="Bus is not allowed for this route")
 
     route.primary_bus_id = bus.id
@@ -124,7 +121,7 @@ def set_active_bus_for_route(
     if not bus:
         raise HTTPException(status_code=404, detail="Bus not found")
     bus_operator_id = get_bus_operator_id(bus)
-    if bus_operator_id != route.operator_id and get_route_access_level(route, bus_operator_id) != "operate":
+    if bus_operator_id != operator.id:
         raise HTTPException(status_code=400, detail="Bus is not allowed for this route")
 
     route.active_bus_id = bus.id
@@ -222,7 +219,7 @@ def assign_driver_to_route(
     )
     ensure_route_owner(route, operator.id)
 
-    assignment = _assign_driver_to_route(route, driver_id, db)
+    assignment = _assign_driver_to_route(route, driver_id, db, operator.id)
 
     db.commit()
     db.refresh(assignment)

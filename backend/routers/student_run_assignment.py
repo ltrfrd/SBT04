@@ -20,6 +20,7 @@ from backend.schemas.student_run_assignment import (
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_operator_scoped_record_or_404
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
+from backend.utils.planning_scope import get_student_for_planning_or_404
 
 # -----------------------------------------------------------
 # Router setup
@@ -103,12 +104,11 @@ def list_assignments(
     if student_id is None:
         raise HTTPException(status_code=400, detail="student_id is required")  # Require student-scoped lookup
 
-    student = get_operator_scoped_record_or_404(
+    student = get_student_for_planning_or_404(
         db=db,
-        model=student_model.Student,
-        record_id=student_id,
         operator_id=operator.id,
         detail="Student not found",
+        student_id=student_id,
     )
 
     assignments = (

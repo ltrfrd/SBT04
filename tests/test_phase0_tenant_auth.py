@@ -652,35 +652,62 @@ def test_same_route_number_across_different_districts_succeeds(client, db_engine
     assert second.status_code == 201
 
 
-def test_legacy_route_duplicate_fallback_still_works_without_district(client):
-    first = client.post(
+def test_route_creation_requires_district_id(client):
+    first = client._wrapped_client.post(
         "/routes/",
         json={"route_number": "LEGACY-DUP-ROUTE"},
     )
-    assert first.status_code in (200, 201)
+    assert first.status_code == 400
+    assert first.json()["detail"] == "district_id is required"
 
-    duplicate = client.post(
+
+def test_direct_route_creation_uses_district_based_uniqueness(client, db_engine):
+    district_one_id = _create_district_in_db(db_engine, "Mixed Scope Route District One")
+    district_two_id = _create_district_in_db(db_engine, "Mixed Scope Route District Two")
+
+    first_route = client._wrapped_client.post(
         "/routes/",
-        json={"route_number": "LEGACY-DUP-ROUTE"},
+        json={"route_number": "MIXED-SCOPE-ROUTE", "district_id": district_one_id},
     )
-    assert duplicate.status_code == 409
-    assert duplicate.json()["detail"] == "Route number already exists"
+    assert first_route.status_code in (200, 201)
+
+    same_district_duplicate = client._wrapped_client.post(
+        "/routes/",
+        json={"route_number": "MIXED-SCOPE-ROUTE", "district_id": district_one_id},
+    )
+    assert same_district_duplicate.status_code == 409
+
+    other_district_route = client._wrapped_client.post(
+        "/routes/",
+        json={"route_number": "MIXED-SCOPE-ROUTE", "district_id": district_two_id},
+    )
+    assert other_district_route.status_code in (200, 201)
 
 
-def test_district_route_and_legacy_route_can_share_route_number(client, db_engine):
-    district_id = _create_district_in_db(db_engine, "Mixed Scope Route District")
+def test_route_school_assignment_requires_district_backed_route(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "Legacy Route School District")
+
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "Legacy Route School", "address": "306 Legacy Way"},
+    )
+    assert school.status_code == 201
+
+    route = client._wrapped_client.post(
+        "/routes/",
+        json={"route_number": "LEGACY-ROUTE-SCHOOL"},
+    )
+    assert route.status_code == 400
+    assert route.json()["detail"] == "district_id is required"
 
     district_route = client.post(
         f"/districts/{district_id}/routes",
-        json={"route_number": "MIXED-SCOPE-ROUTE"},
+        json={"route_number": "LEGACY-ROUTE-SCHOOL"},
     )
     assert district_route.status_code == 201
 
-    legacy_route = client.post(
-        "/routes/",
-        json={"route_number": "MIXED-SCOPE-ROUTE"},
-    )
-    assert legacy_route.status_code in (200, 201)
+    assign = client.post(f"/schools/{school.json()['id']}/assign_route/{district_route.json()['id']}")
+    assert assign.status_code == 200
 
 
 def test_create_route_with_matching_school_district_succeeds(client, db_engine):
@@ -864,41 +891,33 @@ def test_create_student_with_mismatched_route_district_fails(client, db_engine):
     assert student.json()["detail"] == "School does not match student district"
 
 
-def test_legacy_route_school_assignment_still_works_without_district_ids(client):
+def test_student_route_planning_requires_district_backed_route(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "Legacy Student Route District")
+
     school = client.post(
-        "/schools/",
-        json={"name": "Legacy Route School", "address": "306 Legacy Way"},
-    )
-    assert school.status_code == 201
-
-    route = client.post(
-        "/routes/",
-        json={"route_number": "LEGACY-ROUTE-SCHOOL"},
-    )
-    assert route.status_code in (200, 201)
-
-    assign = client.post(f"/schools/{school.json()['id']}/assign_route/{route.json()['id']}")
-    assert assign.status_code == 200
-
-
-def test_legacy_student_route_link_still_works_without_district_ids(client):
-    school = client.post(
-        "/schools/",
+        f"/districts/{district_id}/schools",
         json={"name": "Legacy Student School", "address": "307 Legacy Student Way"},
     )
     assert school.status_code == 201
 
-    route = client.post(
+    route = client._wrapped_client.post(
         "/routes/",
         json={"route_number": "LEGACY-STUDENT-ROUTE"},
     )
-    assert route.status_code in (200, 201)
+    assert route.status_code == 400
+    assert route.json()["detail"] == "district_id is required"
 
-    assign = client.post(f"/schools/{school.json()['id']}/assign_route/{route.json()['id']}")
+    district_route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "LEGACY-STUDENT-ROUTE"},
+    )
+    assert district_route.status_code == 201
+
+    assign = client.post(f"/schools/{school.json()['id']}/assign_route/{district_route.json()['id']}")
     assert assign.status_code == 200
 
     student = client.post(
-        f"/routes/{route.json()['id']}/students",
+        f"/routes/{district_route.json()['id']}/students",
         json={
             "name": "Legacy Student",
             "grade": "8",

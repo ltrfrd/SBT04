@@ -21,16 +21,10 @@ def planning_relationship_matches(
     secondary_district_id: int | None,
     secondary_operator_id: int | None,
 ) -> bool:
-    if primary_district_id is not None or secondary_district_id is not None:
-        return (
-            primary_district_id is not None
-            and secondary_district_id is not None
-            and primary_district_id == secondary_district_id
-        )
     return (
-        primary_operator_id is not None
-        and secondary_operator_id is not None
-        and primary_operator_id == secondary_operator_id
+        primary_district_id is not None
+        and secondary_district_id is not None
+        and primary_district_id == secondary_district_id
     )
 
 
@@ -67,8 +61,8 @@ def accessible_school_filter(operator_id: int):
 
 def accessible_student_filter(operator_id: int):
     return or_(
-        Student.operator_id == operator_id,
         Student.route.has(accessible_route_filter(operator_id)),
+        Student.school.has(School.routes.any(accessible_route_filter(operator_id))),
     )
 
 
@@ -127,7 +121,7 @@ def get_student_for_planning_or_404(
 def validate_route_school_alignment(
     *,
     route_district_id: int | None,
-    route_operator_id: int,
+    route_operator_id: int | None,
     school: School,
     detail: str = "School does not match route district",
 ) -> None:
@@ -143,7 +137,7 @@ def validate_route_school_alignment(
 def validate_route_school_links(
     *,
     route_district_id: int | None,
-    route_operator_id: int,
+    route_operator_id: int | None,
     schools: list[School],
     detail: str = "School does not match route district",
 ) -> None:

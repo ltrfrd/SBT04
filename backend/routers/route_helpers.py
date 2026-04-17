@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from backend.models import run as run_model
 from backend.models.associations import RouteDriverAssignment
+from backend.models.district import District
 from backend.models.driver import Driver
 from backend.models.route import Route
 from backend.schemas.route import (
@@ -36,10 +37,10 @@ def _route_identity_query(
     district_id: int | None,
     operator_id: int,
 ):
+    if district_id is None:
+        raise HTTPException(status_code=400, detail="district_id is required")
     query = db.query(Route).filter(Route.route_number == route_number)
-    if district_id is not None:
-        return query.filter(Route.district_id == district_id)
-    return query.filter(Route.district_id.is_(None)).filter(Route.operator_id == operator_id)
+    return query.filter(Route.district_id == district_id)
 
 
 def _get_conflicting_route_or_none(
@@ -276,6 +277,11 @@ def create_route_record(
     payload.pop("district_id", None)
     school_ids = payload.pop("school_ids", [])  # Separate school assignment ids
     effective_district_id = district_id if district_id is not None else payload_district_id
+    if effective_district_id is None:
+        raise HTTPException(status_code=400, detail="district_id is required")
+    district = db.get(District, effective_district_id)
+    if not district:
+        raise HTTPException(status_code=404, detail="District not found")
 
     existing_route = _get_conflicting_route_or_none(
         db=db,
@@ -304,7 +310,7 @@ def create_route_record(
         )
         validate_route_school_links(
             route_district_id=effective_district_id,
-            route_operator_id=operator_id,
+            route_operator_id=None,
             schools=schools,
         )
         db_route.schools = schools  # Attach requested schools
@@ -349,12 +355,13 @@ def _assign_driver_to_route(
     route: Route,
     driver_id: int,
     db: Session,
+    operator_id: int,
 ) -> RouteDriverAssignment:
     driver = db.get(Driver, driver_id)  # Validate driver exists
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
     driver_operator_id = get_driver_operator_id(driver)
-    if driver_operator_id != route.operator_id and get_route_access_level(route, driver_operator_id) != "operate":
+    if driver_operator_id != operator_id:
         raise HTTPException(status_code=400, detail="Driver is not allowed for this route")
 
     _assert_route_driver_assignment_integrity(route)  # Fail safely on invalid legacy active/primary state
