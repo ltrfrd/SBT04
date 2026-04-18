@@ -11,8 +11,6 @@ class Operator(Base):
     name = Column(String(150), nullable=False, unique=True, index=True)
 
     yards = relationship("Yard", back_populates="operator")
-    students = relationship("Student", back_populates="operator")
-    routes = relationship("Route", back_populates="operator")
     route_access = relationship(
         "OperatorRouteAccess",
         back_populates="operator",

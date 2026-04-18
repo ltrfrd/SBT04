@@ -62,7 +62,7 @@ def _validate_student_route_planning_alignment(
         primary_district_id=student_district_id,
         primary_operator_id=None,
         secondary_district_id=route.district_id,
-        secondary_operator_id=route.operator_id,
+        secondary_operator_id=None,
         detail="Student does not match route district",
     )
 

@@ -48,6 +48,12 @@ def test_schools_crud(client):
     assert r.status_code in (200, 201)
     school_id = r.json()["id"]
 
+    visible_route = client.post(
+        "/routes/",
+        json={"route_number": "S1-VISIBLE-ROUTE", "school_ids": [school_id]},
+    )
+    assert visible_route.status_code in (200, 201)
+
     r = client.get("/schools/")
     assert r.status_code == 200
     assert any(s["id"] == school_id for s in r.json())
@@ -957,8 +963,8 @@ def test_update_student_inside_run_stop_context_validates_route_school_membershi
         f"/runs/{run_id}/stops/{stop.json()['id']}/students/{student.json()['id']}",
         json={"school_id": unassigned_school.json()["id"]},
     )
-    assert invalid_update.status_code == 400
-    assert invalid_update.json()["detail"] == "School is not assigned to the run route"
+    assert invalid_update.status_code == 404
+    assert invalid_update.json()["detail"] == "School not found"
 
     valid_update = client.put(
         f"/runs/{run_id}/stops/{stop.json()['id']}/students/{student.json()['id']}",
@@ -1375,6 +1381,12 @@ def test_school_create_read_update_works_without_school_code(client):
     assert school["address"] is None
     assert "school_code" not in school
 
+    visible_route = client.post(
+        "/routes/",
+        json={"route_number": "NORTH-RIDGE-VISIBLE", "school_ids": [school["id"]]},
+    )
+    assert visible_route.status_code in (200, 201)
+
     read = client.get(f"/schools/{school['id']}")
     assert read.status_code == 200
     assert "school_code" not in read.json()
@@ -1494,8 +1506,8 @@ def test_stop_context_student_create_rejects_school_not_on_route(client):
         f"/runs/{run_id}/stops/{stop.json()['id']}/students",
         json={"name": "Mismatched School Student", "school_id": other_school.json()["id"]},
     )
-    assert response.status_code == 400
-    assert response.json()["detail"] == "School is not assigned to the run route"
+    assert response.status_code == 404
+    assert response.json()["detail"] == "School not found"
 
 
 def test_run_context_stop_update_endpoint_appears_in_openapi(client):

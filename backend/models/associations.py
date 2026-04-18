@@ -75,3 +75,14 @@ class StudentRunAssignment(Base):
     dropped_off_at = Column(DateTime, nullable=True)  # Track when exit happened
     is_onboard = Column(Boolean, default=False, nullable=False)  # Track current onboard state
     school_status = Column(String, nullable=True)  # "present" or "absent"
+
+
+class YardRouteAssignment(Base):
+    __tablename__ = "yard_route_assignments"
+
+    yard_id = Column(Integer, ForeignKey("yards.id", ondelete="CASCADE"), primary_key=True)
+    route_id = Column(Integer, ForeignKey("routes.id", ondelete="CASCADE"), primary_key=True)
+
+    __table_args__ = (
+        UniqueConstraint("yard_id", "route_id", name="uq_yard_route"),
+    )

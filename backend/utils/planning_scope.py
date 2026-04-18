@@ -2,12 +2,14 @@ from fastapi import HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from backend.models.associations import YardRouteAssignment
 from backend.models.operator import OperatorRouteAccess
 from backend.models.route import Route
 from backend.models.run import Run
 from backend.models.school import School
 from backend.models.stop import Stop
 from backend.models.student import Student
+from backend.models.yard import Yard
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
 
 
@@ -46,17 +48,15 @@ def validate_planning_alignment(
 
 
 def accessible_route_filter(operator_id: int):
-    return or_(
-        Route.operator_id == operator_id,
-        Route.operator_access.any(OperatorRouteAccess.operator_id == operator_id),
-    )
+    return Route.operator_access.any(OperatorRouteAccess.operator_id == operator_id)
+
+
+def yard_accessible_route_filter(yard_id: int):
+    return Route.yards.any(Yard.id == yard_id)
 
 
 def accessible_school_filter(operator_id: int):
-    return or_(
-        School.district_id.is_not(None),
-        School.routes.any(accessible_route_filter(operator_id)),
-    )
+    return School.routes.any(accessible_route_filter(operator_id))
 
 
 def accessible_student_filter(operator_id: int):

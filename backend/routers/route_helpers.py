@@ -20,6 +20,7 @@ from backend.schemas.route import (
 )
 from backend.schemas.stop import RunStopCreate
 from backend.utils.operator_scope import get_driver_operator_id
+from backend.utils.operator_scope import create_operator_route_access
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
 from backend.utils.operator_scope import get_route_access_level
 from backend.utils.planning_scope import get_schools_for_route_attachment_or_404
@@ -298,10 +299,16 @@ def create_route_record(
     db_route = Route(
         **payload,
         district_id=effective_district_id,
-        operator_id=operator_id,
     )  # Create route after uniqueness check
     db.add(db_route)  # Add route to session
     db.flush()  # Allocate route id before school linking
+    db.add(
+        create_operator_route_access(
+            route_id=db_route.id,
+            operator_id=operator_id,
+            access_level="owner",
+        )
+    )
 
     if school_ids:
         schools = get_schools_for_route_attachment_or_404(

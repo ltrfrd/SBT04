@@ -34,7 +34,6 @@ class Route(Base):
 
     id = Column(Integer, primary_key=True, index=True)     # Unique route identifier
     district_id = Column(Integer, ForeignKey("districts.id", ondelete="SET NULL"), nullable=True, index=True)
-    operator_id = Column(Integer, ForeignKey("operators.id", ondelete="SET NULL"), nullable=True, index=True)
     route_number = Column(String(50), nullable=False)      # Public route number (ex: "102A")
     bus_id = Column(Integer, ForeignKey("buses.id", ondelete="SET NULL"), nullable=True)  # Current assigned bus
     primary_bus_id = Column(Integer, ForeignKey("buses.id", ondelete="SET NULL"), nullable=True)  # Default/base route bus
@@ -44,11 +43,6 @@ class Route(Base):
 
     district = relationship(
         "District",
-        back_populates="routes",
-    )
-
-    operator = relationship(
-        "Operator",
         back_populates="routes",
     )
 
@@ -98,8 +92,10 @@ class Route(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    yards = relationship(
+        "Yard",
+        secondary="yard_route_assignments",
+        back_populates="routes",
+    )
 
-    @property
-    def planning_owner(self) -> int | None:
-        return self.district_id if self.district_id is not None else self.operator_id
 

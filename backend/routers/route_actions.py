@@ -7,6 +7,7 @@ from backend.models.associations import RouteDriverAssignment
 from backend.models.bus import Bus
 from backend.models.operator import Operator, OperatorRouteAccess
 from backend.models.route import Route
+from backend.models.yard import Yard
 from backend.routers.route_helpers import _assign_driver_to_route
 from backend.routers.route_helpers import _assert_route_driver_assignment_integrity
 from backend.routers.route_helpers import _get_primary_route_assignment
@@ -17,6 +18,7 @@ from backend.utils.operator_scope import create_operator_route_access
 from backend.utils.operator_scope import ensure_route_owner
 from backend.utils.operator_scope import get_bus_operator_id
 from backend.utils.operator_scope import get_operator_context
+from backend.utils.operator_scope import get_route_access_level
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
 router = APIRouter(tags=["Routes"])
 
@@ -282,6 +284,69 @@ def unassign_driver_from_route(
 
 
 @router.post(
+    "/{route_id}/assign-yard/{yard_id}",
+    summary="Assign route to yard",
+    description="Link a route to one yard owned by the acting operator without changing route grant logic.",
+)
+def assign_route_to_yard(
+    route_id: int,
+    yard_id: int,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    route = get_operator_scoped_route_or_404(
+        db=db,
+        route_id=route_id,
+        operator_id=operator.id,
+        required_access="operate",
+    )
+
+    yard = db.get(Yard, yard_id)
+    if not yard:
+        raise HTTPException(status_code=404, detail="Yard not found")
+    if yard.operator_id != operator.id:
+        raise HTTPException(status_code=403, detail="Yard is not allowed for this route")
+
+    if all(existing_yard.id != yard.id for existing_yard in route.yards):
+        route.yards.append(yard)
+
+    db.commit()
+    return {"route_id": route_id, "yard_id": yard_id}
+
+
+@router.delete(
+    "/{route_id}/assign-yard/{yard_id}",
+    summary="Unassign route from yard",
+    description="Remove one yard link from a route without changing route grant logic.",
+)
+def unassign_route_from_yard(
+    route_id: int,
+    yard_id: int,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    route = get_operator_scoped_route_or_404(
+        db=db,
+        route_id=route_id,
+        operator_id=operator.id,
+        required_access="operate",
+    )
+
+    yard = db.get(Yard, yard_id)
+    if not yard:
+        raise HTTPException(status_code=404, detail="Yard not found")
+    if yard.operator_id != operator.id:
+        raise HTTPException(status_code=403, detail="Yard is not allowed for this route")
+
+    linked_yard = next((existing_yard for existing_yard in route.yards if existing_yard.id == yard.id), None)
+    if linked_yard is not None:
+        route.yards.remove(linked_yard)
+
+    db.commit()
+    return {"route_id": route_id, "yard_id": yard_id}
+
+
+@router.post(
     "/{route_id}/share/{target_operator_id}",
     summary="Grant shared route access",
     description="Owner-only endpoint that grants explicit read or operate access for a route to another operator.",
@@ -301,7 +366,7 @@ def share_route_with_operator(
     )
     ensure_route_owner(route, operator.id)
 
-    if target_operator_id == route.operator_id:
+    if get_route_access_level(route, target_operator_id) == "owner":
         raise HTTPException(status_code=400, detail="Owner operator already has access")
 
     target_operator = db.get(Operator, target_operator_id)
@@ -365,6 +430,11 @@ def unshare_route_with_operator(
     )
     if grant is None:
         raise HTTPException(status_code=404, detail="Shared access not found")
+    if grant.access_level == "owner":
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot remove owner access from a route",
+        )
 
     db.delete(grant)
     db.commit()

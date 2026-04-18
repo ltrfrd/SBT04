@@ -17,6 +17,7 @@ DEFAULT_OPERATOR_NAME = "Default Operator"
 ROUTE_ACCESS_PRIORITY = {
     "read": 1,
     "operate": 2,
+    "owner": 3,
 }
 
 
@@ -157,9 +158,6 @@ def _route_access_satisfies(access_level: str | None, required_access: str) -> b
 
 
 def get_route_access_level(route: Route, operator_id: int) -> str | None:
-    if route.operator_id == operator_id:
-        return "owner"
-
     resolved_access_level = None
     for grant in route.operator_access:
         if grant.operator_id == operator_id:
@@ -195,7 +193,7 @@ def get_operator_scoped_route_or_404(
 
 
 def ensure_route_owner(route: Route, operator_id: int) -> None:
-    if not _route_access_satisfies(get_route_access_level(route, operator_id), "operate"):
+    if not _route_access_satisfies(get_route_access_level(route, operator_id), "owner"):
         raise HTTPException(status_code=404, detail="Route not found")
 
 

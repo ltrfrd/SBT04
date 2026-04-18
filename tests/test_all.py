@@ -3157,6 +3157,12 @@ def test_get_school_reports(client):
     assert school.status_code == 201
     school_id = school.json()["id"]
 
+    route = client.post(
+        "/routes/",
+        json={"route_number": "REPORTS-SCHOOL-ROUTE", "school_ids": [school_id]},
+    )
+    assert route.status_code in (200, 201)
+
     # -------------------------------------------------------------------------
     # Request school reports payload
     # -------------------------------------------------------------------------
@@ -3551,16 +3557,11 @@ def _build_school_reports_fixture(client):
         json={
             "route_number": "R1-",                                  # Route number
             "driver_id": driver_id,                                # Assigned driver
+            "school_ids": [school_id],
         },
     )
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]                                  # Save route ID
-
-    # -------------------------------------------------------------------------
-    # Assign route to school
-    # -------------------------------------------------------------------------
-    route_assign = client.post(f"/schools/{school_id}/assign_route/{route_id}")
-    assert route_assign.status_code in (200, 201)
 
     # -------------------------------------------------------------------------
     # Create run 1

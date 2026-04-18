@@ -24,7 +24,7 @@ from backend.models import (
     school as school_model,
     student as student_model,
 )
-from backend.models.operator import Operator, OperatorRouteAccess
+from backend.models.operator import Operator
 from backend.models.yard import Yard
 from backend.models.associations import RouteDriverAssignment, StudentRunAssignment
 from backend.utils import reports_generator
@@ -130,7 +130,7 @@ def driver_run_view(
         .options(joinedload(run_model.Run.route))
         .filter(run_model.Run.driver_id == driver_id)
         .join(route_model.Route, route_model.Route.id == run_model.Run.route_id)
-        .filter(route_model.Route.operator_id == operator.id)
+        .filter(accessible_route_filter(operator.id))
         .filter(run_model.Run.start_time.is_not(None))
         .filter(run_model.Run.end_time.is_(None))
         .first()
@@ -151,10 +151,7 @@ def driver_run_view(
             RouteDriverAssignment.driver_id == driver_id,
             RouteDriverAssignment.active.is_(True),
         )))
-        .filter(
-            (route_model.Route.operator_id == operator.id)
-            | route_model.Route.operator_access.any(OperatorRouteAccess.operator_id == operator.id)
-        )
+        .filter(accessible_route_filter(operator.id))
         .order_by(route_model.Route.route_number.asc(), route_model.Route.id.asc())
         .all()
     )

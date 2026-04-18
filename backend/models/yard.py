@@ -2,6 +2,7 @@ from sqlalchemy import Column, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 
 from database import Base
+from backend.models.associations import YardRouteAssignment
 
 
 # -----------------------------------------------------------
@@ -18,3 +19,8 @@ class Yard(Base):
     operator = relationship("Operator", back_populates="yards")
     drivers = relationship("Driver", back_populates="yard")
     buses = relationship("Bus", back_populates="yard")
+    routes = relationship(
+        "Route",
+        secondary="yard_route_assignments",
+        back_populates="yards",
+    )
