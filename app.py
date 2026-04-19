@@ -39,6 +39,7 @@ from backend.routers import (
     student,
     student_run_assignment,
     ws,
+    yard,
 )
 from backend.web import web_pages
 
@@ -84,6 +85,7 @@ app.mount(settings.MEDIA_URL_PREFIX, StaticFiles(directory=settings.MEDIA_ROOT),
 # ROUTERS REGISTRATION
 # -----------------------------------------------------------
 # Yard domain routers
+app.include_router(yard.router)
 app.include_router(driver.router)
 app.include_router(bus.router)
 app.include_router(dispatch.router)

@@ -3372,3 +3372,34 @@ def test_bootstrap_operator_sets_session(empty_client):
     # Authenticated endpoint must succeed — session was set by bootstrap
     drivers = empty_client.get("/drivers/")
     assert drivers.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Yard API tests
+# ---------------------------------------------------------------------------
+
+def test_create_yard_with_operator_session(client):
+    r = client.post("/yards/", json={"name": "Alpha Yard"})
+    assert r.status_code == 201
+    body = r.json()
+    assert body["name"] == "Alpha Yard"
+    assert "id" in body
+    assert "operator_id" in body
+
+
+def test_list_yards_returns_only_current_operator_yards(client, db_engine):
+    other_operator_id = _create_operator_in_db(db_engine, "Other Operator Yard List")
+
+    client.post("/yards/", json={"name": "My Yard A"})
+    client.post("/yards/", json={"name": "My Yard B"})
+
+    # Switch to other operator and create a yard
+    _login(client, other_operator_id)
+    client._wrapped_client.post("/yards/", json={"name": "Other Yard"})
+
+    # Switch back and verify isolation
+    _login(client, 1)
+    r = client._wrapped_client.get("/yards/")
+    assert r.status_code == 200
+    names = [y["name"] for y in r.json()]
+    assert "Other Yard" not in names
