@@ -21,7 +21,7 @@ from backend.models.route import Route
 from backend.models.yard import Yard
 from backend.schemas.bus import BusUpdate
 from backend.routers.route_helpers import _serialize_route_detail
-from backend.utils.planning_scope import execution_route_filter
+from backend.utils.planning_scope import accessible_route_filter
 from backend.utils.operator_scope import get_bus_operator_id
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_operator_scoped_bus_or_404
@@ -189,7 +189,7 @@ def get_bus(
             selectinload(Route.runs).selectinload(run_model.Run.student_assignments).selectinload(StudentRunAssignment.student).selectinload(student_model.Student.school),
         )
         .filter(Route.id.in_([route.id for route in bus.routes]))
-        .filter(execution_route_filter(db=db, operator_id=bus_operator_id))
+        .filter(accessible_route_filter(bus_operator_id))
         .order_by(Route.route_number.asc(), Route.id.asc())
         .all()
     )

@@ -7,7 +7,6 @@
 #   Route -> RouteDriverAssignment (one-to-many)
 #   Route -> Schools (many-to-many)
 #   Route -> Runs (one-to-many)
-#   Route -> Students (view-only legacy reference)
 #
 # Data flow in the system:
 #   Route -> RouteDriverAssignment -> Runs -> Stops
@@ -82,10 +81,6 @@ class Route(Base):
         foreign_keys=[active_bus_id],                      # Current operational bus pointer
     )
 
-    students = relationship(
-        "Student",
-        viewonly=True,                                     # Not used for runtime assignment
-    )
     operator_access = relationship(
         "OperatorRouteAccess",
         back_populates="route",

@@ -15,6 +15,8 @@ from backend.models.student import Student
 from backend.models.yard import Yard
 from backend.routers import route_lifecycle as route_lifecycle_router
 from backend.routers import route_setup_routes as route_setup_router
+from backend.routers import run_setup_routes as run_setup_router
+from backend.routers.reports import SchoolStatusUpdate
 from backend.routers.route_helpers import _serialize_route
 from backend.routers.school import create_school_record
 from backend.schemas.run import RouteRunCreate, RunUpdate
@@ -24,6 +26,7 @@ from backend.utils.operator_scope import get_operator_scoped_route_or_404
 from backend.utils.planning_scope import accessible_route_filter, accessible_school_filter
 from backend.utils.planning_scope import get_route_run_or_404
 from backend.utils.planning_scope import get_route_stop_or_404
+from backend.utils.planning_scope import get_route_student_or_404
 
 
 router = APIRouter(prefix="/districts", tags=["Districts"])
@@ -187,7 +190,7 @@ def create_district_route(
 ):
     _get_district_or_404(db=db, district_id=district_id)
     route_payload = route.model_copy(update={"district_id": district_id})
-    return route_lifecycle_router.create_route(
+    return route_lifecycle_router._create_route_internal(
         route=route_payload,
         db=db,
         operator=operator,
@@ -200,12 +203,13 @@ def _get_district_scoped_route_or_404(
     district_id: int,
     route_id: int,
     operator_id: int,
+    required_access: str = "read",
 ) -> Route:
     route = get_operator_scoped_route_or_404(
         db=db,
         route_id=route_id,
         operator_id=operator_id,
-        required_access="operate",
+        required_access=required_access,
     )
     if route.district_id != district_id:
         raise HTTPException(status_code=404, detail="Route not found for district")
@@ -270,7 +274,7 @@ def update_district_route(
         operator_id=operator.id,
     )
     route_payload = route_in.model_copy(update={"district_id": district_id})
-    return route_lifecycle_router.update_route(
+    return route_lifecycle_router._update_route_internal(
         route_id=route_id,
         route_in=route_payload,
         db=db,
@@ -298,7 +302,7 @@ def delete_district_route(
         route_id=route_id,
         operator_id=operator.id,
     )
-    return route_lifecycle_router.delete_route(
+    return route_lifecycle_router._delete_route_internal(
         route_id=route_id,
         db=db,
         operator=operator,
@@ -326,8 +330,9 @@ def create_district_route_run(
         district_id=district_id,
         route_id=route_id,
         operator_id=operator.id,
+        required_access="operate",
     )
-    return route_setup_router.create_route_run(
+    return route_setup_router._create_route_run_internal(
         route_id=route_id,
         payload=payload,
         db=db,
@@ -358,7 +363,7 @@ def update_district_route_run(
         run_id=run_id,
         operator_id=operator.id,
     )
-    return route_setup_router.update_route_run(
+    return route_setup_router._update_route_run_internal(
         route_id=route_id,
         run_id=run_id,
         payload=payload,
@@ -389,7 +394,7 @@ def delete_district_route_run(
         run_id=run_id,
         operator_id=operator.id,
     )
-    return route_setup_router.delete_route_run(
+    return route_setup_router._delete_route_run_internal(
         route_id=route_id,
         run_id=run_id,
         db=db,
@@ -421,7 +426,7 @@ def create_district_route_run_stop(
         run_id=run_id,
         operator_id=operator.id,
     )
-    return route_setup_router.create_route_run_stop(
+    return route_setup_router._create_route_run_stop_internal(
         route_id=route_id,
         run_id=run_id,
         payload=payload,
@@ -453,7 +458,7 @@ def update_district_route_stop(
         stop_id=stop_id,
         operator_id=operator.id,
     )
-    return route_setup_router.update_route_stop(
+    return route_setup_router._update_route_stop_internal(
         route_id=route_id,
         stop_id=stop_id,
         payload=payload,
@@ -484,9 +489,235 @@ def delete_district_route_stop(
         stop_id=stop_id,
         operator_id=operator.id,
     )
-    return route_setup_router.delete_route_stop(
+    return route_setup_router._delete_route_stop_internal(
         route_id=route_id,
         stop_id=stop_id,
+        db=db,
+        operator=operator,
+    )
+
+
+@router.post(
+    "/{district_id}/routes/{route_id}/students",
+    response_model=schemas.StudentOut,
+    status_code=status.HTTP_410_GONE,
+    summary="Create student inside district route",
+    description=(
+        "Route-level student placement is retired. "
+        "Use the canonical district route-run-stop placement endpoint "
+        "POST /districts/{district_id}/routes/{route_id}/runs/{run_id}/stops/{stop_id}/students."
+    ),
+    response_description="Route-level placement endpoint retired",
+    include_in_schema=False,
+)
+def create_district_route_student(
+    district_id: int,
+    route_id: int,
+    payload: schemas.StudentCompatibilityCreate,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail=(
+            "Route-level student placement is retired. "
+            "Use POST /districts/{district_id}/routes/{route_id}/runs/{run_id}/stops/{stop_id}/students."
+        ),
+    )
+
+
+@router.delete(
+    "/{district_id}/routes/{route_id}/students/{student_id}",
+    status_code=status.HTTP_410_GONE,
+    summary="Remove student from district route",
+    description=(
+        "Route-level student placement removal is retired. "
+        "Use the canonical district route-run-stop placement delete endpoint "
+        "DELETE /districts/{district_id}/routes/{route_id}/runs/{run_id}/stops/{stop_id}/students/{student_id}."
+    ),
+    response_description="Route-level placement delete endpoint retired",
+    include_in_schema=False,
+)
+def delete_district_route_student(
+    district_id: int,
+    route_id: int,
+    student_id: int,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail=(
+            "Route-level student placement removal is retired. "
+            "Use DELETE /districts/{district_id}/routes/{route_id}/runs/{run_id}/stops/{stop_id}/students/{student_id}."
+        ),
+    )
+
+
+@router.post(
+    "/{district_id}/routes/{route_id}/runs/{run_id}/students/{student_id}/school-status",
+    status_code=status.HTTP_200_OK,
+    summary="Update school status inside district route run",
+    description="Update one assigned student's school status from the selected district-route-run context.",
+    response_description="School student status updated",
+)
+def update_district_route_run_student_school_status(
+    district_id: int,
+    route_id: int,
+    run_id: int,
+    student_id: int,
+    payload: SchoolStatusUpdate,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    _get_district_or_404(db=db, district_id=district_id)
+    _get_district_scoped_run_or_404(
+        db=db,
+        district_id=district_id,
+        route_id=route_id,
+        run_id=run_id,
+        operator_id=operator.id,
+    )
+    return run_setup_router._update_run_student_school_status_internal(
+        run_id=run_id,
+        student_id=student_id,
+        payload=payload,
+        db=db,
+        operator=operator,
+    )
+
+
+@router.post(
+    "/{district_id}/routes/{route_id}/runs/{run_id}/stops/{stop_id}/students",
+    response_model=schemas.StudentOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add student to district route run stop",
+    description="Create one student from the selected district-route-run-stop planning context.",
+    response_description="Created student",
+)
+def create_district_route_run_stop_student(
+    district_id: int,
+    route_id: int,
+    run_id: int,
+    stop_id: int,
+    payload: schemas.StopStudentCreate,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    _get_district_or_404(db=db, district_id=district_id)
+    _get_district_scoped_run_or_404(
+        db=db,
+        district_id=district_id,
+        route_id=route_id,
+        run_id=run_id,
+        operator_id=operator.id,
+    )
+    return run_setup_router._create_run_stop_student_internal(
+        run_id=run_id,
+        stop_id=stop_id,
+        payload=payload,
+        db=db,
+        operator=operator,
+    )
+
+
+@router.put(
+    "/{district_id}/routes/{route_id}/runs/{run_id}/stops/{stop_id}/students/{student_id}",
+    response_model=schemas.StudentOut,
+    summary="Update student inside district route run stop",
+    description="Update one student inside the selected district-route-run-stop planning context.",
+    response_description="Updated student",
+)
+def update_district_route_run_stop_student(
+    district_id: int,
+    route_id: int,
+    run_id: int,
+    stop_id: int,
+    student_id: int,
+    payload: schemas.StopStudentUpdate,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    _get_district_or_404(db=db, district_id=district_id)
+    _get_district_scoped_run_or_404(
+        db=db,
+        district_id=district_id,
+        route_id=route_id,
+        run_id=run_id,
+        operator_id=operator.id,
+    )
+    return run_setup_router._update_run_stop_student_internal(
+        run_id=run_id,
+        stop_id=stop_id,
+        student_id=student_id,
+        payload=payload,
+        db=db,
+        operator=operator,
+    )
+
+
+@router.delete(
+    "/{district_id}/routes/{route_id}/runs/{run_id}/stops/{stop_id}/students/{student_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove student from district route run stop",
+    description="Remove one student from the selected district-route-run-stop planning context without deleting the student record entirely.",
+    response_description="Student removed from run stop",
+)
+def delete_district_route_run_stop_student(
+    district_id: int,
+    route_id: int,
+    run_id: int,
+    stop_id: int,
+    student_id: int,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    _get_district_or_404(db=db, district_id=district_id)
+    _get_district_scoped_run_or_404(
+        db=db,
+        district_id=district_id,
+        route_id=route_id,
+        run_id=run_id,
+        operator_id=operator.id,
+    )
+    return run_setup_router._delete_run_stop_student_internal(
+        run_id=run_id,
+        stop_id=stop_id,
+        student_id=student_id,
+        db=db,
+        operator=operator,
+    )
+
+
+@router.post(
+    "/{district_id}/routes/{route_id}/runs/{run_id}/stops/{stop_id}/students/bulk",
+    response_model=schemas.StopStudentBulkResult,
+    status_code=status.HTTP_201_CREATED,
+    summary="Bulk add students to district route run stop",
+    description="Bulk create students from the selected district-route-run-stop planning context.",
+    response_description="Bulk student creation summary",
+)
+def bulk_create_district_route_run_stop_students(
+    district_id: int,
+    route_id: int,
+    run_id: int,
+    stop_id: int,
+    payload: schemas.StopStudentBulkCreate,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    _get_district_or_404(db=db, district_id=district_id)
+    _get_district_scoped_run_or_404(
+        db=db,
+        district_id=district_id,
+        route_id=route_id,
+        run_id=run_id,
+        operator_id=operator.id,
+    )
+    return run_setup_router._bulk_create_run_stop_students_internal(
+        run_id=run_id,
+        stop_id=stop_id,
+        payload=payload,
         db=db,
         operator=operator,
     )
@@ -510,6 +741,7 @@ def assign_district_route_to_yard(
         district_id=district_id,
         route_id=route_id,
         operator_id=operator.id,
+        required_access="operate",
     )
 
     yard = db.get(Yard, yard_id)

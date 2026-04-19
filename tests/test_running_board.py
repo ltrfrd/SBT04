@@ -14,6 +14,8 @@
 #   - cumulative load logic
 # =============================================================================
 
+from tests.conftest import ensure_run_has_execution_yard
+
 def test_running_board_basic(client):  # Test the running board endpoint
 
     # -------------------------------------------------------------------------
@@ -108,6 +110,7 @@ def test_running_board_basic(client):  # Test the running board endpoint
     # -------------------------------------------------------------------------
     # Call running board endpoint
     # -------------------------------------------------------------------------
+    ensure_run_has_execution_yard(client, run["id"])
     response = client.get(f"/runs/{run['id']}/running_board")  # Request running board
 
     assert response.status_code == 200  # Endpoint should succeed

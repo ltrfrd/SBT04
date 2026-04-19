@@ -46,6 +46,7 @@ from backend.utils.planning_scope import (
     execution_student_filter,
     get_operator_yard_ids,
     get_route_for_execution_or_404,
+    get_school_for_planning_or_404,
     get_school_for_execution_or_404,
     operator_has_yard_route_assignments,
     yards_accessible_route_filter,
@@ -331,17 +332,26 @@ def get_school_reports(
     operator: Operator = Depends(get_operator_context),
 ):
     yard_ids = _get_active_execution_yard_ids(db=db, operator_id=operator.id)
-    get_school_for_execution_or_404(
-        db=db,
-        operator_id=operator.id,
-        school_id=school_id,
-        detail="School not found",
-    )
+    if yard_ids is not None:
+        get_school_for_execution_or_404(
+            db=db,
+            operator_id=operator.id,
+            school_id=school_id,
+            detail="School not found",
+        )
+    else:
+        get_school_for_planning_or_404(
+            db=db,
+            operator_id=operator.id,
+            school_id=school_id,
+            detail="School not found",
+        )
     reports_data = reports_generator.generate_reports(
         db=db,                                                # Pass DB session
         reports_type="school",
         ref_id=school_id,                                     # School reference ID
         yard_ids=yard_ids,
+        operator_id=operator.id,
     )
     return _serialize_school_report_summary(reports_data)
 
@@ -697,6 +707,7 @@ def get_school_mobile_reports(
         db=db,                                                 # Pass DB session
         school_id=school_id,                                   # Requested school
         yard_ids=yard_ids,
+        operator_id=operator.id,
     )                                                          # Navigation payload
 
     if "error" in report_data:                                 # Reject unknown school requests
@@ -737,6 +748,7 @@ def get_school_mobile_route_runs(
         school_id=school_id,                                  # Requested school
         route_id=route_id,                                    # Requested route
         yard_ids=yard_ids,
+        operator_id=operator.id,
     )                                                         # Route runs payload
 
     if "error" in report_data:                                # Reject unknown route requests
@@ -778,6 +790,7 @@ def get_school_mobile_single_run_reports(
         school_id=school_id,                                  # Requested school
         run_id=run_id,                                        # Requested run
         yard_ids=yard_ids,
+        operator_id=operator.id,
     )                                                         # Single run payload
 
     if "error" in report_data:                                # Reject unknown run requests
@@ -881,4 +894,3 @@ def update_school_status_for_assignment(
 student_bus_absence_router = student_bus_absence.router
 
 __all__ = ["router", "student_bus_absence_router"]
-

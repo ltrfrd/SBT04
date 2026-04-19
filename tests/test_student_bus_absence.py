@@ -14,8 +14,22 @@ def _create_student(client):
     assert route_response.status_code in (200, 201)
     route_id = route_response.json()["id"]
 
+    run_response = client.post(
+        f"/routes/{route_id}/runs",
+        json={"run_type": "AM"},
+    )
+    assert run_response.status_code in (200, 201)
+    run_id = run_response.json()["id"]
+
+    stop_response = client.post(
+        f"/runs/{run_id}/stops",
+        json={"sequence": 1, "type": "pickup", "name": "Absence Stop"},
+    )
+    assert stop_response.status_code in (200, 201)
+    stop_id = stop_response.json()["id"]
+
     student_response = client.post(
-        f"/routes/{route_id}/students",
+        f"/runs/{run_id}/stops/{stop_id}/students",
         json={"name": "Absence Student", "grade": "4", "school_id": school_id},
     )  # Create student for absence tests
     assert student_response.status_code in (200, 201)  # Confirm student creation succeeded

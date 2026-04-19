@@ -17,8 +17,7 @@ from backend.models import school as school_model
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
 from backend.utils.planning_scope import (
-    execution_school_filter,
-    get_school_for_execution_or_404,
+    accessible_school_filter,
     get_school_for_planning_or_404,
     validate_planning_alignment,
     validate_route_school_alignment,
@@ -29,6 +28,16 @@ router = APIRouter(
     prefix="/schools",
     tags=["Schools"],
 )
+
+
+def _raise_district_planning_path_retired() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail=(
+            "School-route planning mutations now belong to district-nested route planning paths. "
+            "Use /districts/{district_id}/routes/{route_id} to manage school links."
+        ),
+    )
 
 def _get_school_for_planning_mutation_or_404(
     *,
@@ -129,7 +138,7 @@ def get_schools(
 ):
     return (
         db.query(school_model.School)
-        .filter(execution_school_filter(db=db, operator_id=operator.id))
+        .filter(accessible_school_filter(operator.id))
         .all()
     )
 
@@ -146,7 +155,7 @@ def get_school(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    return get_school_for_execution_or_404(
+    return get_school_for_planning_or_404(
         db=db,
         school_id=school_id,
         operator_id=operator.id,
@@ -223,6 +232,7 @@ def delete_school(
 @router.post(
     "/{school_id}/assign_route/{route_id}",
     response_model=schemas.SchoolOut,
+    include_in_schema=False,
     summary="Assign route to school",
     description="Link a school to a route while keeping the route as the planning source of truth. Prevents duplicate assignments.",
     response_description="Updated school with route link",
@@ -233,6 +243,7 @@ def assign_route_to_school(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
+    _raise_district_planning_path_retired()
     school, route = _get_school_route_link_context_or_404(
         db=db,
         school_id=school_id,
@@ -250,6 +261,7 @@ def assign_route_to_school(
 @router.delete(
     "/{school_id}/unassign_route/{route_id}",
     response_model=schemas.SchoolOut,
+    include_in_schema=False,
     summary="Unassign route from school",
     description="Remove the link between a school and a route while keeping route context authoritative.",
     response_description="Updated school without route link",
@@ -260,6 +272,7 @@ def unassign_route_from_school(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
+    _raise_district_planning_path_retired()
     school, route = _get_school_route_link_context_or_404(
         db=db,
         school_id=school_id,

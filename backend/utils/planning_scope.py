@@ -13,6 +13,9 @@ from backend.models.yard import Yard
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
 
 
+EXECUTION_ROUTE_BLOCKED_DETAIL = "Route is not assigned to a yard for execution for this operator"
+
+
 # -----------------------------------------------------------
 # School-domain planning scope helpers
 # -----------------------------------------------------------
@@ -238,6 +241,26 @@ def get_route_for_execution_or_404(
         .first()
     )
     if not route:
+        route_exists = (
+            db.query(Route.id)
+            .filter(Route.id == route_id)
+            .first()
+        ) is not None
+        if not route_exists:
+            raise HTTPException(status_code=404, detail=detail)
+
+        planning_visible = (
+            db.query(Route.id)
+            .filter(Route.id == route_id)
+            .filter(accessible_route_filter(operator_id))
+            .first()
+        ) is not None
+        if planning_visible:
+            raise HTTPException(
+                status_code=403,
+                detail=EXECUTION_ROUTE_BLOCKED_DETAIL,
+            )
+
         raise HTTPException(status_code=404, detail=detail)
     return route
 

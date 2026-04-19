@@ -19,13 +19,10 @@ from backend.models import stop as stop_model
 from backend.models import student as student_model
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.planning_scope import (
-    execution_student_filter,
-    get_route_for_execution_or_404,
+    accessible_student_filter,
     get_route_with_schools_or_404,
     get_school_for_planning_or_404,
-    get_school_for_execution_or_404,
     get_student_for_planning_or_404,
-    get_student_for_execution_or_404,
     validate_planning_alignment,
     validate_route_school_alignment,
 )
@@ -228,7 +225,7 @@ def _sync_student_assignment_rows_for_assignment_move(
         if is_historical:
             continue
 
-        if run.route_id != target_route.id:
+        if assignment.run_id != target_run.id:
             db.delete(assignment)
 
     if target_assignment is None:
@@ -328,7 +325,7 @@ def get_students(
 ):
     return (
         db.query(student_model.Student)
-        .filter(execution_student_filter(db=db, operator_id=operator.id))
+        .filter(accessible_student_filter(operator.id))
         .all()
     )
 
@@ -345,7 +342,7 @@ def get_student(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    return get_student_for_execution_or_404(
+    return get_student_for_planning_or_404(
         db=db,
         student_id=student_id,
         operator_id=operator.id,
@@ -356,14 +353,15 @@ def get_student(
 @router.put(
     "/{student_id}/assignment",
     response_model=schemas.StudentOut,
+    status_code=status.HTTP_410_GONE,
     summary="Update student assignment (maintenance)",
     description=(
-        "Maintenance endpoint for correcting or moving a student to a different route, run, and stop after initial setup. "
-        "This is not the normal creation workflow; preferred initial setup is POST /runs/{run_id}/stops/{stop_id}/students. "
-        "Runtime assignment rows are synchronized safely when the move is valid. "
-        "Only planned runs can be modified."
+        "Student placement maintenance through /students/{student_id}/assignment is retired. "
+        "Use the canonical district run-stop placement endpoint "
+        "PUT /districts/{district_id}/routes/{route_id}/runs/{run_id}/stops/{stop_id}/students/{student_id}."
     ),
-    response_description="Updated student assignment",
+    response_description="Placement maintenance endpoint retired",
+    include_in_schema=False,
 )
 def update_student_assignment(
     student_id: int,
@@ -371,36 +369,13 @@ def update_student_assignment(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    student = _get_student_for_planning_or_404(
-        db=db,
-        operator_id=operator.id,
-        detail="Student not found",
-        student_id=student_id,
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail=(
+            "Student placement updates now belong to the canonical district run-stop placement path. "
+            "Use PUT /districts/{district_id}/routes/{route_id}/runs/{run_id}/stops/{stop_id}/students/{student_id}."
+        ),
     )
-
-    target_route, target_run, target_stop = _validate_student_assignment_target(
-        student=student,
-        route_id=assignment_in.route_id,
-        run_id=assignment_in.run_id,
-        stop_id=assignment_in.stop_id,
-        operator_id=operator.id,
-        db=db,
-    )
-
-    student.route_id = target_route.id
-    student.stop_id = target_stop.id
-
-    _sync_student_assignment_rows_for_assignment_move(
-        student=student,
-        target_route=target_route,
-        target_run=target_run,
-        target_stop=target_stop,
-        db=db,
-    )
-
-    db.commit()
-    db.refresh(student)
-    return student
 
 
 @router.delete(
@@ -441,8 +416,8 @@ def get_students_by_school(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    student_filter = execution_student_filter(db=db, operator_id=operator.id)
-    get_school_for_execution_or_404(
+    student_filter = accessible_student_filter(operator.id)
+    get_school_for_planning_or_404(
         db=db,
         operator_id=operator.id,
         detail="School not found",
@@ -469,12 +444,8 @@ def get_students_by_route(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    student_filter = execution_student_filter(db=db, operator_id=operator.id)
-    get_route_for_execution_or_404(
-        db=db,
-        route_id=route_id,
-        operator_id=operator.id,
-    )
+    student_filter = accessible_student_filter(operator.id)
+    _get_route_with_schools(route_id, db, operator.id, "read")
 
     return (
         db.query(student_model.Student)

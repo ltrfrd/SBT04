@@ -16,11 +16,8 @@ from backend.models.route import Route
 from backend.routers.route_helpers import _serialize_route
 from backend.routers.route_helpers import _serialize_route_detail
 from backend.routers.run_helpers import _serialize_run
+from backend.utils.planning_scope import accessible_route_filter
 from backend.utils.operator_scope import get_operator_context
-from backend.utils.planning_scope import (
-    execution_route_filter,
-    get_route_for_execution_or_404,
-)
 
 
 router = APIRouter(tags=["Routes"])
@@ -45,7 +42,7 @@ def get_routes(
             selectinload(Route.runs).selectinload(run_model.Run.stops),
             selectinload(Route.runs).selectinload(run_model.Run.student_assignments),
         )
-        .filter(execution_route_filter(db=db, operator_id=operator.id))
+        .filter(accessible_route_filter(operator.id))
         .order_by(Route.route_number.asc(), Route.id.asc())
         .all()
     )
@@ -75,7 +72,7 @@ def get_route(
             selectinload(Route.runs).selectinload(run_model.Run.student_assignments).selectinload(StudentRunAssignment.student).selectinload(student_model.Student.school),
         )
         .filter(Route.id == route_id)
-        .filter(execution_route_filter(db=db, operator_id=operator.id))
+        .filter(accessible_route_filter(operator.id))
         .first()
     )
     if not route:
@@ -95,11 +92,14 @@ def get_route_runs(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    route = get_route_for_execution_or_404(
-        db=db,
-        route_id=route_id,
-        operator_id=operator.id,
+    route = (
+        db.query(Route)
+        .filter(Route.id == route_id)
+        .filter(accessible_route_filter(operator.id))
+        .first()
     )
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
 
     runs = (
         db.query(run_model.Run)
@@ -122,11 +122,14 @@ def get_route_stops(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    route = get_route_for_execution_or_404(
-        db=db,
-        route_id=route_id,
-        operator_id=operator.id,
+    route = (
+        db.query(Route)
+        .filter(Route.id == route_id)
+        .filter(accessible_route_filter(operator.id))
+        .first()
     )
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
 
     return (
         db.query(stop_model.Stop)
@@ -148,11 +151,14 @@ def get_route_students(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    route = get_route_for_execution_or_404(
-        db=db,
-        route_id=route_id,
-        operator_id=operator.id,
+    route = (
+        db.query(Route)
+        .filter(Route.id == route_id)
+        .filter(accessible_route_filter(operator.id))
+        .first()
     )
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
 
     return (
         db.query(student_model.Student)
@@ -168,11 +174,15 @@ def get_route_schools(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    route = get_route_for_execution_or_404(
-        db=db,
-        route_id=route_id,
-        operator_id=operator.id,
+    route = (
+        db.query(Route)
+        .options(selectinload(Route.schools))
+        .filter(Route.id == route_id)
+        .filter(accessible_route_filter(operator.id))
+        .first()
     )
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
 
     return [{"id": s.id, "name": s.name, "address": s.address} for s in route.schools]
 
@@ -194,12 +204,15 @@ def get_route_drivers(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    route = get_route_for_execution_or_404(
-        db=db,
-        route_id=route_id,
-        operator_id=operator.id,
-        options=[joinedload(Route.driver_assignments).joinedload(RouteDriverAssignment.driver)],
+    route = (
+        db.query(Route)
+        .options(joinedload(Route.driver_assignments).joinedload(RouteDriverAssignment.driver))
+        .filter(Route.id == route_id)
+        .filter(accessible_route_filter(operator.id))
+        .first()
     )
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
 
     return [
         schemas.RouteDriverAssignmentOut(

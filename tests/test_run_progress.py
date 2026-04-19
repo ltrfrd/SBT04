@@ -11,7 +11,7 @@
 #   - POST /runs/{run_id}/stops/{stop_id}/students
 #   - POST /runs/start
 # =============================================================================
-from tests.conftest import ensure_prepared_run_student
+from tests.conftest import ensure_prepared_run_student, ensure_run_has_execution_yard
 
 
 # =============================================================================
@@ -70,6 +70,7 @@ def test_start_run_requires_prepared_stops(client):
     # -------------------------------------------------------------------------
     # Starting without prepared stops should now fail
     # -------------------------------------------------------------------------
+    ensure_run_has_execution_yard(client, source_run_id)
     start_response = client.post(f"/runs/start?run_id={source_run_id}")
     assert start_response.status_code == 400
     assert start_response.json()["detail"] == "Run has no stops. Prepare stops before starting the run."
@@ -142,6 +143,7 @@ def test_start_run_requires_prepared_students(client):
     # -------------------------------------------------------------------------
     # Starting without runtime students should now fail
     # -------------------------------------------------------------------------
+    ensure_run_has_execution_yard(client, source_run_id)
     start_response = client.post(f"/runs/start?run_id={source_run_id}")
     assert start_response.status_code == 400
     assert start_response.json()["detail"] == "Run has no students. Assign students before starting the run."

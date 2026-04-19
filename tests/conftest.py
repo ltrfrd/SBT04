@@ -39,7 +39,7 @@ from sqlalchemy.orm import sessionmaker  # Session factory
 from database import Base  # SQLAlchemy Base (root database.py)
 from app import app, get_db  # FastAPI app + DB dependency
 from backend.config import settings
-from backend.models import driver, school, student, route, run, dispatch          # Core models used by app
+from backend.models import driver, school, student, route, run, stop, dispatch          # Core models used by app
 from backend.models import associations                                            # Ensure StudentRunAssignment is registered
 from backend.models.operator import Operator                                        # Operator model for direct DB bootstrap
 from backend.models.driver import Driver                                          # Driver model for direct DB bootstrap
@@ -410,6 +410,58 @@ def client(db_engine):
             finally:
                 db.close()
 
+        def _get_route_planning_snapshot(self, route_id: int) -> dict | None:
+            TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+            db = TestingSessionLocal()
+            try:
+                route_row = db.get(route.Route, route_id)
+                if route_row is None:
+                    return None
+                return {
+                    "route_id": route_row.id,
+                    "district_id": route_row.district_id,
+                    "route_number": route_row.route_number,
+                    "school_ids": [school_row.id for school_row in route_row.schools],
+                }
+            finally:
+                db.close()
+
+        def _get_run_context(self, run_id: int) -> dict | None:
+            TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+            db = TestingSessionLocal()
+            try:
+                run_row = db.get(run.Run, run_id)
+                if run_row is None:
+                    return None
+                route_row = db.get(route.Route, run_row.route_id) if run_row.route_id is not None else None
+                district_id = route_row.district_id if route_row is not None else None
+                return {
+                    "run_id": run_row.id,
+                    "route_id": run_row.route_id,
+                    "district_id": district_id,
+                }
+            finally:
+                db.close()
+
+        def _get_stop_context(self, stop_id: int) -> dict | None:
+            TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+            db = TestingSessionLocal()
+            try:
+                stop_row = db.get(stop.Stop, stop_id)
+                if stop_row is None:
+                    return None
+                run_row = db.get(run.Run, stop_row.run_id) if stop_row.run_id is not None else None
+                route_row = db.get(route.Route, run_row.route_id) if run_row is not None and run_row.route_id is not None else None
+                district_id = route_row.district_id if route_row is not None else None
+                return {
+                    "stop_id": stop_row.id,
+                    "run_id": stop_row.run_id,
+                    "route_id": route_row.id if route_row is not None else None,
+                    "district_id": district_id,
+                }
+            finally:
+                db.close()
+
         def _ensure_route_payload_has_district(self, payload: dict) -> dict:
             route_payload = dict(payload)
             if route_payload.get("district_id") is not None:
@@ -460,22 +512,6 @@ def client(db_engine):
 
         def get(self, url, *args, **kwargs):
             parsed = urlparse(url)
-            path_parts = [part for part in parsed.path.strip("/").split("/") if part]
-            query = parse_qs(parsed.query)
-
-            if len(path_parts) >= 2 and path_parts[0] == "runs" and path_parts[1].isdigit():
-                self.ensure_run_has_execution_yard(int(path_parts[1]))
-
-            if parsed.path.rstrip("/") == "/runs":
-                route_id_values = query.get("route_id", [])
-                if route_id_values and route_id_values[0].isdigit():
-                    self.ensure_route_has_execution_yard(int(route_id_values[0]))
-
-            if len(path_parts) >= 1 and path_parts[0] == "driver_run":
-                route_id_values = query.get("route_id", [])
-                if route_id_values and route_id_values[0].isdigit():
-                    self.ensure_route_has_execution_yard(int(route_id_values[0]))
-
             return self._wrapped_client.get(url, *args, **kwargs)
 
         def post(self, url, *args, **kwargs):
@@ -506,7 +542,13 @@ def client(db_engine):
             if url == "/routes/" and isinstance(payload, dict) and "driver_id" in payload:
                 route_payload = self._ensure_route_payload_has_district(payload)
                 driver_id = route_payload.pop("driver_id")
-                response = self._wrapped_client.post(url, *args, json=route_payload, **{k: v for k, v in kwargs.items() if k != "json"})
+                district_id = route_payload.pop("district_id")
+                response = self._wrapped_client.post(
+                    f"/districts/{district_id}/routes",
+                    *args,
+                    json=route_payload,
+                    **{k: v for k, v in kwargs.items() if k != "json"},
+                )
 
                 if response.status_code in (200, 201):
                     route_id = response.json().get("id")
@@ -517,8 +559,9 @@ def client(db_engine):
 
             if url == "/routes/" and isinstance(payload, dict):
                 route_payload = self._ensure_route_payload_has_district(payload)
+                district_id = route_payload.pop("district_id")
                 return self._wrapped_client.post(
-                    url,
+                    f"/districts/{district_id}/routes",
                     *args,
                     json=route_payload,
                     **{k: v for k, v in kwargs.items() if k != "json"},
@@ -529,12 +572,31 @@ def client(db_engine):
                 school_id = int(path_parts[1])
                 route_id = int(path_parts[3])
                 self._ensure_route_matches_school_district(school_id, route_id)
-                return self._wrapped_client.post(url, *args, **kwargs)
+                route_snapshot = self._get_route_planning_snapshot(route_id)
+                assert route_snapshot is not None
+                school_ids = route_snapshot["school_ids"]
+                if school_id not in school_ids:
+                    school_ids = [*school_ids, school_id]
+                return self._wrapped_client.put(
+                    f"/districts/{route_snapshot['district_id']}/routes/{route_id}",
+                    *args,
+                    json={
+                        "route_number": route_snapshot["route_number"],
+                        "school_ids": school_ids,
+                    },
+                    **kwargs,
+                )
 
             if url.startswith("/routes/") and url.endswith("/students"):
                 route_id = int(url.strip("/").split("/")[1])
                 self._ensure_route_matches_payload_school(route_id, payload)
-                return self._wrapped_client.post(url, *args, **kwargs)
+                route_snapshot = self._get_route_planning_snapshot(route_id)
+                assert route_snapshot is not None
+                return self._wrapped_client.post(
+                    f"/districts/{route_snapshot['district_id']}/routes/{route_id}/students",
+                    *args,
+                    **kwargs,
+                )
 
             if url == "/runs/" and isinstance(payload, dict) and "driver_id" in payload:
                 run_payload = _with_default_run_schedule(payload)
@@ -542,46 +604,191 @@ def client(db_engine):
                 route_id = run_payload.pop("route_id", None)
                 if route_id is None:
                     return self._wrapped_client.post(url, *args, json=run_payload, **{k: v for k, v in kwargs.items() if k != "json"})
-                return self._wrapped_client.post(f"/routes/{route_id}/runs", *args, json=run_payload, **{k: v for k, v in kwargs.items() if k != "json"})
+                district_id = self._get_route_district_id(route_id)
+                assert district_id is not None
+                return self._wrapped_client.post(
+                    f"/districts/{district_id}/routes/{route_id}/runs",
+                    *args,
+                    json=run_payload,
+                    **{k: v for k, v in kwargs.items() if k != "json"},
+                )
 
             if url == "/runs/" and isinstance(payload, dict):
                 run_payload = _with_default_run_schedule(payload)
                 route_id = run_payload.pop("route_id", None)
                 if route_id is None:
                     return self._wrapped_client.post(url, *args, json=run_payload, **{k: v for k, v in kwargs.items() if k != "json"})
-                return self._wrapped_client.post(f"/routes/{route_id}/runs", *args, json=run_payload, **{k: v for k, v in kwargs.items() if k != "json"})
+                district_id = self._get_route_district_id(route_id)
+                assert district_id is not None
+                return self._wrapped_client.post(
+                    f"/districts/{district_id}/routes/{route_id}/runs",
+                    *args,
+                    json=run_payload,
+                    **{k: v for k, v in kwargs.items() if k != "json"},
+                )
 
             if url == "/stops/" and isinstance(payload, dict):
                 stop_payload = dict(payload)
                 run_id = stop_payload.pop("run_id", None)
                 if run_id is None:
                     return self._wrapped_client.post(url, *args, json=stop_payload, **{k: v for k, v in kwargs.items() if k != "json"})
-                return self._wrapped_client.post(f"/runs/{run_id}/stops", *args, json=stop_payload, **{k: v for k, v in kwargs.items() if k != "json"})
+                run_context = self._get_run_context(run_id)
+                if run_context is None:
+                    return self._wrapped_client.post(url, *args, json=stop_payload, **{k: v for k, v in kwargs.items() if k != "json"})
+                return self._wrapped_client.post(
+                    f"/districts/{run_context['district_id']}/routes/{run_context['route_id']}/runs/{run_id}/stops",
+                    *args,
+                    json=stop_payload,
+                    **{k: v for k, v in kwargs.items() if k != "json"},
+                )
 
-            if url.startswith("/routes/") and url.endswith("/stops") and isinstance(payload, dict):
+            if (
+                url.startswith("/routes/")
+                and url.endswith("/stops")
+                and "/runs/" not in url
+                and isinstance(payload, dict)
+            ):
                 stop_payload = dict(payload)
                 run_id = stop_payload.pop("run_id", None)
                 if run_id is None:
                     return self._wrapped_client.post(url, *args, json=stop_payload, **{k: v for k, v in kwargs.items() if k != "json"})
                 route_path = url.rstrip("/")
-                return self._wrapped_client.post(f"{route_path}/runs/{run_id}/stops", *args, json=stop_payload, **{k: v for k, v in kwargs.items() if k != "json"})
+                route_id = int(route_path.strip("/").split("/")[1])
+                district_id = self._get_route_district_id(route_id)
+                assert district_id is not None
+                return self._wrapped_client.post(
+                    f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops",
+                    *args,
+                    json=stop_payload,
+                    **{k: v for k, v in kwargs.items() if k != "json"},
+                )
+
+            if (
+                len([part for part in url.strip("/").split("/") if part]) == 5
+                and url.startswith("/routes/")
+                and "/runs/" in url
+                and url.endswith("/stops")
+                and isinstance(payload, dict)
+            ):
+                path_parts = [part for part in url.strip("/").split("/") if part]
+                route_id = int(path_parts[1])
+                run_id = int(path_parts[3])
+                district_id = self._get_route_district_id(route_id)
+                if district_id is None:
+                    return self._wrapped_client.post(url, *args, **kwargs)
+                return self._wrapped_client.post(
+                    f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops",
+                    *args,
+                    json=payload,
+                    **{k: v for k, v in kwargs.items() if k != "json"},
+                )
 
             if url.startswith("/routes/") and url.endswith("/runs") and isinstance(payload, dict):
-                return self._wrapped_client.post(url, *args, json=_with_default_run_schedule(payload), **{k: v for k, v in kwargs.items() if k != "json"})
+                route_id = int(url.strip("/").split("/")[1])
+                district_id = self._get_route_district_id(route_id)
+                assert district_id is not None
+                return self._wrapped_client.post(
+                    f"/districts/{district_id}/routes/{route_id}/runs",
+                    *args,
+                    json=_with_default_run_schedule(payload),
+                    **{k: v for k, v in kwargs.items() if k != "json"},
+                )
+
+            if (
+                len([part for part in url.strip("/").split("/") if part]) == 3
+                and url.startswith("/runs/")
+                and url.endswith("/stops")
+                and isinstance(payload, dict)
+            ):
+                path_parts = [part for part in url.strip("/").split("/") if part]
+                run_id = int(path_parts[1])
+                run_context = self._get_run_context(run_id)
+                if run_context is None:
+                    return self._wrapped_client.post(url, *args, **kwargs)
+                return self._wrapped_client.post(
+                    f"/districts/{run_context['district_id']}/routes/{run_context['route_id']}/runs/{run_id}/stops",
+                    *args,
+                    json=payload,
+                    **{k: v for k, v in kwargs.items() if k != "json"},
+                )
 
             if url == "/students/" and isinstance(payload, dict) and "route_id" in payload:
                 student_payload = dict(payload)
                 route_id = student_payload.pop("route_id", None)
                 self._ensure_route_matches_payload_school(route_id, student_payload)
                 student_payload.pop("district_id", None)
-                return self._wrapped_client.post(f"/routes/{route_id}/students", *args, json=student_payload, **{k: v for k, v in kwargs.items() if k != "json"})
+                route_snapshot = self._get_route_planning_snapshot(route_id)
+                assert route_snapshot is not None
+                return self._wrapped_client.post(
+                    f"/districts/{route_snapshot['district_id']}/routes/{route_id}/students",
+                    *args,
+                    json=student_payload,
+                    **{k: v for k, v in kwargs.items() if k != "json"},
+                )
+
+            if (
+                len([part for part in url.strip("/").split("/") if part]) >= 5
+                and url.startswith("/runs/")
+                and "/stops/" in url
+                and url.endswith("/students")
+                and isinstance(payload, dict)
+            ):
+                path_parts = [part for part in url.strip("/").split("/") if part]
+                run_id = int(path_parts[1])
+                stop_id = int(path_parts[3])
+                run_context = self._get_run_context(run_id)
+                if run_context is None:
+                    return self._wrapped_client.post(url, *args, **kwargs)
+                return self._wrapped_client.post(
+                    f"/districts/{run_context['district_id']}/routes/{run_context['route_id']}/runs/{run_id}/stops/{stop_id}/students",
+                    *args,
+                    json=payload,
+                    **{k: v for k, v in kwargs.items() if k != "json"},
+                )
+
+            if (
+                len([part for part in url.strip("/").split("/") if part]) >= 6
+                and url.startswith("/runs/")
+                and url.endswith("/students/bulk")
+                and isinstance(payload, dict)
+            ):
+                path_parts = [part for part in url.strip("/").split("/") if part]
+                run_id = int(path_parts[1])
+                stop_id = int(path_parts[3])
+                run_context = self._get_run_context(run_id)
+                if run_context is None:
+                    return self._wrapped_client.post(url, *args, **kwargs)
+                return self._wrapped_client.post(
+                    f"/districts/{run_context['district_id']}/routes/{run_context['route_id']}/runs/{run_id}/stops/{stop_id}/students/bulk",
+                    *args,
+                    json=payload,
+                    **{k: v for k, v in kwargs.items() if k != "json"},
+                )
+
+            if (
+                len([part for part in url.strip("/").split("/") if part]) == 5
+                and url.startswith("/runs/")
+                and url.endswith("/school-status")
+                and isinstance(payload, dict)
+            ):
+                path_parts = [part for part in url.strip("/").split("/") if part]
+                run_id = int(path_parts[1])
+                student_id = int(path_parts[3])
+                run_context = self._get_run_context(run_id)
+                if run_context is None:
+                    return self._wrapped_client.post(url, *args, **kwargs)
+                return self._wrapped_client.post(
+                    f"/districts/{run_context['district_id']}/routes/{run_context['route_id']}/runs/{run_id}/students/{student_id}/school-status",
+                    *args,
+                    json=payload,
+                    **{k: v for k, v in kwargs.items() if k != "json"},
+                )
 
             if url.startswith("/runs/start"):
                 parsed = urlparse(url)
                 run_id_values = parse_qs(parsed.query).get("run_id", [])
                 if run_id_values:
                     run_id = int(run_id_values[0])
-                    self.ensure_run_has_execution_yard(run_id)
                     run_response = self._wrapped_client.get(f"/runs/{run_id}")
                     if run_response.status_code == 200:
                         run_data = run_response.json()
@@ -659,7 +866,14 @@ def client(db_engine):
             if url.startswith("/routes/") and isinstance(payload, dict) and "driver_id" in payload:
                 route_payload = self._ensure_route_payload_has_district(payload)
                 driver_id = route_payload.pop("driver_id")
-                response = self._wrapped_client.put(url, *args, json=route_payload, **{k: v for k, v in kwargs.items() if k != "json"})
+                route_id = int(url.strip("/").split("/")[1])
+                district_id = route_payload.pop("district_id")
+                response = self._wrapped_client.put(
+                    f"/districts/{district_id}/routes/{route_id}",
+                    *args,
+                    json=route_payload,
+                    **{k: v for k, v in kwargs.items() if k != "json"},
+                )
 
                 if response.status_code == 200:
                     route_id = response.json().get("id")
@@ -670,14 +884,171 @@ def client(db_engine):
 
             if len(path_parts) == 2 and path_parts[0] == "routes" and isinstance(payload, dict):
                 route_payload = self._ensure_route_payload_has_district(payload)
+                district_id = route_payload.pop("district_id")
                 return self._wrapped_client.put(
-                    url,
+                    f"/districts/{district_id}/routes/{path_parts[1]}",
                     *args,
                     json=route_payload,
                     **{k: v for k, v in kwargs.items() if k != "json"},
                 )
 
+            if len(path_parts) == 2 and path_parts[0] == "runs" and isinstance(payload, dict):
+                run_context = self._get_run_context(int(path_parts[1]))
+                if run_context is None:
+                    return self._wrapped_client.put(url, *args, **kwargs)
+                return self._wrapped_client.put(
+                    f"/districts/{run_context['district_id']}/routes/{run_context['route_id']}/runs/{path_parts[1]}",
+                    *args,
+                    json=payload,
+                    **{k: v for k, v in kwargs.items() if k != "json"},
+                )
+
+            if (
+                len(path_parts) == 4
+                and path_parts[0] == "routes"
+                and path_parts[2] == "stops"
+                and isinstance(payload, dict)
+            ):
+                route_id = int(path_parts[1])
+                district_id = self._get_route_district_id(route_id)
+                if district_id is None:
+                    return self._wrapped_client.put(url, *args, **kwargs)
+                return self._wrapped_client.put(
+                    f"/districts/{district_id}/routes/{route_id}/stops/{path_parts[3]}",
+                    *args,
+                    json=payload,
+                    **{k: v for k, v in kwargs.items() if k != "json"},
+                )
+
+            if (
+                len(path_parts) == 4
+                and path_parts[0] == "routes"
+                and path_parts[2] == "runs"
+                and isinstance(payload, dict)
+            ):
+                route_id = int(path_parts[1])
+                district_id = self._get_route_district_id(route_id)
+                if district_id is None:
+                    return self._wrapped_client.put(url, *args, **kwargs)
+                return self._wrapped_client.put(
+                    f"/districts/{district_id}/routes/{route_id}/runs/{path_parts[3]}",
+                    *args,
+                    json=payload,
+                    **{k: v for k, v in kwargs.items() if k != "json"},
+                )
+
+            if (
+                len(path_parts) == 4
+                and path_parts[0] == "runs"
+                and path_parts[2] == "stops"
+                and isinstance(payload, dict)
+            ):
+                run_context = self._get_run_context(int(path_parts[1]))
+                if run_context is None:
+                    return self._wrapped_client.put(url, *args, **kwargs)
+                return self._wrapped_client.put(
+                    f"/districts/{run_context['district_id']}/routes/{run_context['route_id']}/stops/{path_parts[3]}",
+                    *args,
+                    json=payload,
+                    **{k: v for k, v in kwargs.items() if k != "json"},
+                )
+
+            if (
+                len(path_parts) == 6
+                and path_parts[0] == "runs"
+                and path_parts[2] == "stops"
+                and path_parts[4] == "students"
+                and isinstance(payload, dict)
+            ):
+                run_context = self._get_run_context(int(path_parts[1]))
+                if run_context is None:
+                    return self._wrapped_client.put(url, *args, **kwargs)
+                return self._wrapped_client.put(
+                    f"/districts/{run_context['district_id']}/routes/{run_context['route_id']}/runs/{path_parts[1]}/stops/{path_parts[3]}/students/{path_parts[5]}",
+                    *args,
+                    json=payload,
+                    **{k: v for k, v in kwargs.items() if k != "json"},
+                )
+
             return self._wrapped_client.put(url, *args, **kwargs)
+
+        def delete(self, url, *args, **kwargs):
+            path_parts = [part for part in url.strip("/").split("/") if part]
+
+            if url.startswith("/schools/") and "/unassign_route/" in url:
+                school_id = int(path_parts[1])
+                route_id = int(path_parts[3])
+                route_snapshot = self._get_route_planning_snapshot(route_id)
+                assert route_snapshot is not None
+                school_ids = [existing_id for existing_id in route_snapshot["school_ids"] if existing_id != school_id]
+                return self._wrapped_client.put(
+                    f"/districts/{route_snapshot['district_id']}/routes/{route_id}",
+                    *args,
+                    json={
+                        "route_number": route_snapshot["route_number"],
+                        "school_ids": school_ids,
+                    },
+                    **kwargs,
+                )
+
+            if len(path_parts) == 2 and path_parts[0] == "routes":
+                district_id = self._get_route_district_id(int(path_parts[1]))
+                assert district_id is not None
+                return self._wrapped_client.delete(
+                    f"/districts/{district_id}/routes/{path_parts[1]}",
+                    *args,
+                    **kwargs,
+                )
+
+            if len(path_parts) == 4 and path_parts[0] == "routes" and path_parts[2] == "runs":
+                district_id = self._get_route_district_id(int(path_parts[1]))
+                if district_id is None:
+                    return self._wrapped_client.delete(url, *args, **kwargs)
+                return self._wrapped_client.delete(
+                    f"/districts/{district_id}/routes/{path_parts[1]}/runs/{path_parts[3]}",
+                    *args,
+                    **kwargs,
+                )
+
+            if len(path_parts) == 4 and path_parts[0] == "routes" and path_parts[2] == "stops":
+                stop_context = self._get_stop_context(int(path_parts[3]))
+                assert stop_context is not None
+                return self._wrapped_client.delete(
+                    f"/districts/{stop_context['district_id']}/routes/{path_parts[1]}/stops/{path_parts[3]}",
+                    *args,
+                    **kwargs,
+                )
+
+            if len(path_parts) == 4 and path_parts[0] == "routes" and path_parts[2] == "students":
+                route_snapshot = self._get_route_planning_snapshot(int(path_parts[1]))
+                assert route_snapshot is not None
+                return self._wrapped_client.delete(
+                    f"/districts/{route_snapshot['district_id']}/routes/{path_parts[1]}/students/{path_parts[3]}",
+                    *args,
+                    **kwargs,
+                )
+
+            if len(path_parts) == 2 and path_parts[0] == "runs":
+                run_context = self._get_run_context(int(path_parts[1]))
+                if run_context is None:
+                    return self._wrapped_client.delete(url, *args, **kwargs)
+                return self._wrapped_client.delete(
+                    f"/districts/{run_context['district_id']}/routes/{run_context['route_id']}/runs/{path_parts[1]}",
+                    *args,
+                    **kwargs,
+                )
+
+            if len(path_parts) == 6 and path_parts[0] == "runs" and path_parts[2] == "stops" and path_parts[4] == "students":
+                run_context = self._get_run_context(int(path_parts[1]))
+                if run_context is None:
+                    return self._wrapped_client.delete(url, *args, **kwargs)
+                return self._wrapped_client.delete(
+                    f"/districts/{run_context['district_id']}/routes/{run_context['route_id']}/runs/{path_parts[1]}/stops/{path_parts[3]}/students/{path_parts[5]}",
+                    *args,
+                    **kwargs,
+                )
+
+            return self._wrapped_client.delete(url, *args, **kwargs)
 
     with TestClient(app) as c:
         legacy = LegacyAwareClient(c)
@@ -723,4 +1094,3 @@ def empty_client(db_engine):
         yield c
 
     app.dependency_overrides.clear()
-

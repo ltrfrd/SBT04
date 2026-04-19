@@ -85,12 +85,14 @@ def _create_started_run_ready_for_posttrip(client, *, route_number: str = "POSTT
 
     started = client._wrapped_client.post(f"/runs/start?run_id={run_id}")
     assert started.status_code in (200, 201)
+    capture_token = _cache_posttrip_capture_token(client, run_id)
 
     return {
         "driver": driver.json(),
         "route": route.json(),
         "bus": bus.json(),
         "run": started.json(),
+        "capture_token": capture_token,
     }
 
 
@@ -123,12 +125,28 @@ def _get_posttrip_capture_token_for_run(client, run_id: int) -> str:
     return match.group(1)
 
 
+def _cache_posttrip_capture_token(client, run_id: int) -> str:
+    token = _get_posttrip_capture_token_for_run(client, run_id)
+    cache = getattr(client, "_posttrip_capture_tokens", {})
+    cache[run_id] = token
+    setattr(client, "_posttrip_capture_tokens", cache)
+    return token
+
+
+def _get_cached_posttrip_capture_token(client, run_id: int) -> str:
+    cache = getattr(client, "_posttrip_capture_tokens", {})
+    token = cache.get(run_id)
+    if token:
+        return token
+    return _cache_posttrip_capture_token(client, run_id)
+
+
 def _submit_phase1(client, run_id: int, *, include_image: bool = True, capture_token: str | None = None):
     data = {
         "phase1_no_students_remaining": "true",
         "phase1_belongings_checked": "true",
         "phase1_checked_sign_hung": "true",
-        "capture_token": capture_token or _get_posttrip_capture_token_for_run(client, run_id),
+        "capture_token": capture_token or _get_cached_posttrip_capture_token(client, run_id),
     }
     files = {}
     if include_image:
@@ -152,7 +170,7 @@ def _submit_phase2(
         "phase2_checked_to_cleared_switched": "true",
         "phase2_rear_button_triggered": "true",
         "exterior_status": exterior_status,
-        "capture_token": capture_token or _get_posttrip_capture_token_for_run(client, run_id),
+        "capture_token": capture_token or _get_cached_posttrip_capture_token(client, run_id),
     }
     if exterior_description is not None:
         data["exterior_description"] = exterior_description
@@ -167,9 +185,16 @@ def _submit_phase2(
     return response
 
 
+def _end_run(client, run_id: int, *, driver_id: int | None = None):
+    if driver_id is not None:
+        return client.post(f"/runs/end_by_driver?driver_id={driver_id}")
+    return client.post(f"/runs/end?run_id={run_id}")
+
+
 def test_posttrip_phase1_fails_without_required_rear_photo(client):
     context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-P1-NO-PHOTO")
     run_id = context["run"]["id"]
+    assert _end_run(client, run_id).status_code == 200
 
     response = _submit_phase1(client, run_id, include_image=False)
 
@@ -180,6 +205,7 @@ def test_posttrip_phase1_fails_without_required_rear_photo(client):
 def test_posttrip_phase1_succeeds_with_required_rear_photo(client):
     context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-P1-WITH-PHOTO")
     run_id = context["run"]["id"]
+    assert _end_run(client, run_id).status_code == 200
 
     response = _submit_phase1(client, run_id)
 
@@ -198,6 +224,7 @@ def test_posttrip_phase1_succeeds_with_required_rear_photo(client):
 def test_posttrip_backend_rejects_phase1_without_driver_workspace_capture_token(client):
     context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-P1-NO-TOKEN")
     run_id = context["run"]["id"]
+    assert _end_run(client, run_id).status_code == 200
 
     response = client.post(
         f"/runs/{run_id}/posttrip/phase1",
@@ -217,6 +244,7 @@ def test_posttrip_backend_rejects_phase1_without_driver_workspace_capture_token(
 def test_posttrip_phase2_fails_without_phase1_complete(client):
     context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-P2-NO-P1")
     run_id = context["run"]["id"]
+    assert _end_run(client, run_id).status_code == 200
 
     response = _submit_phase2(client, run_id)
 
@@ -227,6 +255,7 @@ def test_posttrip_phase2_fails_without_phase1_complete(client):
 def test_posttrip_phase2_fails_if_any_required_image_is_missing(client):
     context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-P2-MISSING-ONE")
     run_id = context["run"]["id"]
+    assert _end_run(client, run_id).status_code == 200
     phase1 = _submit_phase1(client, run_id)
     assert phase1.status_code == 200
 
@@ -243,6 +272,7 @@ def test_posttrip_phase2_fails_if_any_required_image_is_missing(client):
 def test_posttrip_phase2_succeeds_with_both_required_images(client):
     context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-P2-SUCCESS")
     run_id = context["run"]["id"]
+    assert _end_run(client, run_id).status_code == 200
     phase1 = _submit_phase1(client, run_id)
     assert phase1.status_code == 200
 
@@ -260,19 +290,35 @@ def test_posttrip_phase2_succeeds_with_both_required_images(client):
     }
 
 
-def test_run_end_is_blocked_without_phase2_but_complete_endpoint_remains_legacy_compatible(client):
+def test_posttrip_phase1_requires_run_to_be_ended_and_complete_requires_both_phases(client):
     context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-END-BLOCK")
     run_id = context["run"]["id"]
+
+    phase1_while_active = _submit_phase1(client, run_id)
+    assert phase1_while_active.status_code == 400
+    assert phase1_while_active.json()["detail"] == "Run must be ended before Post-Trip Phase 1"
+
+    end_response = _end_run(client, run_id)
+    assert end_response.status_code == 200
+    assert end_response.json()["end_time"] is not None
+
+    complete_response = client.post(f"/runs/{run_id}/complete")
+    assert complete_response.status_code == 400
+    assert complete_response.json()["detail"] == "Post-trip phases 1 and 2 must be completed before completing the run"
+
+
+def test_run_end_by_driver_is_allowed_before_posttrip_and_completion_requires_both_phases(client):
+    context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-END-ALLOW")
+    run_id = context["run"]["id"]
+    end_response = _end_run(client, run_id, driver_id=context["driver"]["id"])
+    assert end_response.status_code == 200
+    assert end_response.json()["id"] == run_id
+    assert end_response.json()["end_time"] is not None
+
     phase1 = _submit_phase1(client, run_id)
     assert phase1.status_code == 200
-
-    end_response = client.post(f"/runs/end?run_id={run_id}")
-    assert end_response.status_code == 400
-    assert end_response.json()["detail"] == "Post-trip phase 2 must be completed before ending the run"
-
-    driver_end_response = client.post(f"/runs/end_by_driver?driver_id={context['driver']['id']}")
-    assert driver_end_response.status_code == 400
-    assert driver_end_response.json()["detail"] == "Post-trip phase 2 must be completed before ending the run"
+    phase2 = _submit_phase2(client, run_id)
+    assert phase2.status_code == 200
 
     complete_response = client.post(f"/runs/{run_id}/complete")
     assert complete_response.status_code == 200
@@ -280,23 +326,10 @@ def test_run_end_is_blocked_without_phase2_but_complete_endpoint_remains_legacy_
     assert complete_response.json()["is_completed"] is True
 
 
-def test_run_end_is_allowed_after_phase2_completion(client):
-    context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-END-ALLOW")
-    run_id = context["run"]["id"]
-    phase1 = _submit_phase1(client, run_id)
-    assert phase1.status_code == 200
-    phase2 = _submit_phase2(client, run_id)
-    assert phase2.status_code == 200
-
-    end_response = client.post(f"/runs/end?run_id={run_id}")
-    assert end_response.status_code == 200
-    assert end_response.json()["id"] == run_id
-    assert end_response.json()["end_time"] is not None
-
-
 def test_driver_cannot_replace_photo_after_phase_completion(client, db_engine):
     context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-P1-LOCK")
     run_id = context["run"]["id"]
+    assert _end_run(client, run_id).status_code == 200
     response = _submit_phase1(client, run_id)
     assert response.status_code == 200
 
@@ -312,6 +345,7 @@ def test_driver_cannot_replace_photo_after_phase_completion(client, db_engine):
 def test_pre_phase_retake_replacement_updates_existing_photo_cleanly(client, db_engine):
     context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-P1-RETAKE")
     run_id = context["run"]["id"]
+    assert _end_run(client, run_id).status_code == 200
 
     with Session(db_engine) as db:
         inspection = PostTripInspection(
@@ -361,6 +395,7 @@ def test_pre_phase_retake_replacement_updates_existing_photo_cleanly(client, db_
 def test_posttrip_output_includes_photo_metadata(client):
     context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-OUTPUT")
     run_id = context["run"]["id"]
+    assert _end_run(client, run_id).status_code == 200
     assert _submit_phase1(client, run_id).status_code == 200
     assert _submit_phase2(client, run_id).status_code == 200
 
@@ -377,6 +412,7 @@ def test_posttrip_output_includes_photo_metadata(client):
 def test_posttrip_phase2_requires_description_for_non_clear_status(client):
     context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-VALIDATE")
     run_id = context["run"]["id"]
+    assert _end_run(client, run_id).status_code == 200
     assert _submit_phase1(client, run_id).status_code == 200
 
     response = _submit_phase2(client, run_id, exterior_status="major", exterior_description=None)
@@ -388,6 +424,7 @@ def test_posttrip_phase2_requires_description_for_non_clear_status(client):
 def test_posttrip_major_defect_alert_is_created_once_and_is_per_run(client, db_engine):
     context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-MAJOR")
     run_id = context["run"]["id"]
+    assert _end_run(client, run_id).status_code == 200
     assert _submit_phase1(client, run_id).status_code == 200
 
     first = _submit_phase2(client, run_id, exterior_status="major", exterior_description="Damaged body panel")
@@ -412,6 +449,7 @@ def test_posttrip_major_defect_alert_is_created_once_and_is_per_run(client, db_e
 def test_posttrip_neglect_alert_is_only_triggered_by_get_flow(client, db_engine):
     context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-NEGLECT")
     run_id = context["run"]["id"]
+    assert _end_run(client, run_id).status_code == 200
     phase1 = _submit_phase1(client, run_id).json()
     assert phase1["neglect_flagged_at"] is None
 
@@ -454,6 +492,7 @@ def test_posttrip_neglect_alert_is_only_triggered_by_get_flow(client, db_engine)
 def test_websocket_gps_persists_posttrip_activity_fields_when_posttrip_exists(client, db_engine):
     context = _create_started_run_ready_for_posttrip(client, route_number="POSTTRIP-WS")
     run_id = context["run"]["id"]
+    assert _end_run(client, run_id).status_code == 200
     assert _submit_phase1(client, run_id).status_code == 200
 
     with client._wrapped_client.websocket_connect(f"/ws/gps/{run_id}") as websocket:

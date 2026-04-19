@@ -4,6 +4,8 @@
 # -----------------------------------------------------------
 from datetime import date, timedelta  # Date helpers for matching and mismatch cases
 
+from tests.conftest import ensure_run_has_execution_yard
+
 
 def _build_run_with_students(client):
     driver = client.post("/drivers/", json={"name": "Absence Driver", "email": "absence_driver@test.com", "phone": "7805557001", "pin": "1234"}).json()  # Create driver dependency
@@ -13,6 +15,7 @@ def _build_run_with_students(client):
     run = client.post(f"/routes/{route['id']}/runs", json={"run_type": "AM"}).json()  # Create planned target run
     stop = client.post("/stops/", json={"run_id": run["id"], "type": "pickup", "sequence": 1, "name": "Absence Stop", "address": "700 Stop Street", "planned_time": "07:10:00", "latitude": 53.7, "longitude": -113.7}).json()  # Create shared stop
     student = client.post(f"/runs/{run['id']}/stops/{stop['id']}/students", json={"name": "Boarded Student", "grade": "5", "school_id": school["id"]}).json()  # Create target student through canonical stop context
+    ensure_run_has_execution_yard(client, run["id"])
     start = client.post(f"/runs/start?run_id={run['id']}")
     assert start.status_code in (200, 201)
     run = start.json()  # Start only after the run has stops

@@ -10,6 +10,32 @@
 # -----------------------------------------------------------------------------
 # Shared setup helper
 # -----------------------------------------------------------------------------
+from sqlalchemy.orm import Session
+
+from app import get_db
+from backend.models.route import Route
+
+
+def _get_client_db_engine(client):
+    wrapped_client = getattr(client, "_wrapped_client", client)
+    override = wrapped_client.app.dependency_overrides[get_db]
+    for cell in override.__closure__ or ():
+        candidate = cell.cell_contents
+        bind = getattr(candidate, "kw", {}).get("bind")
+        if bind is not None:
+            return bind
+    raise AssertionError("Unable to resolve test database engine from client fixture")
+
+
+def _get_route_district_id(client, route_id: int) -> int:
+    db_engine = _get_client_db_engine(client)
+    with Session(db_engine) as db:
+        route = db.get(Route, route_id)
+        assert route is not None
+        assert route.district_id is not None
+        return route.district_id
+
+
 def _build_assignment_context(client, route_number: str, run_types: list[str]):
 
     # -------------------------------------------------------------------------
@@ -98,16 +124,12 @@ def test_create_student_run_assignment_is_blocked(client):
     run = context["runs"][0]
     stop = context["stops"][0]
     school = context["school"]
-    route = context["route"]
-
     student = client.post(
-        "/students/",
+        f"/runs/{run['id']}/stops/{stop['id']}/students",
         json={
             "name": "Blocked Assignment Student",
             "grade": "6",
             "school_id": school["id"],
-            "route_id": route["id"],
-            "stop_id": stop["id"],
         },
     ).json()
 
@@ -123,10 +145,10 @@ def test_create_student_run_assignment_is_blocked(client):
         },
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 410
     assert response.json()["detail"] == (
-        "Direct student run assignment creation is not allowed. "
-        "Use /runs/{run_id}/stops/{stop_id}/students."
+        "Direct student run assignment creation is retired. "
+        "Use POST /districts/{district_id}/routes/{route_id}/runs/{run_id}/stops/{stop_id}/students."
     )
 
 
@@ -187,10 +209,11 @@ def test_get_student_run_assignments_by_student_lookup(client):
     # Create route with two runs
     # -------------------------------------------------------------------------
     context = _build_assignment_context(client, "SRA-STUDENT", ["AM", "PM"])
-    route = context["route"]
     school = context["school"]
     run_1, run_2 = context["runs"]
     stop_1, stop_2 = context["stops"]
+    district_id = _get_route_district_id(client, context["route"]["id"])
+    route_id = context["route"]["id"]
 
     # -------------------------------------------------------------------------
     # Create the canonical initial stop-context student
@@ -205,15 +228,9 @@ def test_get_student_run_assignments_by_student_lookup(client):
     ).json()
 
     # -------------------------------------------------------------------------
-    # Use the maintenance move endpoint to synchronize a second run row
-    # -------------------------------------------------------------------------
     moved = client.put(
-        f"/students/{student['id']}/assignment",
-        json={
-            "route_id": route["id"],
-            "run_id": run_2["id"],
-            "stop_id": stop_2["id"],
-        },
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_2['id']}/stops/{stop_2['id']}/students/{student['id']}",
+        json={},
     )
 
     assert moved.status_code == 200
@@ -225,8 +242,8 @@ def test_get_student_run_assignments_by_student_lookup(client):
     data = response.json()
 
     assert response.status_code == 200
-    assert [item["run_id"] for item in data] == [run_1["id"], run_2["id"]]
-    assert [item["stop_id"] for item in data] == [stop_1["id"], stop_2["id"]]
+    assert [item["run_id"] for item in data] == [run_2["id"]]
+    assert [item["stop_id"] for item in data] == [stop_2["id"]]
 
 
 # -----------------------------------------------------------
@@ -273,8 +290,8 @@ def test_delete_student_run_assignment_is_blocked(client):
     # -------------------------------------------------------------------------
     response = client.delete(f"/student-run-assignments/{assignment_id}")
 
-    assert response.status_code == 405
+    assert response.status_code == 410
     assert response.json()["detail"] == (
-        "Direct assignment deletion is not allowed. "
-        "Use the canonical contextual delete endpoint DELETE /runs/{run_id}/stops/{stop_id}/students/{student_id}."
+        "Direct assignment deletion is retired. "
+        "Use DELETE /districts/{district_id}/routes/{route_id}/runs/{run_id}/stops/{stop_id}/students/{student_id}."
     )

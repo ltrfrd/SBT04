@@ -37,8 +37,9 @@ from backend.utils.operator_scope import (
     get_operator_scoped_driver_or_404,
 )
 from backend.utils.student_bus_absence import apply_run_absence_filter
-from backend.utils.planning_scope import execution_route_filter, get_route_for_execution_or_404
+from backend.utils.planning_scope import accessible_route_filter, execution_route_filter, get_route_for_execution_or_404
 from backend.routers.run_helpers import (
+    EXECUTION_RUN_BLOCKED_DETAIL,
     _build_run_occupancy_counts,
     _build_running_board_stops,
     _get_execution_scoped_run_or_404,
@@ -155,6 +156,18 @@ def get_active_run(
     # Return result or 404
     # -------------------------------------------------------------------------
     if not active_run:                              # If no active run found
+        planning_visible_active_run = (
+            db.query(run_model.Run)
+            .join(run_model.Run.route)
+            .filter(run_model.Run.driver_id == driver_id)
+            .filter(accessible_route_filter(operator.id))
+            .filter(run_model.Run.start_time.is_not(None))
+            .filter(run_model.Run.end_time.is_(None))
+            .order_by(run_model.Run.start_time.desc())
+            .first()
+        )
+        if planning_visible_active_run:
+            raise HTTPException(status_code=403, detail=EXECUTION_RUN_BLOCKED_DETAIL)
         raise HTTPException(status_code=404, detail="No active run found for this driver")
 
     return active_run                               # Return active run

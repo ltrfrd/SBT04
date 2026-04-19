@@ -21,6 +21,8 @@ from backend.utils.student_bus_absence import has_student_bus_absence  # Absence
 from backend.models import school as school_model  # School model
 from backend.models import SchoolAttendanceVerification  # School confirmation state
 from backend.utils.planning_scope import (
+    accessible_route_filter,
+    accessible_school_filter,
     execution_route_filter,
     yards_accessible_route_filter,
     yards_accessible_school_filter,
@@ -253,7 +255,7 @@ def generate_reports(
     if reports_type == "date" and start and end:
         return date_summary_execution(db, start, end, operator_id=operator_id)
     if reports_type == "school" and ref_id:
-        return school_reports_summary_execution(db, ref_id, yard_ids=yard_ids)
+        return school_reports_summary_execution(db, ref_id, yard_ids=yard_ids, operator_id=operator_id)
     return {"error": "Invalid reports type or parameters"}  # Preserve error-style contract
 
 # -----------------------------------------------------------
@@ -422,12 +424,15 @@ def school_reports_summary_execution(
     db: Session,
     school_id: int,
     yard_ids: list[int] | None = None,
+    operator_id: int | None = None,
 ):
-    if yard_ids is None:
-        return {"error": "School not found"}
-
     school_query = db.query(school_model.School).filter(school_model.School.id == school_id)
-    school_query = school_query.filter(yards_accessible_school_filter(yard_ids))
+    if yard_ids is not None:
+        school_query = school_query.filter(yards_accessible_school_filter(yard_ids))
+    elif operator_id is not None:
+        school_query = school_query.filter(accessible_school_filter(operator_id))
+    else:
+        return {"error": "School not found"}
     school = school_query.first()  # Load school once for final payload
     if not school:
         return {"error": "School not found"}
@@ -437,7 +442,12 @@ def school_reports_summary_execution(
         .join(route_model.route_schools)  # Join route-school association
         .filter(route_model.route_schools.c.school_id == school_id)  # Keep only this school's routes
     )
-    routes_query = routes_query.filter(yards_accessible_route_filter(yard_ids))
+    if yard_ids is not None:
+        routes_query = routes_query.filter(yards_accessible_route_filter(yard_ids))
+    elif operator_id is not None:
+        routes_query = routes_query.filter(accessible_route_filter(operator_id))
+    else:
+        return {"error": "School not found"}
     routes = routes_query.all()  # Execute query
 
     results = []  # Collect run reports summaries
@@ -622,8 +632,9 @@ def school_routes_summary(
     db: Session,
     school_id: int,
     yard_ids: list[int] | None = None,
+    operator_id: int | None = None,
 ):
-    school_data = school_reports_summary_execution(db, school_id, yard_ids=yard_ids)
+    school_data = school_reports_summary_execution(db, school_id, yard_ids=yard_ids, operator_id=operator_id)
 
     if school_data.get("school_name") is None:  # Guard unknown school requests
         return {"error": "School not found"}
@@ -645,8 +656,9 @@ def school_route_runs_summary(
     school_id: int,
     route_id: int,
     yard_ids: list[int] | None = None,
+    operator_id: int | None = None,
 ):
-    school_data = school_reports_summary_execution(db, school_id, yard_ids=yard_ids)
+    school_data = school_reports_summary_execution(db, school_id, yard_ids=yard_ids, operator_id=operator_id)
 
     if school_data.get("school_name") is None:  # Guard unknown school requests
         return {"error": "School not found"}
@@ -676,8 +688,9 @@ def school_single_run_summary(
     school_id: int,
     run_id: int,
     yard_ids: list[int] | None = None,
+    operator_id: int | None = None,
 ):
-    school_data = school_reports_summary_execution(db, school_id, yard_ids=yard_ids)
+    school_data = school_reports_summary_execution(db, school_id, yard_ids=yard_ids, operator_id=operator_id)
 
     if school_data.get("school_name") is None:  # Guard unknown school requests
         return {"error": "School not found"}
@@ -697,5 +710,3 @@ def school_single_run_summary(
             }
 
     return {"error": "Run not found for school"}  # Reject unrelated runs
-
-

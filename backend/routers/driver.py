@@ -17,7 +17,7 @@ from backend.schemas.route import RouteOut
 from backend.routers.route_helpers import _serialize_route
 from backend.models.operator import Operator
 from backend.utils.auth import hash_driver_pin
-from backend.utils.planning_scope import execution_route_filter
+from backend.utils.planning_scope import accessible_route_filter
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_driver_operator_id
 from backend.utils.operator_scope import get_operator_scoped_driver_or_404
@@ -156,7 +156,7 @@ def get_driver_routes(
         .join(RouteDriverAssignment, RouteDriverAssignment.route_id == Route.id)
         .filter(RouteDriverAssignment.driver_id == driver_id)
         .filter(RouteDriverAssignment.active.is_(True))
-        .filter(execution_route_filter(db=db, operator_id=driver_operator_id))
+        .filter(accessible_route_filter(driver_operator_id))
         .order_by(Route.route_number.asc(), Route.id.asc())
         .distinct()
         .all()

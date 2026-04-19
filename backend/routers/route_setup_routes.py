@@ -26,24 +26,22 @@ from backend.utils.planning_scope import get_route_student_or_404
 router = APIRouter(tags=["Routes"])
 
 
-@router.post(
-    "/{route_id}/runs",
-    response_model=schemas.RunOut,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create run inside route",
-    description=(
-        "Primary workflow-first run creation path. "
-        "Create a planned run inside the selected route context without sending route_id in the body. "
-        "When exactly one active route-driver assignment exists, the planned run inherits that active driver. "
-        "Primary/default assignment does not control operational run resolution by itself."
-    ),
-    response_description="Created run",
-)
-def create_route_run(
+def _raise_district_planning_path_retired() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail=(
+            "Route planning mutations now belong to district-nested planning paths. "
+            "Use /districts/{district_id}/routes/{route_id}/... planning endpoints."
+        ),
+    )
+
+
+def _create_route_run_internal(
+    *,
     route_id: int,
     payload: RouteRunCreate,
-    db: Session = Depends(get_db),
-    operator: Operator = Depends(get_operator_context),
+    db: Session,
+    operator: Operator,
 ):
     route = get_operator_scoped_route_or_404(
         db=db,
@@ -65,19 +63,13 @@ def create_route_run(
     return _serialize_run(new_run)
 
 
-@router.put(
-    "/{route_id}/runs/{run_id}",
-    response_model=schemas.RunOut,
-    summary="Update run inside route",
-    description="Update one planned run under the selected route context. The path route_id is authoritative.",
-    response_description="Updated run",
-)
-def update_route_run(
+def _update_route_run_internal(
+    *,
     route_id: int,
     run_id: int,
     payload: RunUpdate,
-    db: Session = Depends(get_db),
-    operator: Operator = Depends(get_operator_context),
+    db: Session,
+    operator: Operator,
 ):
     route = get_operator_scoped_route_or_404(
         db=db,
@@ -107,18 +99,12 @@ def update_route_run(
     return _serialize_run(run)
 
 
-@router.delete(
-    "/{route_id}/runs/{run_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete run inside route",
-    description="Delete one planned run under the selected route context. The path route_id is authoritative.",
-    response_description="Run deleted",
-)
-def delete_route_run(
+def _delete_route_run_internal(
+    *,
     route_id: int,
     run_id: int,
-    db: Session = Depends(get_db),
-    operator: Operator = Depends(get_operator_context),
+    db: Session,
+    operator: Operator,
 ):
     route = get_operator_scoped_route_or_404(
         db=db,
@@ -136,20 +122,13 @@ def delete_route_run(
     return None
 
 
-@router.post(
-    "/{route_id}/runs/{run_id}/stops",
-    response_model=StopOut,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create stop inside route run",
-    description="Primary path-driven stop creation workflow. Create a planned stop under the selected route and run context without sending internal run_id in the body.",
-    response_description="Created stop",
-)
-def create_route_run_stop(
+def _create_route_run_stop_internal(
+    *,
     route_id: int,
     run_id: int,
     payload: RunStopCreate,
-    db: Session = Depends(get_db),
-    operator: Operator = Depends(get_operator_context),
+    db: Session,
+    operator: Operator,
 ):
     return _create_route_run_stop(
         route_id=route_id,
@@ -160,21 +139,15 @@ def create_route_run_stop(
     )
 
 
-@router.put(
-    "/{route_id}/stops/{stop_id}",
-    response_model=StopOut,
-    summary="Update stop inside route",
-    description="Update one planned stop under the selected route context. The stop may not be moved across runs through this route-level endpoint.",
-    response_description="Updated stop",
-)
-def update_route_stop(
+def _update_route_stop_internal(
+    *,
     route_id: int,
     stop_id: int,
     payload: StopUpdate,
-    db: Session = Depends(get_db),
-    operator: Operator = Depends(get_operator_context),
+    db: Session,
+    operator: Operator,
 ):
-    from backend.routers import stop as stop_router  # Local import avoids circular import at module load time
+    from backend.routers import stop as stop_router
 
     route = get_operator_scoped_route_or_404(
         db=db,
@@ -204,20 +177,14 @@ def update_route_stop(
     return updated_stop
 
 
-@router.delete(
-    "/{route_id}/stops/{stop_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete stop inside route",
-    description="Delete one planned stop under the selected route context and normalize the remaining run sequence order.",
-    response_description="Stop deleted",
-)
-def delete_route_stop(
+def _delete_route_stop_internal(
+    *,
     route_id: int,
     stop_id: int,
-    db: Session = Depends(get_db),
-    operator: Operator = Depends(get_operator_context),
+    db: Session,
+    operator: Operator,
 ):
-    from backend.routers import stop as stop_router  # Local import avoids circular import at module load time
+    from backend.routers import stop as stop_router
 
     route = get_operator_scoped_route_or_404(
         db=db,
@@ -235,21 +202,14 @@ def delete_route_stop(
     return None
 
 
-@router.post(
-    "/{route_id}/students",
-    response_model=schemas.StudentOut,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create student inside route",
-    description="Route-scoped planning helper. This is not the preferred initial student setup workflow. Preferred workflow is POST /runs/{run_id}/stops/{stop_id}/students so run and stop context stay authoritative.",
-    response_description="Created student",
-)
-def create_route_student(
+def _create_route_student_internal(
+    *,
     route_id: int,
     payload: schemas.StudentCompatibilityCreate,
-    db: Session = Depends(get_db),
-    operator: Operator = Depends(get_operator_context),
+    db: Session,
+    operator: Operator,
 ):
-    from backend.routers import student as student_router  # Local import avoids circular import at module load time
+    from backend.routers import student as student_router
 
     route = get_operator_scoped_route_or_404(
         db=db,
@@ -285,18 +245,12 @@ def create_route_student(
     return new_student
 
 
-@router.delete(
-    "/{route_id}/students/{student_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Remove student from route",
-    description="Remove one student from the selected route planning context without deleting the student record entirely.",
-    response_description="Student removed from route",
-)
-def delete_route_student(
+def _delete_route_student_internal(
+    *,
     route_id: int,
     student_id: int,
-    db: Session = Depends(get_db),
-    operator: Operator = Depends(get_operator_context),
+    db: Session,
+    operator: Operator,
 ):
     route = get_operator_scoped_route_or_404(
         db=db,
@@ -315,3 +269,158 @@ def delete_route_student(
 
     db.commit()
     return None
+
+
+@router.post(
+    "/{route_id}/runs",
+    response_model=schemas.RunOut,
+    status_code=status.HTTP_201_CREATED,
+    include_in_schema=False,
+    summary="Create run inside route",
+    description=(
+        "Primary workflow-first run creation path. "
+        "Create a planned run inside the selected route context without sending route_id in the body. "
+        "When exactly one active route-driver assignment exists, the planned run inherits that active driver. "
+        "Primary/default assignment does not control operational run resolution by itself."
+    ),
+    response_description="Created run",
+)
+def create_route_run(
+    route_id: int,
+    payload: RouteRunCreate,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    _raise_district_planning_path_retired()
+    return _create_route_run_internal(route_id=route_id, payload=payload, db=db, operator=operator)
+
+
+@router.put(
+    "/{route_id}/runs/{run_id}",
+    response_model=schemas.RunOut,
+    include_in_schema=False,
+    summary="Update run inside route",
+    description="Update one planned run under the selected route context. The path route_id is authoritative.",
+    response_description="Updated run",
+)
+def update_route_run(
+    route_id: int,
+    run_id: int,
+    payload: RunUpdate,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    _raise_district_planning_path_retired()
+    return _update_route_run_internal(route_id=route_id, run_id=run_id, payload=payload, db=db, operator=operator)
+
+
+@router.delete(
+    "/{route_id}/runs/{run_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    include_in_schema=False,
+    summary="Delete run inside route",
+    description="Delete one planned run under the selected route context. The path route_id is authoritative.",
+    response_description="Run deleted",
+)
+def delete_route_run(
+    route_id: int,
+    run_id: int,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    _raise_district_planning_path_retired()
+    return _delete_route_run_internal(route_id=route_id, run_id=run_id, db=db, operator=operator)
+
+
+@router.post(
+    "/{route_id}/runs/{run_id}/stops",
+    response_model=StopOut,
+    status_code=status.HTTP_201_CREATED,
+    include_in_schema=False,
+    summary="Create stop inside route run",
+    description="Primary path-driven stop creation workflow. Create a planned stop under the selected route and run context without sending internal run_id in the body.",
+    response_description="Created stop",
+)
+def create_route_run_stop(
+    route_id: int,
+    run_id: int,
+    payload: RunStopCreate,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    _raise_district_planning_path_retired()
+    return _create_route_run_stop_internal(route_id=route_id, run_id=run_id, payload=payload, db=db, operator=operator)
+
+
+@router.put(
+    "/{route_id}/stops/{stop_id}",
+    response_model=StopOut,
+    include_in_schema=False,
+    summary="Update stop inside route",
+    description="Update one planned stop under the selected route context. The stop may not be moved across runs through this route-level endpoint.",
+    response_description="Updated stop",
+)
+def update_route_stop(
+    route_id: int,
+    stop_id: int,
+    payload: StopUpdate,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    _raise_district_planning_path_retired()
+    return _update_route_stop_internal(route_id=route_id, stop_id=stop_id, payload=payload, db=db, operator=operator)
+
+
+@router.delete(
+    "/{route_id}/stops/{stop_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    include_in_schema=False,
+    summary="Delete stop inside route",
+    description="Delete one planned stop under the selected route context and normalize the remaining run sequence order.",
+    response_description="Stop deleted",
+)
+def delete_route_stop(
+    route_id: int,
+    stop_id: int,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    _raise_district_planning_path_retired()
+    return _delete_route_stop_internal(route_id=route_id, stop_id=stop_id, db=db, operator=operator)
+
+
+@router.post(
+    "/{route_id}/students",
+    response_model=schemas.StudentOut,
+    status_code=status.HTTP_201_CREATED,
+    include_in_schema=False,
+    summary="Create student inside route",
+    description="Route-scoped planning helper. This is not the preferred initial student setup workflow. Preferred workflow is POST /runs/{run_id}/stops/{stop_id}/students so run and stop context stay authoritative.",
+    response_description="Created student",
+)
+def create_route_student(
+    route_id: int,
+    payload: schemas.StudentCompatibilityCreate,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    _raise_district_planning_path_retired()
+    return _create_route_student_internal(route_id=route_id, payload=payload, db=db, operator=operator)
+
+
+@router.delete(
+    "/{route_id}/students/{student_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    include_in_schema=False,
+    summary="Remove student from route",
+    description="Remove one student from the selected route planning context without deleting the student record entirely.",
+    response_description="Student removed from route",
+)
+def delete_route_student(
+    route_id: int,
+    student_id: int,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    _raise_district_planning_path_retired()
+    return _delete_route_student_internal(route_id=route_id, student_id=student_id, db=db, operator=operator)

@@ -184,7 +184,7 @@ def test_run_context_stop_update_works_without_run_id_in_body(client):
     assert body["longitude"] == 2
 
 
-def test_run_context_stop_update_rejects_wrong_run_stop_pairing(client):
+def test_run_context_stop_update_path_is_retired(client):
     run_a_id = _setup_run(client)
     run_a = client.get(f"/runs/{run_a_id}")
     assert run_a.status_code == 200
@@ -204,13 +204,13 @@ def test_run_context_stop_update_rejects_wrong_run_stop_pairing(client):
     assert created.status_code in (200, 201)
     stop_id = created.json()["id"]
 
-    response = client.put(
+    response = client._wrapped_client.put(
         f"/runs/{run_b_id}/stops/{stop_id}",
         json={"name": "Wrong Pairing"},
     )
 
-    assert response.status_code == 400
-    assert response.json()["detail"] == "Stop does not belong to run"
+    assert response.status_code == 410
+    assert "district-nested planning paths" in response.json()["detail"]
 
 
 def test_route_run_context_stop_creation_works_without_run_id_in_body(client):
@@ -253,7 +253,7 @@ def test_route_run_context_stop_creation_returns_404_for_missing_run(client):
     assert response.json()["detail"] == "Run not found"
 
 
-def test_route_run_context_stop_creation_rejects_run_from_other_route(client):
+def test_route_run_context_stop_creation_path_is_retired(client):
     run_a_id = _setup_run(client)
     run_a_response = client.get(f"/runs/{run_a_id}")
     assert run_a_response.status_code == 200
@@ -261,13 +261,13 @@ def test_route_run_context_stop_creation_rejects_run_from_other_route(client):
 
     run_b_id = _setup_run(client)
 
-    response = client.post(
+    response = client._wrapped_client.post(
         f"/routes/{route_a_id}/runs/{run_b_id}/stops",
         json={"type": "pickup", "name": "Wrong Route Stop"},
     )
 
-    assert response.status_code == 400
-    assert response.json()["detail"] == "Run does not belong to route"
+    assert response.status_code == 410
+    assert "district-nested planning paths" in response.json()["detail"]
 
 
 def test_route_run_context_stop_creation_rejects_started_runs(client):

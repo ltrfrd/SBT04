@@ -15,6 +15,9 @@ from backend import schemas  # Shared schema exports
 from backend.models.posttrip import PostTripInspection, PostTripPhoto  # Post-trip persistence models
 from backend.models.route import Route  # Route model for active bus resolution
 from backend.models.run import Run  # Run model for context lookup
+from backend.models.operator import Operator
+from backend.utils.operator_scope import get_operator_context
+from backend.routers.run_helpers import _get_execution_scoped_run_or_404
 from backend.utils.posttrip_alerts import sync_posttrip_issue_alerts, sync_posttrip_neglect_alert_if_needed  # Post-trip alert sync helpers
 from backend.utils.posttrip_photos import (
     PHASE1,
@@ -35,16 +38,13 @@ router = APIRouter(prefix="/runs", tags=["Post-Trip Inspection"])
 # - Post-trip helpers
 # - Resolve run context and the linked post-trip row safely
 # -----------------------------------------------------------
-def _get_run_with_route_or_404(run_id: int, db: Session) -> Run:
-    run = (
-        db.query(Run)
-        .options(joinedload(Run.route))
-        .filter(Run.id == run_id)
-        .first()
-    )                                                          # Load run with route for post-trip ownership fields
-    if not run:
-        raise HTTPException(status_code=404, detail="Run not found")
-    return run
+def _get_run_with_route_or_404(run_id: int, db: Session, operator_id: int) -> Run:
+    return _get_execution_scoped_run_or_404(
+        run_id,
+        db,
+        operator_id,
+        options=[joinedload(Run.route)],
+    )                                                          # Load run with route and execution visibility for post-trip surfaces
 
 
 def _get_route_for_run_or_404(run: Run, db: Session) -> Route:
@@ -92,6 +92,11 @@ def _assert_phase_is_editable(inspection: PostTripInspection, phase: str) -> Non
         raise HTTPException(status_code=400, detail="Post-Trip Phase 1 is already completed and photo replacement is locked")
     if phase == PHASE2 and inspection.phase2_completed:
         raise HTTPException(status_code=400, detail="Post-Trip Phase 2 is already completed and photo replacement is locked")
+
+
+def _require_run_ended_for_posttrip(run: Run) -> None:
+    if run.end_time is None:
+        raise HTTPException(status_code=400, detail="Run must be ended before Post-Trip Phase 1")
 
 
 def _build_posttrip_response(inspection: PostTripInspection) -> dict[str, object]:
@@ -179,9 +184,11 @@ def submit_posttrip_phase1(
     capture_token: str = Form(...),
     phase1_rear_to_front_image: UploadFile | None = File(None),
     db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
 ):
     require_valid_capture_token(session=request.session, run_id=run_id, capture_token=capture_token)
-    run = _get_run_with_route_or_404(run_id, db)
+    run = _get_run_with_route_or_404(run_id, db, operator.id)
+    _require_run_ended_for_posttrip(run)
     route = _get_route_for_run_or_404(run, db)
     inspection = _get_or_create_posttrip_inspection(run=run, route=route, db=db)
     _assert_phase_is_editable(inspection, PHASE1)
@@ -252,9 +259,11 @@ def submit_posttrip_phase2(
     phase2_rear_to_front_image: UploadFile | None = File(None),
     phase2_cleared_sign_image: UploadFile | None = File(None),
     db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
 ):
     require_valid_capture_token(session=request.session, run_id=run_id, capture_token=capture_token)
-    _get_run_with_route_or_404(run_id, db)
+    run = _get_run_with_route_or_404(run_id, db, operator.id)
+    _require_run_ended_for_posttrip(run)
 
     inspection = _get_posttrip_by_run(run_id, db)
     if inspection is None or inspection.phase1_completed is not True:
@@ -322,8 +331,9 @@ def submit_posttrip_phase2(
 def get_posttrip_by_run(
     run_id: int,
     db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
 ):
-    _get_run_with_route_or_404(run_id, db)
+    _get_run_with_route_or_404(run_id, db, operator.id)
 
     inspection = _get_posttrip_by_run(run_id, db)
     if inspection is None:

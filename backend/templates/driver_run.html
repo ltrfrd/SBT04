@@ -266,18 +266,18 @@
               id="endActiveRunButton"
               data-run-id="{{ workspace.active_run.id }}"
               data-reload-url="/driver_run/{{ driver_id }}?route_id={{ workspace.id }}"
-              data-posttrip-phase2-completed="{{ 'true' if active_posttrip_phase2_completed else 'false' }}"
-              {% if not active_posttrip_phase2_completed %}disabled aria-disabled="true"{% endif %}
+              data-posttrip-phase2-completed="{{ 'true' if active_run_ready_for_posttrip else 'false' }}"
+              {% if not active_run_ready_for_posttrip %}disabled aria-disabled="true"{% endif %}
             >
               <i class="bi bi-stop-circle me-1"></i> End Active Run
             </button>
             <div id="endRunStatusMessage" class="small text-muted mt-2">
-              {% if active_posttrip_phase2_completed %}
-              Post-Trip completed. End Run is available.
-              {% elif active_run_ready_for_posttrip or active_posttrip_exists %}
-              Complete Post-Trip Phase 2 before ending the run.
+              {% if active_run_ready_for_posttrip %}
+              Rider actions are complete. End Run is available.
+              {% elif active_posttrip_exists %}
+              End Run stays locked until all assigned rider actions are finished.
               {% else %}
-              End Run stays locked until all assigned rider actions are finished and Post-Trip Phase 2 is complete.
+              End Run stays locked until all assigned rider actions are finished.
               {% endif %}
             </div>
           </div>
@@ -327,7 +327,7 @@
           <div>
             <h3 class="h5 mb-1">Post-Trip Inspection</h3>
             <p class="text-muted mb-0" id="postTripIntroMessage">
-              Complete Phase 1 and Phase 2 here before ending the active run.
+              End the run, then complete Phase 1 and Phase 2 here.
             </p>
           </div>
           <div class="d-flex flex-wrap gap-2">
@@ -346,7 +346,7 @@
           {% if active_posttrip_phase2_completed %}
           Post-Trip completed.
           {% elif active_posttrip_phase1_completed %}
-          Phase 1 completed. Phase 2 is still required before End Run becomes available.
+          Phase 1 completed. Phase 2 is still required before run completion.
           {% else %}
           Phase 1 pending.
           {% endif %}
@@ -1301,7 +1301,7 @@
       if (!isReadyForPostTrip && !hasInspection) {
         syncCameraSlotsForPhase("phase1", photoMap, { canCapture: false, locked: false, mediaPrefix });
         syncCameraSlotsForPhase("phase2", photoMap, { canCapture: false, locked: false, mediaPrefix });
-        setEndRunAvailability(false, "End Run stays locked until all assigned rider actions are finished and Post-Trip Phase 2 is complete.");
+        setEndRunAvailability(false, "End Run stays locked until all assigned rider actions are finished.");
         showInlineError("");
         return;
       }
@@ -1362,9 +1362,9 @@
 
       if (introMessage) {
         if (!isReadyForPostTrip && hasInspection) {
-          introMessage.textContent = "An existing Post-Trip record is shown below. Phase 2 still controls End Run availability.";
+          introMessage.textContent = "An existing Post-Trip record is shown below.";
         } else {
-          introMessage.textContent = "Complete Phase 1 and Phase 2 here before ending the active run.";
+          introMessage.textContent = "End the run, then complete Phase 1 and Phase 2 here.";
         }
       }
 
@@ -1372,18 +1372,16 @@
         if (phase2Completed) {
           statusMessage.textContent = "Post-Trip completed with required photos saved.";
         } else if (phase1Completed) {
-          statusMessage.textContent = "Phase 1 completed with the rear-of-bus photo. Phase 2 and both final photos are still required before End Run becomes available.";
+          statusMessage.textContent = "Phase 1 completed with the rear-of-bus photo. Phase 2 and both final photos are still required before run completion.";
         } else {
           statusMessage.textContent = "Phase 1 pending. Take the rear-of-bus photo before submitting.";
         }
       }
 
-      if (phase2Completed) {
-        setEndRunAvailability(true, "Post-Trip completed. End Run is available.");
-      } else if (isReadyForPostTrip) {
-        setEndRunAvailability(false, "Complete Post-Trip Phase 2 before ending the run.");
+      if (isReadyForPostTrip) {
+        setEndRunAvailability(true, "Rider actions are complete. End Run is available.");
       } else {
-        setEndRunAvailability(false, "End Run stays locked until all assigned rider actions are finished and Post-Trip Phase 2 is complete.");
+        setEndRunAvailability(false, "End Run stays locked until all assigned rider actions are finished.");
       }
     }
 

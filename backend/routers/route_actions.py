@@ -7,7 +7,6 @@ from backend.models.associations import RouteDriverAssignment
 from backend.models.bus import Bus
 from backend.models.operator import Operator, OperatorRouteAccess
 from backend.models.route import Route
-from backend.models.yard import Yard
 from backend.routers.route_helpers import _assign_driver_to_route
 from backend.routers.route_helpers import _assert_route_driver_assignment_integrity
 from backend.routers.route_helpers import _get_primary_route_assignment
@@ -281,40 +280,6 @@ def unassign_driver_from_route(
 
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-@router.post(
-    "/{route_id}/assign-yard/{yard_id}",
-    summary="Assign route to yard",
-    description="Link a route to one yard owned by the acting operator without changing route grant logic.",
-)
-def assign_route_to_yard(
-    route_id: int,
-    yard_id: int,
-    db: Session = Depends(get_db),
-    operator: Operator = Depends(get_operator_context),
-):
-    raise HTTPException(
-        status_code=403,
-        detail="Yard assignment must be managed through district route planning endpoints",
-    )
-
-
-@router.delete(
-    "/{route_id}/assign-yard/{yard_id}",
-    summary="Unassign route from yard",
-    description="Remove one yard link from a route without changing route grant logic.",
-)
-def unassign_route_from_yard(
-    route_id: int,
-    yard_id: int,
-    db: Session = Depends(get_db),
-    operator: Operator = Depends(get_operator_context),
-):
-    raise HTTPException(
-        status_code=403,
-        detail="Yard assignment must be managed through district route planning endpoints",
-    )
 
 
 @router.post(

@@ -155,6 +155,12 @@ def driver_run_view(
     selected_route = None
     if route_id is not None:
         selected_route = next((route for route in available_routes if route.id == route_id), None)
+        if selected_route is None:
+            get_route_for_execution_or_404(
+                db=db,
+                route_id=route_id,
+                operator_id=operator.id,
+            )
 
     workspace = _build_route_workspace(selected_route, run_id) if selected_route else None
     active_pretrip = None

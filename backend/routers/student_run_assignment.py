@@ -34,19 +34,23 @@ router = APIRouter(prefix="/student-run-assignments", tags=["StudentRunAssignmen
 # -----------------------------------------------------------
 @router.post(
     "/",
-    status_code=status.HTTP_400_BAD_REQUEST,
+    status_code=status.HTTP_410_GONE,
     summary="Create student run assignment (disabled)",
     description=(
-        "Direct raw StudentRunAssignment creation is disabled. "
-        "Canonical workflow-first creation is POST /runs/{run_id}/stops/{stop_id}/students, "
-        "which creates the student record and internal runtime assignment together."
+        "Direct raw StudentRunAssignment creation is retired. "
+        "Canonical workflow-first placement is "
+        "POST /districts/{district_id}/routes/{route_id}/runs/{run_id}/stops/{stop_id}/students."
     ),
     response_description="Direct create blocked",
+    include_in_schema=False,
 )
 def create_assignment(payload: StudentRunAssignmentCreate, db: Session = Depends(get_db)):
     raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Direct student run assignment creation is not allowed. Use /runs/{run_id}/stops/{stop_id}/students.",
+        status_code=status.HTTP_410_GONE,
+        detail=(
+            "Direct student run assignment creation is retired. "
+            "Use POST /districts/{district_id}/routes/{route_id}/runs/{run_id}/stops/{stop_id}/students."
+        ),
     )
 
 # -----------------------------------------------------------
@@ -125,21 +129,22 @@ def list_assignments(
 # -----------------------------------------------------------
 @router.delete(
     "/{assignment_id}",
-    status_code=405,
+    status_code=status.HTTP_410_GONE,
     summary="Delete student run assignment (disabled)",
     description=(
-        "Direct assignment deletion is not allowed. "
-        "Use the canonical contextual delete endpoint DELETE /runs/{run_id}/stops/{stop_id}/students/{student_id} "
-        "so runtime and planning state stay synchronized."
+        "Direct assignment deletion is retired. "
+        "Use the canonical contextual delete endpoint "
+        "DELETE /districts/{district_id}/routes/{route_id}/runs/{run_id}/stops/{stop_id}/students/{student_id}."
     ),
     response_description="Direct delete blocked",
+    include_in_schema=False,
 )
 def delete_assignment(assignment_id: int, db: Session = Depends(get_db)):
     raise HTTPException(
-        status_code=405,
+        status_code=status.HTTP_410_GONE,
         detail=(
-            "Direct assignment deletion is not allowed. "
-            "Use the canonical contextual delete endpoint DELETE /runs/{run_id}/stops/{stop_id}/students/{student_id}."
+            "Direct assignment deletion is retired. "
+            "Use DELETE /districts/{district_id}/routes/{route_id}/runs/{run_id}/stops/{stop_id}/students/{student_id}."
         ),
     )
 

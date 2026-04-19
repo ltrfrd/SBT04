@@ -70,14 +70,12 @@ def test_driver_workspace_shows_posttrip_section_when_run_is_ready(client):
     assert "Compatibility path for browsers that cannot access the live camera" not in body
     assert f'/runs/{context["run"]["id"]}/posttrip/phase1' in body
     assert f'/runs/{context["run"]["id"]}/posttrip/phase2' in body
-    assert 'data-posttrip-phase2-completed="false"' in body
+    assert 'data-posttrip-phase2-completed="true"' in body
 
 
-def test_driver_workspace_enables_end_run_after_phase2_completion(client):
+def test_driver_workspace_enables_end_run_when_rider_work_is_finished(client):
     context = _create_started_run_ready_for_posttrip(client, route_number="DRV-UI-COMPLETE")
     _mark_active_run_ready_for_posttrip(client, context["run"]["id"])
-    _submit_phase1(client, context["run"]["id"])
-    _submit_phase2(client, context["run"]["id"])
 
     login = client.post("/session/operator", json={"operator_id": 1})
     assert login.status_code == 200
@@ -87,6 +85,6 @@ def test_driver_workspace_enables_end_run_after_phase2_completion(client):
 
     body = response.text
     assert 'data-posttrip-phase2-completed="true"' in body
-    assert "Post-Trip completed. End Run is available." in body
+    assert "Rider actions are complete. End Run is available." in body
     assert 'id="endActiveRunButton"' in body
     assert 'disabled aria-disabled="true"' not in body

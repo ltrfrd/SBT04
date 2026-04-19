@@ -34,6 +34,7 @@ from backend.schemas.run import (  # Running board response schemas
 )
 from backend.utils.student_bus_absence import apply_run_absence_filter
 from backend.utils.planning_scope import (
+    EXECUTION_ROUTE_BLOCKED_DETAIL,
     get_route_for_execution_or_404,
     get_school_for_planning_or_404,
     validate_route_school_alignment,
@@ -41,6 +42,9 @@ from backend.utils.planning_scope import (
 from backend.utils.route_driver_assignment import resolve_route_driver_assignment
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
 from backend.utils.run_setup import get_run_stop_context_or_404
+
+
+EXECUTION_RUN_BLOCKED_DETAIL = "Run is not executable because its route is not assigned to a yard for execution for this operator"
 
 
 # -----------------------------------------------------------
@@ -101,11 +105,19 @@ def _get_execution_scoped_run_or_404(
             detail="Run not found",
         )
 
-    get_route_for_execution_or_404(
-        db=db,
-        route_id=run.route_id,
-        operator_id=operator_id,
-    )
+    try:
+        get_route_for_execution_or_404(
+            db=db,
+            route_id=run.route_id,
+            operator_id=operator_id,
+        )
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_403_FORBIDDEN and exc.detail == EXECUTION_ROUTE_BLOCKED_DETAIL:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=EXECUTION_RUN_BLOCKED_DETAIL,
+            ) from exc
+        raise
     return run
 
 
@@ -144,16 +156,20 @@ def _is_run_active(run: Run) -> bool:
     return run.start_time is not None and run.end_time is None  # Planned runs are not active until they start
 
 
-def _require_posttrip_phase2_completed(run_id: int, db: Session) -> None:
+def _require_posttrip_phase1_and_phase2_completed(run_id: int, db: Session) -> None:
     inspection = (
         db.query(posttrip_model.PostTripInspection)
         .filter(posttrip_model.PostTripInspection.run_id == run_id)
         .first()
     )                                                          # One post-trip row may exist per run
-    if not inspection or inspection.phase2_completed is not True:
+    if (
+        not inspection
+        or inspection.phase1_completed is not True
+        or inspection.phase2_completed is not True
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Post-trip phase 2 must be completed before ending the run",
+            detail="Post-trip phases 1 and 2 must be completed before completing the run",
         )
 
 

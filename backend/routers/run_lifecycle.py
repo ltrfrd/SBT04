@@ -22,7 +22,7 @@ from backend.models.associations import StudentRunAssignment
 from backend.models.operator import Operator
 from backend.models.run_event import RunEvent
 from backend.schemas.run import RunCompleteOut, RunOut, RunUpdate
-from backend.utils.planning_scope import execution_route_filter, get_route_for_execution_or_404
+from backend.utils.planning_scope import accessible_route_filter, execution_route_filter, get_route_for_execution_or_404
 from backend.utils.operator_scope import (
     get_operator_context,
     get_operator_scoped_driver_or_404,
@@ -30,17 +30,27 @@ from backend.utils.operator_scope import (
 from backend.utils.pretrip_alerts import create_missing_pretrip_alert_if_needed
 from backend.routers.run_helpers import (
     _assert_unique_route_run_type,
+    EXECUTION_RUN_BLOCKED_DETAIL,
     _get_execution_scoped_run_or_404,
     _get_operator_scoped_run_or_404,
     _get_run_assignments,
-    _is_run_active,
-    _require_posttrip_phase2_completed,
+    _require_posttrip_phase1_and_phase2_completed,
     _resolve_run_driver,
     _serialize_run,
 )
 
 
 router = APIRouter(tags=["Runs"])
+
+
+def _raise_district_planning_path_retired() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail=(
+            "Planned run mutations now belong to district-nested planning paths. "
+            "Use /districts/{district_id}/routes/{route_id}/runs/{run_id}."
+        ),
+    )
 
 
 # -----------------------------------------------------------
@@ -205,8 +215,6 @@ def end_run(
     if run.end_time:
         raise HTTPException(status_code=400, detail="Run already ended")
 
-    _require_posttrip_phase2_completed(run.id, db)             # Run cannot close until post-trip phase 2 is complete
-
     run.end_time = datetime.now(timezone.utc).replace(tzinfo=None)  # Set end timestamp
     db.commit()  # Save changes
     db.refresh(run)  # Reload updated run
@@ -258,9 +266,19 @@ def end_run_by_driver(
     # Validate active run exists
     # -------------------------------------------------------------------------
     if not active_run:                              # If no active run found
+        planning_visible_active_run = (
+            db.query(run_model.Run)
+            .join(route_model.Route, route_model.Route.id == run_model.Run.route_id)
+            .filter(run_model.Run.driver_id == driver_id)
+            .filter(accessible_route_filter(operator.id))
+            .filter(run_model.Run.start_time.is_not(None))
+            .filter(run_model.Run.end_time.is_(None))
+            .order_by(run_model.Run.start_time.desc())
+            .first()
+        )
+        if planning_visible_active_run:
+            raise HTTPException(status_code=403, detail=EXECUTION_RUN_BLOCKED_DETAIL)
         raise HTTPException(status_code=404, detail="No active run found for this driver")
-
-    _require_posttrip_phase2_completed(active_run.id, db)      # Run cannot close until post-trip phase 2 is complete
 
     # -------------------------------------------------------------------------
     # End the active run
@@ -282,8 +300,8 @@ def end_run_by_driver(
     response_model=RunCompleteOut,
     summary="Complete run",
     description=(
-        "Mark an active run as completed, close it, and create no-show events for riders not picked up. "
-        "This preserves flexible runtime stop history while locking further live rider actions."
+        "Mark an ended run as completed after both post-trip phases are done, "
+        "and create no-show events for riders not picked up."
     ),
     response_description="Run completion status",
 )
@@ -297,10 +315,16 @@ def complete_run(
     # -------------------------------------------------------------------------
     run = _get_execution_scoped_run_or_404(run_id, db, operator.id)
 
-    if not _is_run_active(run):  # Only active runs can be completed
+    if run.start_time is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Run is not active",
+            detail="Run has not started",
+        )
+
+    if run.end_time is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Run must be ended before completion",
         )
 
     # -------------------------------------------------------------------------
@@ -312,6 +336,8 @@ def complete_run(
             detail="Run is already completed",
         )
 
+    _require_posttrip_phase1_and_phase2_completed(run.id, db)
+
     # -------------------------------------------------------------------------
     # Mark completion fields
     # -------------------------------------------------------------------------
@@ -319,7 +345,6 @@ def complete_run(
 
     run.is_completed = True  # Lock run from further action updates
     run.completed_at = now  # Store completion time
-    run.end_time = now  # Also close the run's end_time for summary/report use
 
 
     # -----------------------------------------------------------
@@ -380,6 +405,7 @@ def complete_run(
 @router.put(
     "/{run_id}",
     response_model=schemas.RunOut,
+    include_in_schema=False,
     summary="Update planned run",
     description="Update the run type for a planned run that has not started yet.",
     response_description="Updated run",
@@ -390,6 +416,7 @@ def update_run(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
+    _raise_district_planning_path_retired()
 
     # -------------------------------------------------------------------------
     # Load run with linked driver and route
@@ -435,6 +462,7 @@ def update_run(
 @router.delete(
     "/{run_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    include_in_schema=False,
     summary="Delete planned run",
     description="Delete a planned run that has not started yet.",
     response_description="Run deleted",
@@ -444,6 +472,7 @@ def delete_run(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
+    _raise_district_planning_path_retired()
 
     # -------------------------------------------------------------------------
     # Load run
