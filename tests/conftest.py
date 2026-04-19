@@ -699,3 +699,28 @@ def client(db_engine):
 
     app.dependency_overrides.clear()  # Remove overrides after test
 
+
+@pytest.fixture()
+def empty_client(db_engine):
+    """FastAPI TestClient backed by an empty DB — no default operator pre-created."""
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    from fastapi.testclient import TestClient
+    with TestClient(app) as c:
+        yield c
+
+    app.dependency_overrides.clear()
+

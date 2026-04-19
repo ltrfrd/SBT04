@@ -3348,3 +3348,27 @@ def test_school_reports_summary_blocked_for_operator_without_yard(client, db_eng
 
     response = client.get(f"/reports/school/{school_id}")
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap endpoint tests
+# ---------------------------------------------------------------------------
+
+def test_bootstrap_operator_works_on_empty_db(empty_client):
+    r = empty_client.post("/session/bootstrap-operator", json={"name": "First Operator"})
+    assert r.status_code == 200
+    assert "operator_id" in r.json()
+
+
+def test_bootstrap_operator_fails_when_operator_exists(empty_client, db_engine):
+    _create_operator_in_db(db_engine, "Existing Operator")
+    r = empty_client.post("/session/bootstrap-operator", json={"name": "Second Operator"})
+    assert r.status_code == 409
+
+
+def test_bootstrap_operator_sets_session(empty_client):
+    r = empty_client.post("/session/bootstrap-operator", json={"name": "Session Bootstrap Operator"})
+    assert r.status_code == 200
+    # Authenticated endpoint must succeed — session was set by bootstrap
+    drivers = empty_client.get("/drivers/")
+    assert drivers.status_code == 200
