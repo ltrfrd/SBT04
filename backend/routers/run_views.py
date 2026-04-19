@@ -35,12 +35,13 @@ from backend.schemas.stop import StopOut
 from backend.utils.operator_scope import (
     get_operator_context,
     get_operator_scoped_driver_or_404,
-    get_operator_scoped_route_or_404,
 )
 from backend.utils.student_bus_absence import apply_run_absence_filter
+from backend.utils.planning_scope import execution_route_filter, get_route_for_execution_or_404
 from backend.routers.run_helpers import (
     _build_run_occupancy_counts,
     _build_running_board_stops,
+    _get_execution_scoped_run_or_404,
     _get_operator_scoped_run_or_404,
     _get_run_assignments,
     _group_running_board_students,
@@ -75,11 +76,10 @@ def get_all_runs(
     if route_id is None:
         raise HTTPException(status_code=400, detail="route_id is required")  # Require route-scoped listing
 
-    get_operator_scoped_route_or_404(
+    get_route_for_execution_or_404(
         db=db,
         route_id=route_id,
         operator_id=operator.id,
-        required_access="read",
     )
 
     # -------------------------------------------------------------------------
@@ -142,7 +142,9 @@ def get_active_run(
     # -------------------------------------------------------------------------
     active_run = (
         db.query(run_model.Run)                      # Query Run table
+        .join(run_model.Run.route)
         .filter(run_model.Run.driver_id == driver_id)  # Only this driver
+        .filter(execution_route_filter(db=db, operator_id=operator.id))  # Keep active run inside the active execution scope
         .filter(run_model.Run.start_time.is_not(None))  # Only started runs
         .filter(run_model.Run.end_time.is_(None))   # Only active runs
         .order_by(run_model.Run.start_time.desc())  # Newest active run first
@@ -181,7 +183,7 @@ def get_run_stops(
     # -------------------------------------------------------------------------
     # Validate run exists
     # -------------------------------------------------------------------------
-    _get_operator_scoped_run_or_404(run_id, db, operator.id, "read")
+    _get_execution_scoped_run_or_404(run_id, db, operator.id)
 
     # -------------------------------------------------------------------------
     # Load stops in stable order
@@ -221,7 +223,7 @@ def get_run_state(
     # -------------------------------------------------------------------------
     # Validate run exists
     # -------------------------------------------------------------------------
-    run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read")
+    run = _get_execution_scoped_run_or_404(run_id, db, operator.id)
 
     # -------------------------------------------------------------------------
     # Load stops in stable order for current-stop and progress context
@@ -323,7 +325,7 @@ def get_onboard_students(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    _get_operator_scoped_run_or_404(run_id, db, operator.id, "read")
+    _get_execution_scoped_run_or_404(run_id, db, operator.id)
     # -------------------------------------------------------------------------
     # Load run
     # -------------------------------------------------------------------------
@@ -428,7 +430,7 @@ def get_run_occupancy_summary(
     # -------------------------------------------------------------------------
     # Validate run exists
     # -------------------------------------------------------------------------
-    run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read")
+    run = _get_execution_scoped_run_or_404(run_id, db, operator.id)
 
     # -------------------------------------------------------------------------
     # Load all runtime student assignments for this run
@@ -476,7 +478,7 @@ def get_run_timeline(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read")
+    run = _get_execution_scoped_run_or_404(run_id, db, operator.id)
 
     events = (
         db.query(RunEvent)                                                # Query run events
@@ -520,7 +522,7 @@ def get_run_replay(
     # -------------------------------------------------------------------------
     # Validate run exists
     # -------------------------------------------------------------------------
-    run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read")
+    run = _get_execution_scoped_run_or_404(run_id, db, operator.id)
 
     # -------------------------------------------------------------------------
     # Load all run events in stable chronological order
@@ -654,11 +656,10 @@ def get_run(
     # -------------------------------------------------------------------------
     # Load run with linked route, stops, and student assignments
     # -------------------------------------------------------------------------
-    run = _get_operator_scoped_run_or_404(
+    run = _get_execution_scoped_run_or_404(
         run_id,
         db,
         operator.id,
-        "read",
         options=[
             joinedload(run_model.Run.driver),
             joinedload(run_model.Run.route),
@@ -694,7 +695,7 @@ def get_running_board(
     # -------------------------------------------------------------------------
     # Load the run
     # -------------------------------------------------------------------------
-    run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read")
+    run = _get_execution_scoped_run_or_404(run_id, db, operator.id)
 
     # -------------------------------------------------------------------------
     # Load run stops ordered by sequence
@@ -754,7 +755,7 @@ def get_run_assignments(
     # -------------------------------------------------------------------------
     # Validate run exists
     # -------------------------------------------------------------------------
-    run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "read")
+    run = _get_execution_scoped_run_or_404(run_id, db, operator.id)
 
     # -------------------------------------------------------------------------
     # Load assignments with student and stop
@@ -816,11 +817,10 @@ def get_run_summary(
     # -------------------------------------------------------------------------
     # Load run with driver and route
     # -------------------------------------------------------------------------
-    run = _get_operator_scoped_run_or_404(
+    run = _get_execution_scoped_run_or_404(
         run_id,
         db,
         operator.id,
-        "read",
         options=[
             joinedload(run_model.Run.driver),
             joinedload(run_model.Run.route),

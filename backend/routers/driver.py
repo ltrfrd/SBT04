@@ -17,10 +17,10 @@ from backend.schemas.route import RouteOut
 from backend.routers.route_helpers import _serialize_route
 from backend.models.operator import Operator
 from backend.utils.auth import hash_driver_pin
+from backend.utils.planning_scope import execution_route_filter
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_driver_operator_id
 from backend.utils.operator_scope import get_operator_scoped_driver_or_404
-from backend.utils.operator_scope import get_route_access_level
 
 # -----------------------------------------------------------
 # Router setup
@@ -150,21 +150,17 @@ def get_driver_routes(
         detail="Driver not found",
     )
 
-    candidate_routes = (
+    driver_operator_id = get_driver_operator_id(driver)
+    routes = (
         db.query(Route)
         .join(RouteDriverAssignment, RouteDriverAssignment.route_id == Route.id)
         .filter(RouteDriverAssignment.driver_id == driver_id)
         .filter(RouteDriverAssignment.active.is_(True))
+        .filter(execution_route_filter(db=db, operator_id=driver_operator_id))
         .order_by(Route.route_number.asc(), Route.id.asc())
         .distinct()
         .all()
     )
-    driver_operator_id = get_driver_operator_id(driver)
-    routes = [
-        route
-        for route in candidate_routes
-        if get_route_access_level(route, driver_operator_id) is not None
-    ]
     return [_serialize_route(route) for route in routes]
 
 

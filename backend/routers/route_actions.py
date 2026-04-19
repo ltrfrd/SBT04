@@ -294,24 +294,10 @@ def assign_route_to_yard(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    route = get_operator_scoped_route_or_404(
-        db=db,
-        route_id=route_id,
-        operator_id=operator.id,
-        required_access="operate",
+    raise HTTPException(
+        status_code=403,
+        detail="Yard assignment must be managed through district route planning endpoints",
     )
-
-    yard = db.get(Yard, yard_id)
-    if not yard:
-        raise HTTPException(status_code=404, detail="Yard not found")
-    if yard.operator_id != operator.id:
-        raise HTTPException(status_code=403, detail="Yard is not allowed for this route")
-
-    if all(existing_yard.id != yard.id for existing_yard in route.yards):
-        route.yards.append(yard)
-
-    db.commit()
-    return {"route_id": route_id, "yard_id": yard_id}
 
 
 @router.delete(
@@ -325,25 +311,10 @@ def unassign_route_from_yard(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    route = get_operator_scoped_route_or_404(
-        db=db,
-        route_id=route_id,
-        operator_id=operator.id,
-        required_access="operate",
+    raise HTTPException(
+        status_code=403,
+        detail="Yard assignment must be managed through district route planning endpoints",
     )
-
-    yard = db.get(Yard, yard_id)
-    if not yard:
-        raise HTTPException(status_code=404, detail="Yard not found")
-    if yard.operator_id != operator.id:
-        raise HTTPException(status_code=403, detail="Yard is not allowed for this route")
-
-    linked_yard = next((existing_yard for existing_yard in route.yards if existing_yard.id == yard.id), None)
-    if linked_yard is not None:
-        route.yards.remove(linked_yard)
-
-    db.commit()
-    return {"route_id": route_id, "yard_id": yard_id}
 
 
 @router.post(

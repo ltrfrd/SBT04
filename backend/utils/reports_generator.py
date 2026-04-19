@@ -20,8 +20,11 @@ from backend.models.associations import StudentRunAssignment  # Runtime assignme
 from backend.utils.student_bus_absence import has_student_bus_absence  # Absence check
 from backend.models import school as school_model  # School model
 from backend.models import SchoolAttendanceVerification  # School confirmation state
-from backend.utils.operator_scope import get_route_access_level
-from backend.utils.planning_scope import accessible_route_filter, accessible_school_filter
+from backend.utils.planning_scope import (
+    execution_route_filter,
+    yards_accessible_route_filter,
+    yards_accessible_school_filter,
+)
 from backend.utils.route_driver_assignment import get_route_driver_name, resolve_route_driver_assignment
 
 
@@ -76,9 +79,9 @@ def driver_summary(db: Session, driver_id: int, operator_id: int | None = None) 
     }  # Preserve existing payload shape
 
 
-def route_summary(db: Session, route_id: int, operator_id: int | None = None) -> dict:
+def route_summary_execution(db: Session, route_id: int) -> dict:
     r = db.get(route_model.Route, route_id)  # Load route
-    if not r or (operator_id is not None and get_route_access_level(r, operator_id) is None):
+    if not r:
         return {"error": "Route not found"}  # Return stable missing-route payload
     assigned_bus = r.bus  # Current assigned bus when present
 
@@ -207,11 +210,12 @@ def generate_reports(
     start: date = None,
     end: date = None,
     operator_id: int | None = None,
+    yard_ids: list[int] | None = None,
 ):
     if reports_type == "driver" and ref_id:
         return driver_summary(db, ref_id, operator_id=operator_id)  # Return driver reports summary
     if reports_type == "route" and ref_id:
-        return route_summary(db, ref_id, operator_id=operator_id)  # Return route reports summary
+        return route_summary_execution(db, ref_id)  # Return route reports summary
     if reports_type == "dispatch" and ref_id and start and end:
         return dispatch_summary(db, ref_id, start, end, operator_id=operator_id)  # Return dispatch summary
     if reports_type == "run" and ref_id:
@@ -247,9 +251,9 @@ def generate_reports(
             absence_lookup,
         )  # Return run reports summary
     if reports_type == "date" and start and end:
-        return date_summary(db, start, end, operator_id=operator_id)
+        return date_summary_execution(db, start, end, operator_id=operator_id)
     if reports_type == "school" and ref_id:
-        return school_reports_summary(db, ref_id, operator_id=operator_id)
+        return school_reports_summary_execution(db, ref_id, yard_ids=yard_ids)
     return {"error": "Invalid reports type or parameters"}  # Preserve error-style contract
 
 # -----------------------------------------------------------
@@ -344,21 +348,21 @@ def run_reports_summary(db, run, assignments, events, absence_lookup):
 # -----------------------------------------------------------
 # School-scope report helpers
 # -----------------------------------------------------------
-def date_summary(db: Session, start: date, end: date, operator_id: int | None = None):        # Build reports for a specific date
-    day_start = datetime.combine(start, time.min)             # Start of requested day
-    day_end = datetime.combine(end, time.max)                 # End of requested day
+def date_summary_execution(db: Session, start: date, end: date, operator_id: int | None = None):
+    day_start = datetime.combine(start, time.min)
+    day_end = datetime.combine(end, time.max)
 
-    runs = (                                                  # Query runs within full-day range
-        db.query(Run)                                         # Select runs
-        .filter(Run.start_time >= day_start)                  # Lower datetime boundary
-        .filter(Run.start_time <= day_end)                    # Upper datetime boundary
-        .all()                                                # Execute query
+    runs_query = (
+        db.query(Run)
+        .filter(Run.start_time >= day_start)
+        .filter(Run.start_time <= day_end)
     )
     if operator_id is not None:
-        runs = [
-            run for run in runs
-            if run.route and get_route_access_level(run.route, operator_id) is not None
-        ]
+        route_f = execution_route_filter(db=db, operator_id=operator_id)
+        accessible_route_ids = db.query(route_model.Route.id).filter(route_f).scalar_subquery()
+        runs_query = runs_query.filter(Run.route_id.in_(accessible_route_ids))
+
+    runs = runs_query.all()
 
     results = []                                              # Collect run reports summaries
 
@@ -414,10 +418,16 @@ def normalize_school_status(status: str) -> str:
 # - School reports summary
 # - Build school-facing reports grouped by route and run
 # -----------------------------------------------------------
-def school_reports_summary(db: Session, school_id: int, operator_id: int | None = None):
+def school_reports_summary_execution(
+    db: Session,
+    school_id: int,
+    yard_ids: list[int] | None = None,
+):
+    if yard_ids is None:
+        return {"error": "School not found"}
+
     school_query = db.query(school_model.School).filter(school_model.School.id == school_id)
-    if operator_id is not None:
-        school_query = school_query.filter(accessible_school_filter(operator_id))
+    school_query = school_query.filter(yards_accessible_school_filter(yard_ids))
     school = school_query.first()  # Load school once for final payload
     if not school:
         return {"error": "School not found"}
@@ -427,8 +437,7 @@ def school_reports_summary(db: Session, school_id: int, operator_id: int | None 
         .join(route_model.route_schools)  # Join route-school association
         .filter(route_model.route_schools.c.school_id == school_id)  # Keep only this school's routes
     )
-    if operator_id is not None:
-        routes_query = routes_query.filter(accessible_route_filter(operator_id))
+    routes_query = routes_query.filter(yards_accessible_route_filter(yard_ids))
     routes = routes_query.all()  # Execute query
 
     results = []  # Collect run reports summaries
@@ -609,8 +618,12 @@ def school_reports_summary(db: Session, school_id: int, operator_id: int | None 
 # - School route navigation summary
 # - Returns routes assigned to one school
 # -----------------------------------------------------------
-def school_routes_summary(db: Session, school_id: int, operator_id: int | None = None):
-    school_data = school_reports_summary(db, school_id, operator_id=operator_id)
+def school_routes_summary(
+    db: Session,
+    school_id: int,
+    yard_ids: list[int] | None = None,
+):
+    school_data = school_reports_summary_execution(db, school_id, yard_ids=yard_ids)
 
     if school_data.get("school_name") is None:  # Guard unknown school requests
         return {"error": "School not found"}
@@ -627,8 +640,13 @@ def school_routes_summary(db: Session, school_id: int, operator_id: int | None =
 # - School route run summary
 # - Returns runs for one selected school route
 # -----------------------------------------------------------
-def school_route_runs_summary(db: Session, school_id: int, route_id: int, operator_id: int | None = None):
-    school_data = school_reports_summary(db, school_id, operator_id=operator_id)
+def school_route_runs_summary(
+    db: Session,
+    school_id: int,
+    route_id: int,
+    yard_ids: list[int] | None = None,
+):
+    school_data = school_reports_summary_execution(db, school_id, yard_ids=yard_ids)
 
     if school_data.get("school_name") is None:  # Guard unknown school requests
         return {"error": "School not found"}
@@ -653,8 +671,13 @@ def school_route_runs_summary(db: Session, school_id: int, route_id: int, operat
 # - School single run summary
 # - Returns one selected run for one school
 # -----------------------------------------------------------
-def school_single_run_summary(db: Session, school_id: int, run_id: int, operator_id: int | None = None):
-    school_data = school_reports_summary(db, school_id, operator_id=operator_id)
+def school_single_run_summary(
+    db: Session,
+    school_id: int,
+    run_id: int,
+    yard_ids: list[int] | None = None,
+):
+    school_data = school_reports_summary_execution(db, school_id, yard_ids=yard_ids)
 
     if school_data.get("school_name") is None:  # Guard unknown school requests
         return {"error": "School not found"}

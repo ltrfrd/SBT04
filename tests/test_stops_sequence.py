@@ -1,3 +1,6 @@
+from tests.conftest import ensure_route_has_execution_yard
+
+
 def _create_driver(client):
     r = client.post("/drivers/", json={"name": "T", "email": "t@t.com", "phone": "1", "pin": "1234"})
     assert r.status_code in (200, 201)
@@ -14,6 +17,7 @@ def _create_route(client, driver_id: int):
 
     r = client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
     assert r.status_code in (200, 201)
+    ensure_route_has_execution_yard(client, route_id)
     return route_id
 
 

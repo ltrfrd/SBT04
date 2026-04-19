@@ -2,7 +2,7 @@ import uuid
 
 import pytest
 
-from tests.conftest import ensure_prepared_run_student
+from tests.conftest import ensure_prepared_run_student, ensure_route_has_execution_yard
 
 
 def _setup_run(client):
@@ -18,6 +18,7 @@ def _setup_run(client):
 
     r = client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
     assert r.status_code in (200, 201)
+    ensure_route_has_execution_yard(client, route_id)
 
     r = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
     assert r.status_code in (200, 201)

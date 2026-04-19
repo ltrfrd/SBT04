@@ -1,4 +1,48 @@
 from tests.conftest import client, ensure_prepared_run_student
+from sqlalchemy.orm import Session
+from app import get_db
+from backend.models.route import Route
+from backend.models.yard import Yard
+
+
+def _get_client_db_engine(client):
+    override = client._wrapped_client.app.dependency_overrides[get_db]
+    for cell in override.__closure__ or ():
+        candidate = cell.cell_contents
+        bind = getattr(candidate, "kw", {}).get("bind")
+        if bind is not None:
+            return bind
+    raise AssertionError("Unable to resolve test database engine from client fixture")
+
+
+def _ensure_route_has_execution_yard(client, route_id: int):
+    db_engine = _get_client_db_engine(client)
+    with Session(db_engine) as db:
+        route = db.get(Route, route_id)
+        assert route is not None
+
+        yard = (
+            db.query(Yard)
+            .filter(Yard.operator_id == 1)
+            .order_by(Yard.id.asc())
+            .first()
+        )
+        if yard is None:
+            yard = Yard(name="Main Yard", operator_id=1)
+            db.add(yard)
+            db.flush()
+
+        yard_id = yard.id
+        district_id = route.district_id
+        existing_yard_ids = {existing_yard.id for existing_yard in route.yards}
+        db.commit()
+
+    assert district_id is not None
+    if yard_id in existing_yard_ids:
+        return
+
+    assigned = client.post(f"/districts/{district_id}/routes/{route_id}/assign-yard/{yard_id}")
+    assert assigned.status_code == 200
 
 
 def test_create_bus(client):
@@ -264,6 +308,7 @@ def test_route_detail_and_list_show_bus_id_when_assigned(client):
 
     assigned = client.post(f"/routes/{route.json()['id']}/assign_bus/{bus.json()['id']}")
     assert assigned.status_code == 200
+    _ensure_route_has_execution_yard(client, route.json()["id"])
 
     detail = client.get(f"/routes/{route.json()['id']}")
     listing = client.get("/routes/")
@@ -359,6 +404,7 @@ def test_bus_detail_returns_assigned_route_with_nested_context(client):
     assign_bus = client.post(f"/routes/{route.json()['id']}/assign_bus/{bus.json()['id']}")
     assert assign_driver.status_code in (200, 201)
     assert assign_bus.status_code == 200
+    _ensure_route_has_execution_yard(client, route.json()["id"])
 
     run = client.post(f"/routes/{route.json()['id']}/runs", json={"run_type": "Morning"})
     assert run.status_code in (200, 201)

@@ -1,8 +1,130 @@
 from tests.conftest import client
+from datetime import date
 from sqlalchemy.orm import Session
+from app import get_db
 from backend.models.associations import StudentRunAssignment
+from backend.models.bus import Bus
 from backend.models.run import Run
+from backend.models.route import Route
 from backend.models.student import Student
+from backend.models.yard import Yard
+
+
+def _get_client_db_engine(client):
+    override = client._wrapped_client.app.dependency_overrides[get_db]
+    for cell in override.__closure__ or ():
+        candidate = cell.cell_contents
+        bind = getattr(candidate, "kw", {}).get("bind")
+        if bind is not None:
+            return bind
+    raise AssertionError("Unable to resolve test database engine from client fixture")
+
+
+def _ensure_route_has_execution_yard(client, route_id: int):
+    db_engine = _get_client_db_engine(client)
+    with Session(db_engine) as db:
+        route = db.get(Route, route_id)
+        assert route is not None
+
+        yard = (
+            db.query(Yard)
+            .filter(Yard.operator_id == 1)
+            .order_by(Yard.id.asc())
+            .first()
+        )
+        if yard is None:
+            yard = Yard(name="Main Yard", operator_id=1)
+            db.add(yard)
+            db.flush()
+
+        yard_id = yard.id
+        district_id = route.district_id
+        existing_yard_ids = {existing_yard.id for existing_yard in route.yards}
+        db.commit()
+
+    assert district_id is not None
+    if yard_id in existing_yard_ids:
+        return
+
+    assigned = client.post(f"/districts/{district_id}/routes/{route_id}/assign-yard/{yard_id}")
+    assert assigned.status_code == 200
+
+
+def _get_route_snapshot(client, route_id: int):
+    db_engine = _get_client_db_engine(client)
+    with Session(db_engine) as db:
+        route = db.get(Route, route_id)
+        assert route is not None
+        return {
+            "active_bus_id": route.active_bus_id,
+            "bus_id": route.bus_id,
+        }
+
+
+def _ensure_route_has_active_bus(client, route_id: int, *, label: str):
+    route_snapshot = _get_route_snapshot(client, route_id)
+    if route_snapshot["active_bus_id"] or route_snapshot["bus_id"]:
+        return
+
+    bus = client.post(
+        "/buses/",
+        json={
+            "bus_number": f"{label}-BUS",
+            "license_plate": f"{label[:8]}-PLT",
+            "capacity": 48,
+            "size": "full",
+        },
+    )
+    assert bus.status_code in (200, 201)
+
+    assign = client.post(f"/routes/{route_id}/assign_bus/{bus.json()['id']}")
+    assert assign.status_code == 200
+
+
+def _ensure_active_bus_pretrip(client, route_id: int, run_id: int, *, driver_name: str | None):
+    route_snapshot = _get_route_snapshot(client, route_id)
+    active_bus_id = route_snapshot["active_bus_id"] or route_snapshot["bus_id"]
+    assert active_bus_id is not None
+
+    pretrip = client.get(f"/pretrips/bus/{active_bus_id}/today")
+    if pretrip.status_code != 404:
+        assert pretrip.status_code == 200
+        return
+
+    db_engine = _get_client_db_engine(client)
+    with Session(db_engine) as db:
+        bus = db.get(Bus, active_bus_id)
+        assert bus is not None
+        bus_number = bus.bus_number
+        license_plate = bus.license_plate
+
+    created = client.post(
+        "/pretrips/",
+        json={
+            "bus_number": bus_number,
+            "license_plate": license_plate,
+            "driver_name": driver_name or "Prepared Driver",
+            "inspection_date": date.today().isoformat(),
+            "inspection_time": "06:30:00",
+            "odometer": 1000 + run_id,
+            "inspection_place": "Test Yard",
+            "use_type": "school_bus",
+            "brakes_checked": True,
+            "lights_checked": True,
+            "tires_checked": True,
+            "emergency_equipment_checked": True,
+            "fit_for_duty": "yes",
+            "no_defects": True,
+            "signature": "test-signature",
+            "defects": [],
+        },
+    )
+    assert created.status_code in (200, 201)
+
+
+def _prepare_run_for_start_attempt(client, route_id: int, run_id: int, *, driver_name: str | None):
+    _ensure_route_has_active_bus(client, route_id, label=f"AUTO-{run_id}")
+    _ensure_active_bus_pretrip(client, route_id, run_id, driver_name=driver_name)
 
 
 def _create_route_with_assignment(client, route_number: str, unit_number: str, driver_id: int):
@@ -38,6 +160,13 @@ def _create_prepared_started_run(
     )
     assert student.status_code in (200, 201)
 
+    _ensure_route_has_execution_yard(client, route_id)
+    _prepare_run_for_start_attempt(
+        client,
+        route_id,
+        run_id,
+        driver_name=run.json().get("driver_name"),
+    )
     started = client.post(f"/runs/start?run_id={run_id}")
     assert started.status_code in (200, 201)
     return started, stop, student
@@ -53,6 +182,7 @@ def test_schools_crud(client):
         json={"route_number": "S1-VISIBLE-ROUTE", "school_ids": [school_id]},
     )
     assert visible_route.status_code in (200, 201)
+    _ensure_route_has_execution_yard(client, visible_route.json()["id"])
 
     r = client.get("/schools/")
     assert r.status_code == 200
@@ -81,6 +211,7 @@ def test_routes_crud(client):
     driver_id = r.json()["id"]
 
     route_id = _create_route_with_assignment(client, "R100", "Bus-100", driver_id)
+    _ensure_route_has_execution_yard(client, route_id)
 
     r = client.get("/routes/")
     assert r.status_code == 200
@@ -268,6 +399,7 @@ def test_route_detail_returns_empty_arrays_for_empty_route(client):
     route = client.post("/routes/", json={"route_number": "REMPTY-1"})
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
+    _ensure_route_has_execution_yard(client, route_id)
 
     response = client.get(f"/routes/{route_id}")
     assert response.status_code == 200
@@ -308,6 +440,7 @@ def test_students_crud(client):
     )
     assert r.status_code in (200, 201)
     student_id = r.json()["id"]
+    _ensure_route_has_execution_yard(client, route_id)
 
     r = client.get("/students/")
     assert r.status_code == 200
@@ -669,6 +802,12 @@ def test_create_student_inside_run_stop_context_rejects_started_run(client):
     )
     assert seed_student.status_code == 201
 
+    _prepare_run_for_start_attempt(
+        client,
+        route_id,
+        run_id,
+        driver_name=run.json().get("driver_name"),
+    )
     started = client.post(f"/runs/start?run_id={run_id}")
     assert started.status_code in (200, 201)
 
@@ -1386,6 +1525,7 @@ def test_school_create_read_update_works_without_school_code(client):
         json={"route_number": "NORTH-RIDGE-VISIBLE", "school_ids": [school["id"]]},
     )
     assert visible_route.status_code in (200, 201)
+    _ensure_route_has_execution_yard(client, visible_route.json()["id"])
 
     read = client.get(f"/schools/{school['id']}")
     assert read.status_code == 200

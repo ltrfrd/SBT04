@@ -31,6 +31,7 @@ from backend.utils import reports_generator
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_operator_scoped_driver_or_404
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
+from backend.utils.planning_scope import execution_route_filter, get_route_for_execution_or_404
 from backend.utils.driver_workspace import _build_route_workspace
 from backend.utils.planning_scope import accessible_route_filter, accessible_school_filter, accessible_student_filter
 from backend.utils.posttrip_photos import get_or_create_capture_token
@@ -81,16 +82,10 @@ def route_report(
     operator: Operator = Depends(get_operator_context),
 ):
     """Shows route-specific reports summary including driver name and route details."""
-    route_data = reports_generator.route_summary(db, route_id, operator_id=operator.id)
+    route = get_route_for_execution_or_404(db=db, route_id=route_id, operator_id=operator.id)
+    route_data = reports_generator.route_summary_execution(db, route_id)
     if "error" in route_data:
         raise HTTPException(status_code=404, detail=route_data["error"])
-
-    route = get_operator_scoped_route_or_404(
-        db=db,
-        route_id=route_id,
-        operator_id=operator.id,
-        required_access="read",
-    )
     driver_name = get_route_driver_name(route) if route else None
     return templates.TemplateResponse(
         request,
@@ -130,7 +125,7 @@ def driver_run_view(
         .options(joinedload(run_model.Run.route))
         .filter(run_model.Run.driver_id == driver_id)
         .join(route_model.Route, route_model.Route.id == run_model.Run.route_id)
-        .filter(accessible_route_filter(operator.id))
+        .filter(execution_route_filter(db=db, operator_id=operator.id))
         .filter(run_model.Run.start_time.is_not(None))
         .filter(run_model.Run.end_time.is_(None))
         .first()
@@ -151,7 +146,7 @@ def driver_run_view(
             RouteDriverAssignment.driver_id == driver_id,
             RouteDriverAssignment.active.is_(True),
         )))
-        .filter(accessible_route_filter(operator.id))
+        .filter(execution_route_filter(db=db, operator_id=operator.id))
         .order_by(route_model.Route.route_number.asc(), route_model.Route.id.asc())
         .all()
     )

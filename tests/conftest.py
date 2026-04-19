@@ -125,6 +125,80 @@ def _get_or_create_test_district_id(db_engine, operator_id: int) -> int:
         db.close()
 
 
+def _get_client_db_engine(client):
+    wrapped_client = getattr(client, "_wrapped_client", client)
+    override = wrapped_client.app.dependency_overrides[get_db]
+    for cell in override.__closure__ or ():
+        candidate = cell.cell_contents
+        bind = getattr(candidate, "kw", {}).get("bind")
+        if bind is not None:
+            return bind
+    raise AssertionError("Unable to resolve test database engine from client fixture")
+
+
+def _get_or_create_operator_yard_id(db_engine, operator_id: int) -> int:
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+    db = TestingSessionLocal()
+    try:
+        yard = (
+            db.query(Yard)
+            .filter(Yard.operator_id == operator_id)
+            .order_by(Yard.id.asc())
+            .first()
+        )
+        if yard is None:
+            yard = Yard(name="Main Yard", operator_id=operator_id)
+            db.add(yard)
+            db.commit()
+            db.refresh(yard)
+        return yard.id
+    finally:
+        db.close()
+
+
+def ensure_route_has_execution_yard(client, route_id: int, *, operator_id: int = 1):
+    db_engine = _get_client_db_engine(client)
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+    db = TestingSessionLocal()
+    try:
+        route_row = db.get(route.Route, route_id)
+        assert route_row is not None, f"Route {route_id} not found in test DB"
+
+        district_id = route_row.district_id
+        existing_yard_ids = {yard.id for yard in route_row.yards}
+    finally:
+        db.close()
+
+    assert district_id is not None, f"Route {route_id} must have a district before yard assignment"
+
+    yard_id = _get_or_create_operator_yard_id(db_engine, operator_id)
+    if yard_id in existing_yard_ids:
+        return yard_id
+
+    assigned = client.post(f"/districts/{district_id}/routes/{route_id}/assign-yard/{yard_id}")
+    assert assigned.status_code == 200, assigned.text
+    return yard_id
+
+
+def _get_run_route_id(client, run_id: int) -> int | None:
+    db_engine = _get_client_db_engine(client)
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+    db = TestingSessionLocal()
+    try:
+        run_row = db.get(run.Run, run_id)
+        return run_row.route_id if run_row is not None else None
+    finally:
+        db.close()
+
+
+def ensure_run_has_execution_yard(client, run_id: int, *, operator_id: int = 1) -> int | None:
+    route_id = _get_run_route_id(client, run_id)
+    if route_id is None:
+        return None
+    ensure_route_has_execution_yard(client, route_id, operator_id=operator_id)
+    return route_id
+
+
 # =============================================================================
 # Test preparation helper
 # =============================================================================
@@ -132,6 +206,7 @@ def _get_or_create_test_district_id(db_engine, operator_id: int) -> int:
 def ensure_prepared_run_student(client, run_id: int):
     """Create the minimum canonical student fixture required for /runs/start."""
 
+    route_id = ensure_run_has_execution_yard(client, run_id)
     run_response = client.get(f"/runs/{run_id}")
     assert run_response.status_code == 200
     run_data = run_response.json()
@@ -141,7 +216,8 @@ def ensure_prepared_run_student(client, run_id: int):
 
     assert run_data["stops"], "Run must have stops before preparing a runtime student"
 
-    route_id = run_data["route"]["route_id"]
+    route_id = route_id or run_data["route"]["route_id"]
+    ensure_route_has_execution_yard(client, route_id)
     route_response = client.get(f"/routes/{route_id}")
     assert route_response.status_code == 200
     route_data = route_response.json()
@@ -268,10 +344,25 @@ def client(db_engine):
     class LegacyAwareClient:
         def __init__(self, wrapped_client):
             self._wrapped_client = wrapped_client
+            self._operator_id: int | None = 1
             self._school_district_ids: dict[int, int] = {}
 
         def _current_operator_id(self):
-            return 1
+            return self._operator_id or 1
+
+        def ensure_route_has_execution_yard(self, route_id: int):
+            return ensure_route_has_execution_yard(
+                self,
+                route_id,
+                operator_id=self._current_operator_id(),
+            )
+
+        def ensure_run_has_execution_yard(self, run_id: int):
+            return ensure_run_has_execution_yard(
+                self,
+                run_id,
+                operator_id=self._current_operator_id(),
+            )
 
         def _ensure_school_payload_has_district(self, payload: dict) -> dict:
             school_payload = dict(payload)
@@ -367,6 +458,26 @@ def client(db_engine):
         def __getattr__(self, name):
             return getattr(self._wrapped_client, name)
 
+        def get(self, url, *args, **kwargs):
+            parsed = urlparse(url)
+            path_parts = [part for part in parsed.path.strip("/").split("/") if part]
+            query = parse_qs(parsed.query)
+
+            if len(path_parts) >= 2 and path_parts[0] == "runs" and path_parts[1].isdigit():
+                self.ensure_run_has_execution_yard(int(path_parts[1]))
+
+            if parsed.path.rstrip("/") == "/runs":
+                route_id_values = query.get("route_id", [])
+                if route_id_values and route_id_values[0].isdigit():
+                    self.ensure_route_has_execution_yard(int(route_id_values[0]))
+
+            if len(path_parts) >= 1 and path_parts[0] == "driver_run":
+                route_id_values = query.get("route_id", [])
+                if route_id_values and route_id_values[0].isdigit():
+                    self.ensure_route_has_execution_yard(int(route_id_values[0]))
+
+            return self._wrapped_client.get(url, *args, **kwargs)
+
         def post(self, url, *args, **kwargs):
             payload = kwargs.get("json")
 
@@ -385,6 +496,12 @@ def client(db_engine):
                     **{k: v for k, v in kwargs.items() if k != "json"},
                 )
                 return self._remember_school_district(response)
+
+            if url == "/session/operator" and isinstance(payload, dict):
+                response = self._wrapped_client.post(url, *args, **kwargs)
+                if response.status_code == 200:
+                    self._operator_id = int(response.json().get("operator_id", payload["operator_id"]))
+                return response
 
             if url == "/routes/" and isinstance(payload, dict) and "driver_id" in payload:
                 route_payload = self._ensure_route_payload_has_district(payload)
@@ -464,6 +581,7 @@ def client(db_engine):
                 run_id_values = parse_qs(parsed.query).get("run_id", [])
                 if run_id_values:
                     run_id = int(run_id_values[0])
+                    self.ensure_run_has_execution_yard(run_id)
                     run_response = self._wrapped_client.get(f"/runs/{run_id}")
                     if run_response.status_code == 200:
                         run_data = run_response.json()

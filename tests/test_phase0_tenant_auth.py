@@ -3,7 +3,7 @@
 # -----------------------------------------------------------------------------
 # Phase 0 tenant isolation and transitional operator-session tests.
 # =============================================================================
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,7 @@ from backend.models.school import School
 from backend.models.stop import Stop
 from backend.models.student import Student
 from backend.models.yard import Yard
+from backend.models.operator import OperatorRouteAccess
 from tests.conftest import TEST_DRIVER_PIN, _create_operator_in_db, _create_driver_in_db
 
 
@@ -57,6 +58,50 @@ def _share_route(client, route_id: int, target_operator_id: int, access_level: s
     )
     assert response.status_code == 200
     assert response.json()["access_level"] == access_level
+
+
+def _assign_route_to_operator_yard(
+    client,
+    db_engine,
+    *,
+    operator_id: int,
+    route_id: int,
+    yard_name: str,
+) -> int:
+    yard_id = _create_yard_in_db(db_engine, operator_id, yard_name)
+    with Session(db_engine) as db:
+        route = db.get(Route, route_id)
+        district_id = route.district_id if route else None
+    assert district_id is not None
+    _login(client, operator_id)
+    response = client.post(f"/districts/{district_id}/routes/{route_id}/assign-yard/{yard_id}")
+    assert response.status_code == 200, response.text
+    return yard_id
+
+
+def _establish_execution_yard(
+    db_engine,
+    route_id: int,
+    *,
+    yard_name: str,
+    operator_id: int | None = None,
+) -> int:
+    """Direct DB yard-route link so the operator gains execution visibility without changing session."""
+    with Session(db_engine) as db:
+        if operator_id is None:
+            access = db.query(OperatorRouteAccess).filter_by(
+                route_id=route_id, access_level="owner"
+            ).first()
+            assert access is not None, f"No owner access found for route {route_id}"
+            operator_id = access.operator_id
+        yard = Yard(name=yard_name, operator_id=operator_id)
+        db.add(yard)
+        db.flush()
+        yard_id = yard.id
+        route = db.get(Route, route_id)
+        route.yards.append(yard)
+        db.commit()
+        return yard_id
 
 
 def _create_shared_planning_context(client, db_engine, *, suffix: str) -> dict[str, int]:
@@ -102,6 +147,8 @@ def _create_shared_planning_context(client, db_engine, *, suffix: str) -> dict[s
     student_id = student.json()["id"]
 
     _share_route(client, route_id, shared_operator_id, "read")
+    _establish_execution_yard(db_engine, route_id, yard_name=f"{suffix} Owner Exec Yard")
+    _establish_execution_yard(db_engine, route_id, yard_name=f"{suffix} Shared Exec Yard", operator_id=shared_operator_id)
     _logout(client)
 
     return {
@@ -238,18 +285,18 @@ def test_shared_route_access_requires_explicit_grant(client, db_engine):
     assert grant.status_code == 200
     assert grant.json()["access_level"] == "read"
 
-    # --- Shared operator can now read ---
+    # --- Shared operator has planning grant but no yard assignment → no execution visibility ---
     _logout(client)
     _login(client, shared_operator_id)
 
     shared_read = client.get(f"/routes/{route_id}")
-    assert shared_read.status_code == 200
+    assert shared_read.status_code == 404
 
     shared_list = client.get("/routes/")
     assert shared_list.status_code == 200
-    assert [item["id"] for item in shared_list.json()] == [route_id]
+    assert route_id not in [item["id"] for item in shared_list.json()]
 
-    # --- Shared operator still cannot write ---
+    # --- Shared operator still cannot write (read grant only, and no execution visibility) ---
     shared_write = client.put(f"/routes/{route_id}", json={"route_number": "SHARED-1-EDIT"})
     assert shared_write.status_code == 404
 
@@ -377,7 +424,7 @@ def test_absences_by_date_includes_accessible_shared_students(client, db_engine)
 
 
 # ---------------------------------------------------------------------------
-# List endpoints only return operator-owned records
+# List endpoints only return operator-accessible records
 # ---------------------------------------------------------------------------
 
 def test_operator_lists_only_show_owned_records(client, db_engine):
@@ -407,6 +454,10 @@ def test_operator_lists_only_show_owned_records(client, db_engine):
     route_two = client.post("/routes/", json={"route_number": "LIST-TWO"})
     assert extra_driver_two.status_code == 201
     assert route_two.status_code in (200, 201)
+    _establish_execution_yard(db_engine, route_two.json()["id"], yard_name="List Two Exec Yard", operator_id=operator_two_id)
+
+    # --- Add yard for operator one's route so it appears in execution listing ---
+    _establish_execution_yard(db_engine, route_one.json()["id"], yard_name="List One Exec Yard", operator_id=operator_one_id)
 
     # --- Operator one list only shows its records ---
     _logout(client)
@@ -815,6 +866,7 @@ def test_assign_route_to_school_with_matching_district_succeeds(client, db_engin
 
     assign = client.post(f"/schools/{school.json()['id']}/assign_route/{route.json()['id']}")
     assert assign.status_code == 200
+    _establish_execution_yard(db_engine, route.json()["id"], yard_name="Assign Match Exec Yard")
 
     detail = client.get(f"/routes/{route.json()['id']}")
     assert detail.status_code == 200
@@ -846,6 +898,7 @@ def test_assigning_same_route_to_school_twice_does_not_duplicate_link(client, db
     second_assign = client.post(f"/schools/{school.json()['id']}/assign_route/{route.json()['id']}")
     assert first_assign.status_code == 200
     assert second_assign.status_code == 200
+    _establish_execution_yard(db_engine, route.json()["id"], yard_name="Assign Duplicate Exec Yard")
 
     detail = client.get(f"/routes/{route.json()['id']}")
     assert detail.status_code == 200
@@ -870,6 +923,7 @@ def test_unassign_route_from_school_succeeds(client, db_engine):
 
     unassign = client.delete(f"/schools/{school.json()['id']}/unassign_route/{route.json()['id']}")
     assert unassign.status_code == 200
+    _establish_execution_yard(db_engine, route.json()["id"], yard_name="Unassign Route Exec Yard")
 
     detail = client.get(f"/routes/{route.json()['id']}")
     assert detail.status_code == 200
@@ -897,6 +951,7 @@ def test_unassigning_non_linked_route_from_school_is_safe_no_op(client, db_engin
 
     unassign = client.delete(f"/schools/{school.json()['id']}/unassign_route/{route.json()['id']}")
     assert unassign.status_code == 200
+    _establish_execution_yard(db_engine, route.json()["id"], yard_name="Unassign Noop Exec Yard")
 
     detail = client.get(f"/routes/{route.json()['id']}")
     assert detail.status_code == 200
@@ -964,7 +1019,7 @@ def test_student_route_planning_requires_district_backed_route(client, db_engine
     assert student.status_code == 201
 
 
-def test_school_list_still_returns_operator_owned_schools(client):
+def test_school_list_still_returns_operator_owned_schools(client, db_engine):
     owned_school = client.post(
         "/schools/",
         json={"name": "Owned School Visible", "address": "20 School Way"},
@@ -976,6 +1031,7 @@ def test_school_list_still_returns_operator_owned_schools(client):
         json={"route_number": "OWNED-SCHOOL-VISIBLE-ROUTE", "school_ids": [owned_school.json()["id"]]},
     )
     assert visible_route.status_code in (200, 201)
+    _establish_execution_yard(db_engine, visible_route.json()["id"], yard_name="Owned School Exec Yard")
 
     schools = client.get("/schools/")
     assert schools.status_code == 200
@@ -998,6 +1054,7 @@ def test_school_list_returns_district_owned_schools(client, db_engine):
         json={"route_number": "DISTRICT-SCHOOL-VISIBLE-ROUTE", "school_ids": [district_school.json()["id"]]},
     )
     assert visible_route.status_code == 201
+    _establish_execution_yard(db_engine, visible_route.json()["id"], yard_name="District School Exec Yard")
 
     schools = client.get("/schools/")
     assert schools.status_code == 200
@@ -1017,6 +1074,7 @@ def test_school_list_returns_combined_operator_and_district_owned_schools(client
         json={"route_number": "COMBINED-OWNED-SCHOOL-ROUTE", "school_ids": [owned_school.json()["id"]]},
     )
     assert owned_route.status_code in (200, 201)
+    _establish_execution_yard(db_engine, owned_route.json()["id"], yard_name="Combined Owned School Exec Yard")
 
     district_id = _create_district_in_db(db_engine, "Combined District")
     district_school = client.post(
@@ -1029,6 +1087,7 @@ def test_school_list_returns_combined_operator_and_district_owned_schools(client
         json={"route_number": "COMBINED-DISTRICT-SCHOOL-ROUTE", "school_ids": [district_school.json()["id"]]},
     )
     assert district_route.status_code == 201
+    _establish_execution_yard(db_engine, district_route.json()["id"], yard_name="Combined District School Exec Yard")
 
     schools = client.get("/schools/")
     assert schools.status_code == 200
@@ -1038,7 +1097,7 @@ def test_school_list_returns_combined_operator_and_district_owned_schools(client
     assert district_school.json()["id"] in school_ids
 
 
-def test_school_detail_still_returns_operator_owned_school(client):
+def test_school_detail_still_returns_operator_owned_school(client, db_engine):
     owned_school = client.post(
         "/schools/",
         json={"name": "Owned School Detail", "address": "24 School Way"},
@@ -1050,6 +1109,7 @@ def test_school_detail_still_returns_operator_owned_school(client):
         json={"route_number": "OWNED-SCHOOL-DETAIL-ROUTE", "school_ids": [owned_school.json()["id"]]},
     )
     assert visible_route.status_code in (200, 201)
+    _establish_execution_yard(db_engine, visible_route.json()["id"], yard_name="Owned School Detail Exec Yard")
 
     school = client.get(f"/schools/{owned_school.json()['id']}")
     assert school.status_code == 200
@@ -1070,6 +1130,7 @@ def test_school_detail_returns_district_owned_school(client, db_engine):
         json={"route_number": "DISTRICT-SCHOOL-DETAIL-ROUTE", "school_ids": [district_school.json()["id"]]},
     )
     assert visible_route.status_code == 201
+    _establish_execution_yard(db_engine, visible_route.json()["id"], yard_name="District School Detail Exec Yard")
 
     school = client.get(f"/schools/{district_school.json()['id']}")
     assert school.status_code == 200
@@ -1165,12 +1226,13 @@ def test_school_delete_succeeds_via_valid_shared_planning_access(client, db_engi
     assert read_back.status_code == 404
 
 
-def test_route_list_still_returns_operator_owned_routes(client):
+def test_route_list_still_returns_operator_owned_routes(client, db_engine):
     owned_route = client.post(
         "/routes/",
         json={"route_number": "OWNED-ROUTE-VISIBLE"},
     )
     assert owned_route.status_code in (200, 201)
+    _establish_execution_yard(db_engine, owned_route.json()["id"], yard_name="Owned Route Exec Yard")
 
     routes = client.get("/routes/")
     assert routes.status_code == 200
@@ -1187,6 +1249,7 @@ def test_route_list_returns_district_owned_routes(client, db_engine):
         json={"route_number": "DISTRICT-ROUTE-VISIBLE"},
     )
     assert district_route.status_code == 201
+    _establish_execution_yard(db_engine, district_route.json()["id"], yard_name="District Route Exec Yard")
 
     routes = client.get("/routes/")
     assert routes.status_code == 200
@@ -1201,6 +1264,7 @@ def test_route_list_returns_combined_operator_and_district_owned_routes(client, 
         json={"route_number": "COMBINED-OWNED-ROUTE"},
     )
     assert owned_route.status_code in (200, 201)
+    _establish_execution_yard(db_engine, owned_route.json()["id"], yard_name="Combined Owned Route Exec Yard")
 
     district_id = _create_district_in_db(db_engine, "Combined District Route")
     district_route = client.post(
@@ -1208,6 +1272,7 @@ def test_route_list_returns_combined_operator_and_district_owned_routes(client, 
         json={"route_number": "COMBINED-DISTRICT-ROUTE"},
     )
     assert district_route.status_code == 201
+    _establish_execution_yard(db_engine, district_route.json()["id"], yard_name="Combined District Route Exec Yard")
 
     routes = client.get("/routes/")
     assert routes.status_code == 200
@@ -1217,12 +1282,13 @@ def test_route_list_returns_combined_operator_and_district_owned_routes(client, 
     assert district_route.json()["id"] in route_ids
 
 
-def test_route_detail_still_returns_operator_owned_route(client):
+def test_route_detail_still_returns_operator_owned_route(client, db_engine):
     owned_route = client.post(
         "/routes/",
         json={"route_number": "OWNED-ROUTE-DETAIL"},
     )
     assert owned_route.status_code in (200, 201)
+    _establish_execution_yard(db_engine, owned_route.json()["id"], yard_name="Owned Route Detail Exec Yard")
 
     route = client.get(f"/routes/{owned_route.json()['id']}")
     assert route.status_code == 200
@@ -1237,6 +1303,7 @@ def test_route_detail_returns_district_owned_route(client, db_engine):
         json={"route_number": "DISTRICT-ROUTE-DETAIL"},
     )
     assert district_route.status_code == 201
+    _establish_execution_yard(db_engine, district_route.json()["id"], yard_name="District Route Detail Exec Yard")
 
     route = client.get(f"/routes/{district_route.json()['id']}")
     assert route.status_code == 200
@@ -1293,10 +1360,10 @@ def test_shared_route_remains_visible_in_route_list(client, db_engine):
     route_list = client.get("/routes/")
     assert route_list.status_code == 200
     route_ids = {item["id"] for item in route_list.json()}
-    assert route_id in route_ids
+    assert route_id not in route_ids
 
 
-def test_student_list_still_returns_operator_owned_students(client):
+def test_student_list_still_returns_operator_owned_students(client, db_engine):
     school = client.post(
         "/schools/",
         json={"name": "Owned Student School", "address": "30 Student Way"},
@@ -1307,6 +1374,7 @@ def test_student_list_still_returns_operator_owned_students(client):
         json={"route_number": "OWNED-STUDENT-ROUTE", "school_ids": [school.json()["id"]]},
     )
     assert route.status_code in (200, 201)
+    _establish_execution_yard(db_engine, route.json()["id"], yard_name="Owned Student Exec Yard")
 
     owned_student = client.post(
         f"/routes/{route.json()['id']}/students",
@@ -1334,6 +1402,7 @@ def test_student_list_returns_district_owned_students(client, db_engine):
         json={"route_number": "DISTRICT-STUDENT-LIST", "school_ids": [school.json()["id"]]},
     )
     assert route.status_code == 201
+    _establish_execution_yard(db_engine, route.json()["id"], yard_name="District Student Exec Yard")
 
     district_student = client.post(
         f"/routes/{route.json()['id']}/students",
@@ -1360,6 +1429,7 @@ def test_student_list_returns_combined_operator_and_district_owned_students(clie
     )
     assert owned_route.status_code in (200, 201)
 
+    _establish_execution_yard(db_engine, owned_route.json()["id"], yard_name="Combined Owned Student Exec Yard")
     owned_student = client.post(
         f"/routes/{owned_route.json()['id']}/students",
         json={"name": "Combined Owned Student", "grade": "5", "school_id": school.json()["id"]},
@@ -1377,6 +1447,7 @@ def test_student_list_returns_combined_operator_and_district_owned_students(clie
         json={"route_number": "COMBINED-DISTRICT-STUDENT-ROUTE", "school_ids": [district_school.json()["id"]]},
     )
     assert district_route.status_code == 201
+    _establish_execution_yard(db_engine, district_route.json()["id"], yard_name="Combined District Student Exec Yard")
     district_student = client.post(
         f"/routes/{district_route.json()['id']}/students",
         json={"name": "Combined District Student", "grade": "6", "school_id": district_school.json()["id"]},
@@ -1449,11 +1520,10 @@ def test_school_becomes_visible_when_linked_to_shared_route(client, db_engine):
     school_list = client.get("/schools/")
     assert school_list.status_code == 200
     school_ids = {item["id"] for item in school_list.json()}
-    assert school_id in school_ids
+    assert school_id not in school_ids
 
     school_detail = client.get(f"/schools/{school_id}")
-    assert school_detail.status_code == 200
-    assert school_detail.json()["id"] == school_id
+    assert school_detail.status_code == 404
 
 
 def _build_shared_school_reports_context(client, db_engine):
@@ -1510,6 +1580,8 @@ def _build_shared_school_reports_context(client, db_engine):
     student_id = student.json()["id"]
 
     _share_route(client, route_id, shared_operator_id)
+    _establish_execution_yard(db_engine, route_id, yard_name="Shared Reports Owner Exec Yard")
+    _establish_execution_yard(db_engine, route_id, yard_name="Shared Reports Shared Exec Yard", operator_id=shared_operator_id)
 
     started_run = client.post(f"/runs/start?run_id={run_id}")
     assert started_run.status_code in (200, 201)
@@ -1654,11 +1726,10 @@ def test_student_becomes_visible_through_shared_route_school_access(client, db_e
     student_list = client.get("/students/")
     assert student_list.status_code == 200
     student_ids = {item["id"] for item in student_list.json()}
-    assert student_id in student_ids
+    assert student_id not in student_ids
 
     student_detail = client.get(f"/students/{student_id}")
-    assert student_detail.status_code == 200
-    assert student_detail.json()["id"] == student_id
+    assert student_detail.status_code == 404
 
 
 def test_student_create_succeeds_via_valid_shared_district_planning_access(client, db_engine):
@@ -1816,10 +1887,11 @@ def test_student_assignment_update_fails_for_mismatched_district_route(client, d
 # Route cascade planning endpoints
 # ---------------------------------------------------------------------------
 
-def test_create_and_list_runs_under_route(client):
+def test_create_and_list_runs_under_route(client, db_engine):
     route = client.post("/routes/", json={"route_number": "CASCADE-RUN-1"})
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
+    _establish_execution_yard(db_engine, route_id, yard_name="Cascade Run Exec Yard")
 
     create = client.post(
         f"/routes/{route_id}/runs",
@@ -1842,6 +1914,7 @@ def test_create_and_list_stops_under_route_sets_route_identity(client, db_engine
     )
     assert route.status_code == 201
     route_id = route.json()["id"]
+    _establish_execution_yard(db_engine, route_id, yard_name="Cascade Stop Exec Yard")
 
     run = client.post(
         f"/routes/{route_id}/runs",
@@ -1902,6 +1975,7 @@ def test_create_and_list_students_under_route_sets_route_and_district(client, db
     assert school.status_code == 201
     assert route.status_code == 201
     route_id = route.json()["id"]
+    _establish_execution_yard(db_engine, route_id, yard_name="Cascade Student Exec Yard")
 
     create = client.post(
         f"/routes/{route_id}/students",
@@ -2353,74 +2427,367 @@ def test_bus_uniqueness_does_not_leak_across_operators(client, db_engine):
     )
 
 
-def test_assign_yard_to_route_succeeds(client, db_engine):
+def test_district_context_assign_yard_to_route_succeeds(client, db_engine):
     operator_id = _create_operator_in_db(db_engine, "Route Yard Owner")
     _create_driver_in_db(db_engine, operator_id, "Route Yard Driver", "route-yard-owner@test.com")
     yard_id = _create_yard_in_db(db_engine, operator_id, "Route Yard One")
+    district_id = _create_district_in_db(db_engine, "Route Yard District")
 
     _logout(client)
     _login(client, operator_id)
 
-    route = client.post("/routes/", json={"route_number": "ROUTE-YARD-ONE"})
-    assert route.status_code in (200, 201)
+    route = client.post(f"/districts/{district_id}/routes", json={"route_number": "ROUTE-YARD-ONE"})
+    assert route.status_code == 201
     route_id = route.json()["id"]
 
-    assign = client.post(f"/routes/{route_id}/assign-yard/{yard_id}")
+    assign = client.post(f"/districts/{district_id}/routes/{route_id}/assign-yard/{yard_id}")
     assert assign.status_code == 200
-    assert assign.json() == {"route_id": route_id, "yard_id": yard_id}
+    assert assign.json() == {"district_id": district_id, "route_id": route_id, "yard_id": yard_id}
 
 
-def test_assign_yard_from_another_operator_returns_403(client, db_engine):
+def test_district_route_lifecycle_endpoints_succeed(client, db_engine):
+    operator_id = _create_operator_in_db(db_engine, "District Route Lifecycle Owner")
+    _create_driver_in_db(db_engine, operator_id, "District Route Lifecycle Driver", "district-route-lifecycle@test.com")
+    district_id = _create_district_in_db(db_engine, "District Route Lifecycle District")
+
+    _logout(client)
+    _login(client, operator_id)
+
+    created = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "DISTRICT-ROUTE-ONE"},
+    )
+    assert created.status_code == 201
+    route_id = created.json()["id"]
+    assert created.json()["route_number"] == "DISTRICT-ROUTE-ONE"
+
+    updated = client.put(
+        f"/districts/{district_id}/routes/{route_id}",
+        json={"route_number": "DISTRICT-ROUTE-UPDATED"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["id"] == route_id
+    assert updated.json()["route_number"] == "DISTRICT-ROUTE-UPDATED"
+
+    deleted = client.delete(f"/districts/{district_id}/routes/{route_id}")
+    assert deleted.status_code == 204
+
+    missing = client.get(f"/routes/{route_id}")
+    assert missing.status_code == 404
+
+
+def test_district_route_update_fails_when_route_is_not_in_path_district(client, db_engine):
+    operator_id = _create_operator_in_db(db_engine, "District Route Mismatch Owner")
+    _create_driver_in_db(db_engine, operator_id, "District Route Mismatch Driver", "district-route-mismatch@test.com")
+    district_one_id = _create_district_in_db(db_engine, "District Route Mismatch One")
+    district_two_id = _create_district_in_db(db_engine, "District Route Mismatch Two")
+
+    _logout(client)
+    _login(client, operator_id)
+
+    created = client.post(
+        f"/districts/{district_one_id}/routes",
+        json={"route_number": "DISTRICT-ROUTE-MISMATCH"},
+    )
+    assert created.status_code == 201
+
+    updated = client.put(
+        f"/districts/{district_two_id}/routes/{created.json()['id']}",
+        json={"route_number": "DISTRICT-ROUTE-MISMATCH-UPDATED"},
+    )
+    assert updated.status_code == 404
+    assert updated.json()["detail"] == "Route not found for district"
+
+
+def test_district_route_run_endpoints_succeed(client, db_engine):
+    operator_id = _create_operator_in_db(db_engine, "District Route Run Owner")
+    _create_driver_in_db(db_engine, operator_id, "District Route Run Driver", "district-route-run@test.com")
+    district_id = _create_district_in_db(db_engine, "District Route Run District")
+
+    _logout(client)
+    _login(client, operator_id)
+
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "DISTRICT-RUN-ROUTE"},
+    )
+    assert route.status_code == 201
+    route_id = route.json()["id"]
+
+    created = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs",
+        json={
+            "run_type": "Morning",
+            "scheduled_start_time": "07:00:00",
+            "scheduled_end_time": "08:00:00",
+        },
+    )
+    assert created.status_code == 201
+    run_id = created.json()["id"]
+    assert created.json()["route_id"] == route_id
+    assert created.json()["run_type"] == "MORNING"
+
+    updated = client.put(
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}",
+        json={
+            "run_type": "Afternoon",
+            "scheduled_start_time": "12:00:00",
+            "scheduled_end_time": "13:00:00",
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["id"] == run_id
+    assert updated.json()["run_type"] == "AFTERNOON"
+
+    deleted = client.delete(f"/districts/{district_id}/routes/{route_id}/runs/{run_id}")
+    assert deleted.status_code == 204
+
+
+def test_district_route_run_create_requires_operate_access(client, db_engine):
+    district_id = _create_district_in_db(db_engine, "District Route Run Shared District")
+    owner_operator_id = _create_operator_in_db(db_engine, "District Route Run Shared Owner")
+    shared_operator_id = _create_operator_in_db(db_engine, "District Route Run Shared Reader")
+
+    _create_driver_in_db(db_engine, owner_operator_id, "District Route Run Shared Owner Driver", "district-route-run-owner@test.com")
+    _create_driver_in_db(db_engine, shared_operator_id, "District Route Run Shared Reader Driver", "district-route-run-reader@test.com")
+
+    _logout(client)
+    _login(client, owner_operator_id)
+
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "DISTRICT-RUN-SHARED"},
+    )
+    assert route.status_code == 201
+    route_id = route.json()["id"]
+
+    _share_route(client, route_id, shared_operator_id, "read")
+    _logout(client)
+    _login(client, shared_operator_id)
+
+    denied = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs",
+        json={
+            "run_type": "Morning",
+            "scheduled_start_time": "07:00:00",
+            "scheduled_end_time": "08:00:00",
+        },
+    )
+    assert denied.status_code == 404
+
+
+def test_district_route_stop_endpoints_succeed(client, db_engine):
+    operator_id = _create_operator_in_db(db_engine, "District Route Stop Owner")
+    _create_driver_in_db(db_engine, operator_id, "District Route Stop Driver", "district-route-stop@test.com")
+    district_id = _create_district_in_db(db_engine, "District Route Stop District")
+
+    _logout(client)
+    _login(client, operator_id)
+
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "DISTRICT-STOP-ROUTE"},
+    )
+    assert route.status_code == 201
+    route_id = route.json()["id"]
+
+    run = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs",
+        json={
+            "run_type": "Morning",
+            "scheduled_start_time": "07:00:00",
+            "scheduled_end_time": "08:00:00",
+        },
+    )
+    assert run.status_code == 201
+    run_id = run.json()["id"]
+
+    created = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops",
+        json={"sequence": 1, "type": "pickup", "name": "District Stop One"},
+    )
+    assert created.status_code == 201
+    stop_id = created.json()["id"]
+    assert created.json()["run_id"] == run_id
+
+    updated = client.put(
+        f"/districts/{district_id}/routes/{route_id}/stops/{stop_id}",
+        json={"sequence": 2, "type": "pickup", "name": "District Stop Updated"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["id"] == stop_id
+    assert updated.json()["name"] == "District Stop Updated"
+
+    deleted = client.delete(f"/districts/{district_id}/routes/{route_id}/stops/{stop_id}")
+    assert deleted.status_code == 204
+
+
+def test_district_route_stop_update_fails_when_route_is_not_in_path_district(client, db_engine):
+    operator_id = _create_operator_in_db(db_engine, "District Stop Mismatch Owner")
+    _create_driver_in_db(db_engine, operator_id, "District Stop Mismatch Driver", "district-stop-mismatch@test.com")
+    district_one_id = _create_district_in_db(db_engine, "District Stop Mismatch One")
+    district_two_id = _create_district_in_db(db_engine, "District Stop Mismatch Two")
+
+    _logout(client)
+    _login(client, operator_id)
+
+    route = client.post(
+        f"/districts/{district_one_id}/routes",
+        json={"route_number": "DISTRICT-STOP-MISMATCH"},
+    )
+    assert route.status_code == 201
+    route_id = route.json()["id"]
+
+    run = client.post(
+        f"/districts/{district_one_id}/routes/{route_id}/runs",
+        json={
+            "run_type": "Morning",
+            "scheduled_start_time": "07:00:00",
+            "scheduled_end_time": "08:00:00",
+        },
+    )
+    assert run.status_code == 201
+
+    stop = client.post(
+        f"/districts/{district_one_id}/routes/{route_id}/runs/{run.json()['id']}/stops",
+        json={"sequence": 1, "type": "pickup", "name": "District Stop Mismatch"},
+    )
+    assert stop.status_code == 201
+
+    updated = client.put(
+        f"/districts/{district_two_id}/routes/{route_id}/stops/{stop.json()['id']}",
+        json={"sequence": 3, "type": "pickup", "name": "Wrong District Stop"},
+    )
+    assert updated.status_code == 404
+    assert updated.json()["detail"] == "Route not found for district"
+
+
+def test_existing_route_run_endpoint_still_works_after_district_additions(client, db_engine):
+    operator_id = _create_operator_in_db(db_engine, "Existing Route Run Owner")
+    _create_driver_in_db(db_engine, operator_id, "Existing Route Run Driver", "existing-route-run@test.com")
+
+    _logout(client)
+    _login(client, operator_id)
+
+    route = client.post("/routes/", json={"route_number": "EXISTING-ROUTE-RUN"})
+    assert route.status_code in (200, 201)
+
+    created = client.post(
+        f"/routes/{route.json()['id']}/runs",
+        json={
+            "run_type": "Morning",
+            "scheduled_start_time": "07:00:00",
+            "scheduled_end_time": "08:00:00",
+        },
+    )
+    assert created.status_code == 201
+
+
+def test_district_context_assign_yard_from_another_operator_returns_403(client, db_engine):
     owner_operator_id = _create_operator_in_db(db_engine, "Route Yard Cross Owner")
     other_operator_id = _create_operator_in_db(db_engine, "Route Yard Cross Other")
     _create_driver_in_db(db_engine, owner_operator_id, "Route Yard Cross Driver", "route-yard-cross-owner@test.com")
     _create_driver_in_db(db_engine, other_operator_id, "Other Route Yard Driver", "route-yard-cross-other@test.com")
     other_yard_id = _create_yard_in_db(db_engine, other_operator_id, "Other Operator Yard")
+    district_id = _create_district_in_db(db_engine, "Route Yard Cross District")
 
     _logout(client)
     _login(client, owner_operator_id)
 
-    route = client.post("/routes/", json={"route_number": "ROUTE-YARD-CROSS"})
-    assert route.status_code in (200, 201)
+    route = client.post(f"/districts/{district_id}/routes", json={"route_number": "ROUTE-YARD-CROSS"})
+    assert route.status_code == 201
 
-    assign = client.post(f"/routes/{route.json()['id']}/assign-yard/{other_yard_id}")
+    assign = client.post(f"/districts/{district_id}/routes/{route.json()['id']}/assign-yard/{other_yard_id}")
     assert assign.status_code == 403
 
 
-def test_unassign_yard_from_route_succeeds(client, db_engine):
+def test_district_context_unassign_yard_from_route_succeeds(client, db_engine):
     operator_id = _create_operator_in_db(db_engine, "Route Yard Remove Owner")
     _create_driver_in_db(db_engine, operator_id, "Route Yard Remove Driver", "route-yard-remove@test.com")
     yard_id = _create_yard_in_db(db_engine, operator_id, "Route Yard Remove")
+    district_id = _create_district_in_db(db_engine, "Route Yard Remove District")
 
     _logout(client)
     _login(client, operator_id)
 
-    route = client.post("/routes/", json={"route_number": "ROUTE-YARD-REMOVE"})
-    assert route.status_code in (200, 201)
+    route = client.post(f"/districts/{district_id}/routes", json={"route_number": "ROUTE-YARD-REMOVE"})
+    assert route.status_code == 201
+    route_id = route.json()["id"]
+
+    assign = client.post(f"/districts/{district_id}/routes/{route_id}/assign-yard/{yard_id}")
+    assert assign.status_code == 200
+
+    unassign = client.delete(f"/districts/{district_id}/routes/{route_id}/assign-yard/{yard_id}")
+    assert unassign.status_code == 200
+    assert unassign.json() == {"district_id": district_id, "route_id": route_id, "yard_id": yard_id}
+
+
+def test_district_context_assign_yard_fails_for_route_outside_district(client, db_engine):
+    operator_id = _create_operator_in_db(db_engine, "Route Yard District Mismatch Owner")
+    _create_driver_in_db(db_engine, operator_id, "Route Yard District Mismatch Driver", "route-yard-district-mismatch@test.com")
+    yard_id = _create_yard_in_db(db_engine, operator_id, "Route Yard District Mismatch Yard")
+    district_one_id = _create_district_in_db(db_engine, "Route Yard District One")
+    district_two_id = _create_district_in_db(db_engine, "Route Yard District Two")
+
+    _logout(client)
+    _login(client, operator_id)
+
+    route = client.post(f"/districts/{district_one_id}/routes", json={"route_number": "ROUTE-YARD-DISTRICT-MISMATCH"})
+    assert route.status_code == 201
+
+    assign = client.post(f"/districts/{district_two_id}/routes/{route.json()['id']}/assign-yard/{yard_id}")
+    assert assign.status_code == 404
+    assert assign.json()["detail"] == "Route not found for district"
+
+
+def test_old_operator_route_yard_endpoint_is_blocked(client, db_engine):
+    operator_id = _create_operator_in_db(db_engine, "Route Yard Blocked Owner")
+    _create_driver_in_db(db_engine, operator_id, "Route Yard Blocked Driver", "route-yard-blocked@test.com")
+    yard_id = _create_yard_in_db(db_engine, operator_id, "Route Yard Blocked Yard")
+    district_id = _create_district_in_db(db_engine, "Route Yard Blocked District")
+
+    _logout(client)
+    _login(client, operator_id)
+
+    route = client.post(f"/districts/{district_id}/routes", json={"route_number": "ROUTE-YARD-BLOCKED"})
+    assert route.status_code == 201
     route_id = route.json()["id"]
 
     assign = client.post(f"/routes/{route_id}/assign-yard/{yard_id}")
-    assert assign.status_code == 200
+    assert assign.status_code == 403
+    assert assign.json()["detail"] == "Yard assignment must be managed through district route planning endpoints"
 
     unassign = client.delete(f"/routes/{route_id}/assign-yard/{yard_id}")
-    assert unassign.status_code == 200
-    assert unassign.json() == {"route_id": route_id, "yard_id": yard_id}
+    assert unassign.status_code == 403
+    assert unassign.json()["detail"] == "Yard assignment must be managed through district route planning endpoints"
+
+    with Session(db_engine) as db:
+        route_row = db.get(Route, route_id)
+        assert route_row is not None
+        assert route_row.yards == []
 
 
 def test_duplicate_yard_assignment_does_not_duplicate_rows(client, db_engine):
     operator_id = _create_operator_in_db(db_engine, "Route Yard Duplicate Owner")
     _create_driver_in_db(db_engine, operator_id, "Route Yard Duplicate Driver", "route-yard-duplicate@test.com")
-    yard_id = _create_yard_in_db(db_engine, operator_id, "Route Yard Duplicate")
+    district_id = _create_district_in_db(db_engine, "Route Yard Duplicate District")
 
     _logout(client)
     _login(client, operator_id)
 
-    route = client.post("/routes/", json={"route_number": "ROUTE-YARD-DUPLICATE"})
-    assert route.status_code in (200, 201)
+    route = client.post(f"/districts/{district_id}/routes", json={"route_number": "ROUTE-YARD-DUPLICATE"})
+    assert route.status_code == 201
     route_id = route.json()["id"]
 
-    first_assign = client.post(f"/routes/{route_id}/assign-yard/{yard_id}")
-    second_assign = client.post(f"/routes/{route_id}/assign-yard/{yard_id}")
+    yard_id = _assign_route_to_operator_yard(
+        client,
+        db_engine,
+        operator_id=operator_id,
+        route_id=route_id,
+        yard_name="Route Yard Duplicate",
+    )
+    first_assign = client.post(f"/districts/{district_id}/routes/{route_id}/assign-yard/{yard_id}")
+    second_assign = client.post(f"/districts/{district_id}/routes/{route_id}/assign-yard/{yard_id}")
     assert first_assign.status_code == 200
     assert second_assign.status_code == 200
 
@@ -2428,4 +2795,382 @@ def test_duplicate_yard_assignment_does_not_duplicate_rows(client, db_engine):
         route_row = db.get(Route, route_id)
         assert route_row is not None
         assert [yard.id for yard in route_row.yards] == [yard_id]
+
+
+def test_execution_route_visibility_requires_yard_assignment(client, db_engine):
+    operator_id = _create_operator_in_db(db_engine, "Execution Route Operator")
+    _create_driver_in_db(db_engine, operator_id, "Execution Route Driver", "execution-route-driver@test.com")
+    district_id = _create_district_in_db(db_engine, "Execution Route District")
+
+    _login(client, operator_id)
+    visible_route = client.post(f"/districts/{district_id}/routes", json={"route_number": "EXEC-ROUTE-VISIBLE"})
+    hidden_route = client.post(f"/districts/{district_id}/routes", json={"route_number": "EXEC-ROUTE-HIDDEN"})
+    assert visible_route.status_code == 201
+    assert hidden_route.status_code == 201
+
+    visible_route_id = visible_route.json()["id"]
+    hidden_route_id = hidden_route.json()["id"]
+    _assign_route_to_operator_yard(
+        client,
+        db_engine,
+        operator_id=operator_id,
+        route_id=visible_route_id,
+        yard_name="Execution Route Yard",
+    )
+
+    routes_response = client.get("/routes/")
+    assert routes_response.status_code == 200
+    assert [item["id"] for item in routes_response.json()] == [visible_route_id]
+
+    visible_detail = client.get(f"/routes/{visible_route_id}")
+    hidden_detail = client.get(f"/routes/{hidden_route_id}")
+    assert visible_detail.status_code == 200
+    assert hidden_detail.status_code == 404
+
+
+def test_execution_school_visibility_requires_yard_accessible_route(client, db_engine):
+    operator_id = _create_operator_in_db(db_engine, "Execution School Operator")
+    _create_driver_in_db(db_engine, operator_id, "Execution School Driver", "execution-school-driver@test.com")
+    district_id = _create_district_in_db(db_engine, "Execution School District")
+
+    _login(client, operator_id)
+    visible_school = client.post("/schools/", json={"name": "Visible Yard School", "address": "1 Yard Way"})
+    hidden_school = client.post("/schools/", json={"name": "Hidden Yard School", "address": "2 Yard Way"})
+    assert visible_school.status_code == 201
+    assert hidden_school.status_code == 201
+
+    visible_school_id = visible_school.json()["id"]
+    hidden_school_id = hidden_school.json()["id"]
+
+    visible_route = client.post(f"/districts/{district_id}/routes", json={"route_number": "EXEC-SCHOOL-VISIBLE", "school_ids": [visible_school_id]})
+    hidden_route = client.post(f"/districts/{district_id}/routes", json={"route_number": "EXEC-SCHOOL-HIDDEN", "school_ids": [hidden_school_id]})
+    assert visible_route.status_code == 201
+    assert hidden_route.status_code == 201
+
+    _assign_route_to_operator_yard(
+        client,
+        db_engine,
+        operator_id=operator_id,
+        route_id=visible_route.json()["id"],
+        yard_name="Execution School Yard",
+    )
+
+    schools_response = client.get("/schools/")
+    assert schools_response.status_code == 200
+    assert [item["id"] for item in schools_response.json()] == [visible_school_id]
+
+    visible_detail = client.get(f"/schools/{visible_school_id}")
+    hidden_detail = client.get(f"/schools/{hidden_school_id}")
+    assert visible_detail.status_code == 200
+    assert hidden_detail.status_code == 404
+
+
+def test_execution_student_visibility_requires_yard_accessible_route(client, db_engine):
+    operator_id = _create_operator_in_db(db_engine, "Execution Student Operator")
+    _create_driver_in_db(db_engine, operator_id, "Execution Student Driver", "execution-student-driver@test.com")
+    district_id = _create_district_in_db(db_engine, "Execution Student District")
+
+    _login(client, operator_id)
+    school = client.post("/schools/", json={"name": "Execution Student School", "address": "3 Student Way"})
+    assert school.status_code == 201
+    school_id = school.json()["id"]
+
+    visible_route = client.post(f"/districts/{district_id}/routes", json={"route_number": "EXEC-STUDENT-VISIBLE", "school_ids": [school_id]})
+    hidden_route = client.post(f"/districts/{district_id}/routes", json={"route_number": "EXEC-STUDENT-HIDDEN", "school_ids": [school_id]})
+    assert visible_route.status_code == 201
+    assert hidden_route.status_code == 201
+
+    visible_route_id = visible_route.json()["id"]
+    hidden_route_id = hidden_route.json()["id"]
+    _assign_route_to_operator_yard(
+        client,
+        db_engine,
+        operator_id=operator_id,
+        route_id=visible_route_id,
+        yard_name="Execution Student Yard",
+    )
+
+    visible_student = client.post(
+        f"/routes/{visible_route_id}/students",
+        json={"name": "Visible Yard Student", "grade": "4", "school_id": school_id},
+    )
+    hidden_student = client.post(
+        f"/routes/{hidden_route_id}/students",
+        json={"name": "Hidden Yard Student", "grade": "4", "school_id": school_id},
+    )
+    assert visible_student.status_code == 201
+    assert hidden_student.status_code == 201
+
+    visible_student_id = visible_student.json()["id"]
+    hidden_student_id = hidden_student.json()["id"]
+
+    students_response = client.get("/students/")
+    assert students_response.status_code == 200
+    assert [item["id"] for item in students_response.json()] == [visible_student_id]
+
+    visible_detail = client.get(f"/students/{visible_student_id}")
+    hidden_detail = client.get(f"/students/{hidden_student_id}")
+    assert visible_detail.status_code == 200
+    assert hidden_detail.status_code == 404
+
+
+def test_school_absences_exclude_students_on_inaccessible_routes(client, db_engine):
+    operator_id = _create_operator_in_db(db_engine, "Execution Absence Operator")
+    _create_driver_in_db(db_engine, operator_id, "Execution Absence Driver", "execution-absence-driver@test.com")
+    district_id = _create_district_in_db(db_engine, "Execution Absence District")
+
+    _login(client, operator_id)
+    school = client.post("/schools/", json={"name": "Shared Absence School", "address": "4 Shared Way"})
+    assert school.status_code == 201
+    school_id = school.json()["id"]
+
+    visible_route = client.post(f"/districts/{district_id}/routes", json={"route_number": "EXEC-ABSENCE-VISIBLE", "school_ids": [school_id]})
+    hidden_route = client.post(f"/districts/{district_id}/routes", json={"route_number": "EXEC-ABSENCE-HIDDEN", "school_ids": [school_id]})
+    assert visible_route.status_code == 201
+    assert hidden_route.status_code == 201
+
+    visible_route_id = visible_route.json()["id"]
+    hidden_route_id = hidden_route.json()["id"]
+    _assign_route_to_operator_yard(
+        client,
+        db_engine,
+        operator_id=operator_id,
+        route_id=visible_route_id,
+        yard_name="Execution Absence Yard",
+    )
+
+    visible_student = client.post(
+        f"/routes/{visible_route_id}/students",
+        json={"name": "Visible Absence Student", "grade": "5", "school_id": school_id},
+    )
+    hidden_student = client.post(
+        f"/routes/{hidden_route_id}/students",
+        json={"name": "Hidden Absence Student", "grade": "5", "school_id": school_id},
+    )
+    assert visible_student.status_code == 201
+    assert hidden_student.status_code == 201
+
+    visible_student_id = visible_student.json()["id"]
+    hidden_student_id = hidden_student.json()["id"]
+
+    visible_absence = client.post(
+        f"/students/{visible_student_id}/bus_absence",
+        json={"date": date.today().isoformat(), "run_type": "AM"},
+    )
+    hidden_absence = client.post(
+        f"/students/{hidden_student_id}/bus_absence",
+        json={"date": date.today().isoformat(), "run_type": "AM"},
+    )
+    assert visible_absence.status_code == 201
+    assert hidden_absence.status_code == 201
+
+    response = client.get(f"/reports/absences/school/{school_id}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_absences"] == 1
+    assert [item["student_id"] for item in body["absences"]] == [visible_student_id]
+
+
+def test_runs_active_ignores_active_runs_on_routes_outside_execution_yard_scope(client, db_engine):
+    operator_id = _create_operator_in_db(db_engine, "Execution Active Run Operator")
+    driver_id = _create_driver_in_db(db_engine, operator_id, "Execution Active Run Driver", "execution-active-run-driver@test.com")
+    district_id = _create_district_in_db(db_engine, "Execution Active Run District")
+
+    _login(client, operator_id)
+    visible_route = client.post(f"/districts/{district_id}/routes", json={"route_number": "EXEC-ACTIVE-VISIBLE"})
+    hidden_route = client.post(f"/districts/{district_id}/routes", json={"route_number": "EXEC-ACTIVE-HIDDEN"})
+    assert visible_route.status_code == 201
+    assert hidden_route.status_code == 201
+
+    visible_route_id = visible_route.json()["id"]
+    hidden_route_id = hidden_route.json()["id"]
+    _assign_route_to_operator_yard(
+        client,
+        db_engine,
+        operator_id=operator_id,
+        route_id=visible_route_id,
+        yard_name="Execution Active Run Yard",
+    )
+
+    visible_run = client.post(f"/routes/{visible_route_id}/runs", json={"run_type": "AM"})
+    hidden_run = client.post(f"/routes/{hidden_route_id}/runs", json={"run_type": "PM"})
+    assert visible_run.status_code == 201
+    assert hidden_run.status_code == 201
+
+    with Session(db_engine) as db:
+        visible_run_row = db.get(Run, visible_run.json()["id"])
+        hidden_run_row = db.get(Run, hidden_run.json()["id"])
+        assert visible_run_row is not None
+        assert hidden_run_row is not None
+        visible_run_row.driver_id = driver_id
+        hidden_run_row.driver_id = driver_id
+        visible_run_row.start_time = datetime.now(UTC) - timedelta(minutes=10)
+        hidden_run_row.start_time = datetime.now(UTC) - timedelta(minutes=1)
+        visible_run_row.end_time = None
+        hidden_run_row.end_time = None
+        db.commit()
+
+    active_response = client.get(f"/runs/active?driver_id={driver_id}")
+    assert active_response.status_code == 200
+    assert active_response.json()["id"] == visible_run.json()["id"]
+
+
+def test_planning_student_mutation_still_allows_owner_access_without_yard_assignment(client, db_engine):
+    operator_id = _create_operator_in_db(db_engine, "Planning Student Regression Operator")
+    _create_driver_in_db(db_engine, operator_id, "Planning Student Regression Driver", "planning-student-regression@test.com")
+
+    _login(client, operator_id)
+    school = client.post("/schools/", json={"name": "Planning Regression School", "address": "5 Planning Way"})
+    assert school.status_code == 201
+    school_id = school.json()["id"]
+
+    route = client.post("/routes/", json={"route_number": "PLANNING-REGRESSION", "school_ids": [school_id]})
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    student = client.post(
+        f"/routes/{route_id}/students",
+        json={"name": "Planning Regression Student", "grade": "3", "school_id": school_id},
+    )
+    assert student.status_code == 201
+    student_id = student.json()["id"]
+
+    delete_response = client.delete(f"/students/{student_id}")
+    assert delete_response.status_code == 204
+
+
+def test_district_context_unassign_yard_when_not_linked_is_safe(client, db_engine):
+    operator_id = _create_operator_in_db(db_engine, "Route Yard Unassign Missing Owner")
+    _create_driver_in_db(db_engine, operator_id, "Route Yard Unassign Missing Driver", "route-yard-unassign-missing@test.com")
+    yard_id = _create_yard_in_db(db_engine, operator_id, "Route Yard Unassign Missing Yard")
+    district_id = _create_district_in_db(db_engine, "Route Yard Unassign Missing District")
+
+    _logout(client)
+    _login(client, operator_id)
+
+    route = client.post(f"/districts/{district_id}/routes", json={"route_number": "ROUTE-YARD-UNASSIGN-MISSING"})
+    assert route.status_code == 201
+    route_id = route.json()["id"]
+
+    unassign = client.delete(f"/districts/{district_id}/routes/{route_id}/assign-yard/{yard_id}")
+    assert unassign.status_code == 200
+    assert unassign.json() == {"district_id": district_id, "route_id": route_id, "yard_id": yard_id}
+
+    with Session(db_engine) as db:
+        route_row = db.get(Route, route_id)
+        assert route_row is not None
+        assert route_row.yards == []
+
+
+# ---------------------------------------------------------------------------
+# Report generator execution-scope tests
+# ---------------------------------------------------------------------------
+
+def test_route_summary_blocked_for_grant_only_operator(client, db_engine):
+    owner_id = _create_operator_in_db(db_engine, "Route Summary Block Owner")
+    grant_only_id = _create_operator_in_db(db_engine, "Route Summary Block Grantee")
+    _create_driver_in_db(db_engine, owner_id, "Route Summary Block Driver", "route-summary-block@test.com")
+    district_id = _create_district_in_db(db_engine, "Route Summary Block District")
+
+    _logout(client)
+    _login(client, owner_id)
+
+    route = client.post(f"/districts/{district_id}/routes", json={"route_number": "ROUTE-SUMM-BLOCK"})
+    assert route.status_code == 201
+    route_id = route.json()["id"]
+
+    _share_route(client, route_id, grant_only_id)
+    _establish_execution_yard(db_engine, route_id, yard_name="Route Summary Block Owner Yard")
+
+    _logout(client)
+    _login(client, grant_only_id)
+
+    response = client.get(f"/reports/route/{route_id}")
+    assert response.status_code == 404
+
+
+def test_date_summary_excludes_runs_outside_yard_scope(client, db_engine):
+    op_a_id = _create_operator_in_db(db_engine, "Date Summary A Op")
+    op_b_id = _create_operator_in_db(db_engine, "Date Summary B Op")
+    _create_driver_in_db(db_engine, op_a_id, "Date Summary A Driver", "date-summ-a@test.com")
+    _create_driver_in_db(db_engine, op_b_id, "Date Summary B Driver", "date-summ-b@test.com")
+    dist_a = _create_district_in_db(db_engine, "Date Summary Dist A")
+    dist_b = _create_district_in_db(db_engine, "Date Summary Dist B")
+
+    _logout(client)
+    _login(client, op_a_id)
+
+    route_a = client.post(f"/districts/{dist_a}/routes", json={"route_number": "DATE-SUMM-ROUTE-A"})
+    assert route_a.status_code == 201
+    route_a_id = route_a.json()["id"]
+    run_a = client.post(f"/routes/{route_a_id}/runs", json={"run_type": "AM"})
+    assert run_a.status_code == 201
+    run_a_id = run_a.json()["id"]
+
+    _logout(client)
+    _login(client, op_b_id)
+
+    route_b = client.post(f"/districts/{dist_b}/routes", json={"route_number": "DATE-SUMM-ROUTE-B"})
+    assert route_b.status_code == 201
+    route_b_id = route_b.json()["id"]
+    run_b = client.post(f"/routes/{route_b_id}/runs", json={"run_type": "AM"})
+    assert run_b.status_code == 201
+    run_b_id = run_b.json()["id"]
+
+    # Inject start_time directly — avoids the full run-start prerequisite chain (bus/pretrip/stops/students)
+    now = datetime.now(UTC)
+    with Session(db_engine) as db:
+        db.get(Run, run_a_id).start_time = now
+        db.get(Run, run_b_id).start_time = now
+        db.commit()
+
+    run_date = now.date().isoformat()
+
+    _establish_execution_yard(db_engine, route_a_id, yard_name="Date Summ Yard A")
+    _establish_execution_yard(db_engine, route_b_id, yard_name="Date Summ Yard B")
+
+    _logout(client)
+    _login(client, op_a_id)
+
+    date_report = client.get(f"/reports/date/{run_date}")
+    assert date_report.status_code == 200
+    route_numbers = {r.get("route_number") for r in date_report.json().get("runs", [])}
+    assert "DATE-SUMM-ROUTE-A" in route_numbers
+    assert "DATE-SUMM-ROUTE-B" not in route_numbers
+
+
+def test_school_reports_summary_works_for_yard_scoped_operator(client, db_engine):
+    context = _build_shared_school_reports_context(client, db_engine)
+
+    response = client.get(f"/reports/school/{context['school_id']}")
+    assert response.status_code == 200
+    assert response.json()["school_id"] == context["school_id"]
+    assert response.json()["school_name"] == "Shared Reports School"
+
+
+def test_school_reports_summary_blocked_for_operator_without_yard(client, db_engine):
+    owner_id = _create_operator_in_db(db_engine, "School Reports No Yard Owner")
+    no_yard_id = _create_operator_in_db(db_engine, "School Reports No Yard Visitor")
+    _create_driver_in_db(db_engine, owner_id, "School Reports No Yard Driver", "school-reports-no-yard@test.com")
+    district_id = _create_district_in_db(db_engine, "School Reports No Yard District")
+
+    _logout(client)
+    _login(client, owner_id)
+
+    school = client.post(f"/districts/{district_id}/schools", json={"name": "No Yard School", "address": "99 No Yard St"})
+    assert school.status_code == 201
+    school_id = school.json()["id"]
+
+    route = client.post(f"/districts/{district_id}/routes", json={"route_number": "SCHOOL-RPT-NO-YARD", "school_ids": [school_id]})
+    assert route.status_code == 201
+    route_id = route.json()["id"]
+
+    _share_route(client, route_id, no_yard_id)
+    _establish_execution_yard(db_engine, route_id, yard_name="School Reports No Yard Owner Yard")
+
+    _logout(client)
+    _login(client, no_yard_id)
+
+    response = client.get(f"/reports/school/{school_id}")
+    assert response.status_code == 404
 

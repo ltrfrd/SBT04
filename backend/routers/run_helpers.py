@@ -33,7 +33,11 @@ from backend.schemas.run import (  # Running board response schemas
     RunningBoardStudent,
 )
 from backend.utils.student_bus_absence import apply_run_absence_filter
-from backend.utils.planning_scope import get_school_for_planning_or_404, validate_route_school_alignment
+from backend.utils.planning_scope import (
+    get_route_for_execution_or_404,
+    get_school_for_planning_or_404,
+    validate_route_school_alignment,
+)
 from backend.utils.route_driver_assignment import resolve_route_driver_assignment
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
 from backend.utils.run_setup import get_run_stop_context_or_404
@@ -76,6 +80,31 @@ def _get_operator_scoped_run_or_404(
         route_id=run.route_id,
         operator_id=operator_id,
         required_access=required_access,
+    )
+    return run
+
+
+def _get_execution_scoped_run_or_404(
+    run_id: int,
+    db: Session,
+    operator_id: int,
+    options: list | None = None,
+) -> Run:
+    query = db.query(Run)
+    if options:
+        query = query.options(*options)
+
+    run = query.filter(Run.id == run_id).first()
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Run not found",
+        )
+
+    get_route_for_execution_or_404(
+        db=db,
+        route_id=run.route_id,
+        operator_id=operator_id,
     )
     return run
 

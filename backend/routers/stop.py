@@ -18,9 +18,9 @@ from backend.models import run as run_model
 from backend.models.stop import Stop, StopType
 from backend.schemas.stop import RunStopCreate, RunStopUpdate, StopOut, StopUpdate, StopReorder
 from backend.utils.db_errors import raise_conflict_if_unique
+from backend.utils.planning_scope import execution_route_filter
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
-from backend.utils.operator_scope import get_route_access_level
 from backend.utils.run_setup import (
     ensure_run_is_planned_for_setup,
     get_run_or_404,
@@ -459,19 +459,27 @@ def get_stops(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    query = db.query(stop_model.Stop)
+    query = (
+        db.query(stop_model.Stop)
+        .join(stop_model.Stop.run)
+        .join(run_model.Run.route)
+        .filter(execution_route_filter(db=db, operator_id=operator.id))
+    )
 
     if run_id is not None:
         run = get_run_or_404(run_id, db)
-        get_operator_scoped_route_or_404(db=db, route_id=run.route_id, operator_id=operator.id, required_access="read")
+        visible_route = (
+            db.query(run_model.Run.id)
+            .join(run_model.Run.route)
+            .filter(run_model.Run.id == run_id)
+            .filter(execution_route_filter(db=db, operator_id=operator.id))
+            .first()
+        )
+        if visible_route is None:
+            raise HTTPException(status_code=404, detail="Route not found")
         query = query.filter(stop_model.Stop.run_id == run_id)
 
-    query = query.order_by(stop_model.Stop.sequence.asc())
-    stops = query.all()
-    return [
-        stop for stop in stops
-        if stop.run and stop.run.route and get_route_access_level(stop.run.route, operator.id) is not None
-    ]
+    return query.order_by(stop_model.Stop.sequence.asc()).all()
 
 # -----------------------------------------------------------
 # - Update stop
@@ -658,4 +666,3 @@ def reorder_stop(
             detail="Stop sequence conflict for this run",
         )
         raise HTTPException(status_code=400, detail="Integrity error")
-

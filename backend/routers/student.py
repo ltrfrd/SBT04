@@ -18,12 +18,14 @@ from backend.models import school as school_model
 from backend.models import stop as stop_model
 from backend.models import student as student_model
 from backend.utils.operator_scope import get_operator_context
-from backend.utils.operator_scope import get_operator_scoped_route_or_404
 from backend.utils.planning_scope import (
-    accessible_student_filter,
+    execution_student_filter,
+    get_route_for_execution_or_404,
     get_route_with_schools_or_404,
     get_school_for_planning_or_404,
+    get_school_for_execution_or_404,
     get_student_for_planning_or_404,
+    get_student_for_execution_or_404,
     validate_planning_alignment,
     validate_route_school_alignment,
 )
@@ -326,7 +328,7 @@ def get_students(
 ):
     return (
         db.query(student_model.Student)
-        .filter(accessible_student_filter(operator.id))
+        .filter(execution_student_filter(db=db, operator_id=operator.id))
         .all()
     )
 
@@ -343,15 +345,12 @@ def get_student(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    student = (
-        db.query(student_model.Student)
-        .filter(student_model.Student.id == student_id)
-        .filter(accessible_student_filter(operator.id))
-        .first()
+    return get_student_for_execution_or_404(
+        db=db,
+        student_id=student_id,
+        operator_id=operator.id,
+        detail="Student not found",
     )
-    if not student:
-        raise HTTPException(status_code=404, detail="Student not found")
-    return student
 
 
 @router.put(
@@ -442,7 +441,8 @@ def get_students_by_school(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    _get_school_for_planning_or_404(
+    student_filter = execution_student_filter(db=db, operator_id=operator.id)
+    get_school_for_execution_or_404(
         db=db,
         operator_id=operator.id,
         detail="School not found",
@@ -451,7 +451,7 @@ def get_students_by_school(
 
     return (
         db.query(student_model.Student)
-        .filter(accessible_student_filter(operator.id))
+        .filter(student_filter)
         .filter(student_model.Student.school_id == school_id)
         .all()
     )
@@ -469,11 +469,11 @@ def get_students_by_route(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    get_operator_scoped_route_or_404(
+    student_filter = execution_student_filter(db=db, operator_id=operator.id)
+    get_route_for_execution_or_404(
         db=db,
         route_id=route_id,
         operator_id=operator.id,
-        required_access="read",
     )
 
     return (
@@ -486,7 +486,7 @@ def get_students_by_route(
             run_model.Run,
             run_model.Run.id == assoc_model.StudentRunAssignment.run_id,
         )
-        .filter(accessible_student_filter(operator.id))
+        .filter(student_filter)
         .filter(run_model.Run.route_id == route_id)
         .distinct()
         .all()

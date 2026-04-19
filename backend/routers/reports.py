@@ -41,8 +41,16 @@ from backend.models import SchoolAttendanceVerification  # Confirmation model
 from backend.models.operator import Operator
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_operator_scoped_record_or_404
-from backend.utils.operator_scope import get_operator_scoped_route_or_404
-from backend.utils.planning_scope import accessible_route_filter, accessible_student_filter, get_school_for_planning_or_404
+from backend.utils.planning_scope import (
+    execution_route_filter,
+    execution_student_filter,
+    get_operator_yard_ids,
+    get_route_for_execution_or_404,
+    get_school_for_execution_or_404,
+    operator_has_yard_route_assignments,
+    yards_accessible_route_filter,
+    yards_accessible_student_filter,
+)
 
 from pydantic import BaseModel  # Small request body schema
 
@@ -54,6 +62,44 @@ router = APIRouter(prefix="/reports", tags=["Reports"])
 # -----------------------------------------------------------
 class SchoolConfirmationRequest(BaseModel):
     confirmed_by: str | None = None  # Optional school staff name
+
+
+def _get_execution_yard_ids(
+    *,
+    db: Session,
+    operator_id: int,
+) -> list[int]:
+    return get_operator_yard_ids(db=db, operator_id=operator_id)
+
+
+def _get_active_execution_yard_ids(
+    *,
+    db: Session,
+    operator_id: int,
+) -> list[int] | None:
+    if not operator_has_yard_route_assignments(db=db, operator_id=operator_id):
+        return None
+    return _get_execution_yard_ids(db=db, operator_id=operator_id)
+
+
+def _get_execution_student_filter(
+    *,
+    db: Session,
+    operator_id: int,
+):
+    if operator_has_yard_route_assignments(db=db, operator_id=operator_id):
+        return yards_accessible_student_filter(_get_execution_yard_ids(db=db, operator_id=operator_id))
+    return execution_student_filter(db=db, operator_id=operator_id)
+
+
+def _get_execution_route_filter(
+    *,
+    db: Session,
+    operator_id: int,
+):
+    if operator_has_yard_route_assignments(db=db, operator_id=operator_id):
+        return yards_accessible_route_filter(_get_execution_yard_ids(db=db, operator_id=operator_id))
+    return execution_route_filter(db=db, operator_id=operator_id)
 
 
 def _build_absence_row(*, absence, stop_name: str | None = None) -> dict:
@@ -127,8 +173,9 @@ def get_route_reports(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    """Return work summary for one route."""                    # Internal docstring
-    reports_data = reports_generator.route_summary(db, route_id, operator_id=operator.id)
+    """Return work summary for one route."""
+    get_route_for_execution_or_404(db=db, route_id=route_id, operator_id=operator.id)
+    reports_data = reports_generator.route_summary_execution(db, route_id)
     if "error" in reports_data:
         raise HTTPException(status_code=404, detail=reports_data["error"])
     return reports_data
@@ -154,11 +201,10 @@ def get_run_reports(
     run = db.query(Run).filter(Run.id == run_id).first()  # Load run
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")  # Preserve missing-resource behavior
-    get_operator_scoped_route_or_404(
+    get_route_for_execution_or_404(
         db=db,
         route_id=run.route_id,
         operator_id=operator.id,
-        required_access="read",
     )
 
     assignments = (
@@ -284,7 +330,8 @@ def get_school_reports(
     db: Session = Depends(get_db),                            # Database session
     operator: Operator = Depends(get_operator_context),
 ):
-    get_school_for_planning_or_404(
+    yard_ids = _get_active_execution_yard_ids(db=db, operator_id=operator.id)
+    get_school_for_execution_or_404(
         db=db,
         operator_id=operator.id,
         school_id=school_id,
@@ -294,7 +341,7 @@ def get_school_reports(
         db=db,                                                # Pass DB session
         reports_type="school",
         ref_id=school_id,                                     # School reference ID
-        operator_id=operator.id,
+        yard_ids=yard_ids,
     )
     return _serialize_school_report_summary(reports_data)
 
@@ -316,7 +363,7 @@ def confirm_school_reports(
     db: Session = Depends(get_db),  # Database session
     operator: Operator = Depends(get_operator_context),
 ):
-    school = get_school_for_planning_or_404(
+    school = get_school_for_execution_or_404(
         db=db,
         operator_id=operator.id,
         school_id=school_id,
@@ -334,11 +381,10 @@ def confirm_school_reports(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Run not found",
         )
-    get_operator_scoped_route_or_404(
+    get_route_for_execution_or_404(
         db=db,
         route_id=run.route_id,
         operator_id=operator.id,
-        required_access="read",
     )
 
     route_school_ids = {s.id for s in run.route.schools} if run.route else set()
@@ -396,12 +442,13 @@ def get_absences_by_date(
     db: Session = Depends(get_db),                                                    # Database session
     operator: Operator = Depends(get_operator_context),
 ):
+    student_filter = _get_execution_student_filter(db=db, operator_id=operator.id)
 
     absences = (
         db.query(StudentBusAbsence)                                                   # Query planned absences
         .join(Student, Student.id == StudentBusAbsence.student_id)
         .options(joinedload(StudentBusAbsence.student))                               # Load student relation
-        .filter(accessible_student_filter(operator.id))
+        .filter(student_filter)
         .filter(StudentBusAbsence.date == target_date)                                # Only this date
         .order_by(StudentBusAbsence.created_at.asc(), StudentBusAbsence.id.asc())     # Stable ordering
         .all()                                                                        # Materialize list
@@ -435,7 +482,8 @@ def get_absences_by_school(
     db: Session = Depends(get_db),                                                 # Database session
     operator: Operator = Depends(get_operator_context),
 ):
-    get_school_for_planning_or_404(
+    student_filter = _get_execution_student_filter(db=db, operator_id=operator.id)
+    get_school_for_execution_or_404(
         db=db,
         operator_id=operator.id,
         school_id=school_id,
@@ -446,6 +494,7 @@ def get_absences_by_school(
         db.query(StudentBusAbsence)                                                # Query planned absences
         .join(Student, Student.id == StudentBusAbsence.student_id)                 # Join student
         .filter(Student.school_id == school_id)                                    # Only this school
+        .filter(student_filter)
         .options(joinedload(StudentBusAbsence.student))                            # Load student relation
         .order_by(StudentBusAbsence.date.asc(), StudentBusAbsence.id.asc())        # Stable ordering
         .all()                                                                     # Materialize list
@@ -479,7 +528,6 @@ def get_absences_by_run(
     db: Session = Depends(get_db),                                                # Database session
     operator: Operator = Depends(get_operator_context),
 ):
-
     run = (
         db.query(Run)                                                             # Load run
         .filter(Run.id == run_id)                                                 # Only this run
@@ -491,11 +539,10 @@ def get_absences_by_run(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Run not found",
         )
-    get_operator_scoped_route_or_404(
+    get_route_for_execution_or_404(
         db=db,
         route_id=run.route_id,
         operator_id=operator.id,
-        required_access="read",
     )
     if run.start_time is None:                                                    # Reject runs that have not started yet
         raise HTTPException(
@@ -549,7 +596,8 @@ def get_school_reports_by_date(
     db: Session = Depends(get_db),                                               # Database session
     operator: Operator = Depends(get_operator_context),
 ):
-    school = get_school_for_planning_or_404(
+    route_filter = _get_execution_route_filter(db=db, operator_id=operator.id)
+    school = get_school_for_execution_or_404(
         db=db,
         operator_id=operator.id,
         school_id=school_id,
@@ -560,7 +608,7 @@ def get_school_reports_by_date(
         db.query(Run)                                                            # Query runs
         .join(Route, Route.id == Run.route_id)
         .filter(Run.route.has(Route.schools.any(School.id == school_id)))        # Only runs whose route includes this school       
-        .filter(accessible_route_filter(operator.id))
+        .filter(route_filter)
         .filter(Run.start_time >= target_date)                                   # On or after start of requested day
         .filter(Run.start_time < (target_date + timedelta(days=1)))              # Before next day
         .order_by(Run.start_time.asc(), Run.id.asc())                            # Stable ordering
@@ -644,10 +692,11 @@ def get_school_mobile_reports(
     db: Session = Depends(get_db),                            # Database session
     operator: Operator = Depends(get_operator_context),
 ):
+    yard_ids = _get_active_execution_yard_ids(db=db, operator_id=operator.id)
     report_data = reports_generator.school_routes_summary(
         db=db,                                                 # Pass DB session
         school_id=school_id,                                   # Requested school
-        operator_id=operator.id,
+        yard_ids=yard_ids,
     )                                                          # Navigation payload
 
     if "error" in report_data:                                 # Reject unknown school requests
@@ -682,11 +731,12 @@ def get_school_mobile_route_runs(
     db: Session = Depends(get_db),                            # Database session
     operator: Operator = Depends(get_operator_context),
 ):
+    yard_ids = _get_active_execution_yard_ids(db=db, operator_id=operator.id)
     report_data = reports_generator.school_route_runs_summary(
         db=db,                                                # Pass DB session
         school_id=school_id,                                  # Requested school
         route_id=route_id,                                    # Requested route
-        operator_id=operator.id,
+        yard_ids=yard_ids,
     )                                                         # Route runs payload
 
     if "error" in report_data:                                # Reject unknown route requests
@@ -722,11 +772,12 @@ def get_school_mobile_single_run_reports(
     db: Session = Depends(get_db),                            # Database session
     operator: Operator = Depends(get_operator_context),
 ):
+    yard_ids = _get_active_execution_yard_ids(db=db, operator_id=operator.id)
     report_data = reports_generator.school_single_run_summary(
         db=db,                                                # Pass DB session
         school_id=school_id,                                  # Requested school
         run_id=run_id,                                        # Requested run
-        operator_id=operator.id,
+        yard_ids=yard_ids,
     )                                                         # Single run payload
 
     if "error" in report_data:                                # Reject unknown run requests
@@ -790,11 +841,10 @@ def update_school_status_for_assignment(
     if not assignment.run or not assignment.run.route:
         raise HTTPException(status_code=404, detail="Assignment not found")
 
-    get_operator_scoped_route_or_404(
+    get_route_for_execution_or_404(
         db=db,
         route_id=assignment.run.route_id,
         operator_id=operator.id,
-        required_access="read",
     )                                                       # Enforce route-level operator visibility
 
     school_id = assignment.student.school_id if assignment.student else None   # Resolve owning school

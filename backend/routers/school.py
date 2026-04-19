@@ -17,7 +17,8 @@ from backend.models import school as school_model
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
 from backend.utils.planning_scope import (
-    accessible_school_filter,
+    execution_school_filter,
+    get_school_for_execution_or_404,
     get_school_for_planning_or_404,
     validate_planning_alignment,
     validate_route_school_alignment,
@@ -128,7 +129,7 @@ def get_schools(
 ):
     return (
         db.query(school_model.School)
-        .filter(accessible_school_filter(operator.id))
+        .filter(execution_school_filter(db=db, operator_id=operator.id))
         .all()
     )
 
@@ -145,15 +146,12 @@ def get_school(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    school = (
-        db.query(school_model.School)
-        .filter(school_model.School.id == school_id)
-        .filter(accessible_school_filter(operator.id))
-        .first()
+    return get_school_for_execution_or_404(
+        db=db,
+        school_id=school_id,
+        operator_id=operator.id,
+        detail="School not found",
     )
-    if not school:
-        raise HTTPException(status_code=404, detail="School not found")
-    return school
 
 
 @router.put(

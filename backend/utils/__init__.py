@@ -8,7 +8,7 @@ from .reports_generator import (
     driver_summary,
     dispatch_summary,
     generate_reports,
-    route_summary,
+    route_summary_execution,
 )
 
 # Optional: Add future utils here
@@ -17,7 +17,7 @@ from .reports_generator import (
 
 __all__ = [
     "driver_summary",
-    "route_summary",
+    "route_summary_execution",
     "dispatch_summary",
     "generate_reports",
 ]
