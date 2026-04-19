@@ -22,14 +22,15 @@ from backend.models.associations import StudentRunAssignment
 from backend.models.operator import Operator
 from backend.models.run_event import RunEvent
 from backend.schemas.run import RunCompleteOut, RunOut, RunUpdate
+from backend.utils.planning_scope import execution_route_filter, get_route_for_execution_or_404
 from backend.utils.operator_scope import (
     get_operator_context,
     get_operator_scoped_driver_or_404,
-    get_operator_scoped_route_or_404,
 )
 from backend.utils.pretrip_alerts import create_missing_pretrip_alert_if_needed
 from backend.routers.run_helpers import (
     _assert_unique_route_run_type,
+    _get_execution_scoped_run_or_404,
     _get_operator_scoped_run_or_404,
     _get_run_assignments,
     _is_run_active,
@@ -64,11 +65,10 @@ def start_run(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    target_run = _get_operator_scoped_run_or_404(
+    target_run = _get_execution_scoped_run_or_404(
         run_id,
         db,
         operator.id,
-        "operate",
         options=[
             joinedload(run_model.Run.driver),
             joinedload(run_model.Run.route),
@@ -78,11 +78,10 @@ def start_run(
     if target_run.start_time is not None:
         raise HTTPException(status_code=400, detail="Run already started")
 
-    route = get_operator_scoped_route_or_404(
+    route = get_route_for_execution_or_404(
         db=db,
         route_id=target_run.route_id,
         operator_id=operator.id,
-        required_access="operate",
         options=[joinedload(route_model.Route.driver_assignments).joinedload(RouteDriverAssignment.driver)],
     )
 
@@ -200,7 +199,7 @@ def end_run(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "operate")
+    run = _get_execution_scoped_run_or_404(run_id, db, operator.id)
     if run.start_time is None:
         raise HTTPException(status_code=400, detail="Run is not active")
     if run.end_time:
@@ -246,7 +245,9 @@ def end_run_by_driver(
     # -------------------------------------------------------------------------
     active_run = (
         db.query(run_model.Run)                      # Query Run table
+        .join(route_model.Route, route_model.Route.id == run_model.Run.route_id)
         .filter(run_model.Run.driver_id == driver_id)  # Only this driver
+        .filter(execution_route_filter(db=db, operator_id=operator.id))
         .filter(run_model.Run.start_time.is_not(None))  # Only started runs
         .filter(run_model.Run.end_time.is_(None))   # Only active runs
         .order_by(run_model.Run.start_time.desc())  # Newest active run first
@@ -294,7 +295,7 @@ def complete_run(
     # -------------------------------------------------------------------------
     # Load run
     # -------------------------------------------------------------------------
-    run = _get_operator_scoped_run_or_404(run_id, db, operator.id, "operate")
+    run = _get_execution_scoped_run_or_404(run_id, db, operator.id)
 
     if not _is_run_active(run):  # Only active runs can be completed
         raise HTTPException(

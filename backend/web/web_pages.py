@@ -52,6 +52,7 @@ def dashboard(
     operator: Operator = Depends(get_operator_context),
 ):
     """Renders admin dashboard summary with record counts."""
+    # Dashboard remains planning-scoped on purpose; execution-scoped runtime pages use execution filters instead.
     counts = {
         "driver_count": (
             db.query(driver_model.Driver)

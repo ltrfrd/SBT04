@@ -104,6 +104,117 @@ def _establish_execution_yard(
         return yard_id
 
 
+def _execution_pretrip_payload(*, bus_number: str, license_plate: str, driver_name: str) -> dict:
+    return {
+        "bus_number": bus_number,
+        "license_plate": license_plate,
+        "driver_name": driver_name,
+        "inspection_date": date.today().isoformat(),
+        "inspection_time": "06:00:00",
+        "odometer": 1000,
+        "inspection_place": "Execution Yard",
+        "use_type": "school_bus",
+        "brakes_checked": True,
+        "lights_checked": True,
+        "tires_checked": True,
+        "emergency_equipment_checked": True,
+        "fit_for_duty": "yes",
+        "no_defects": True,
+        "signature": "test-sig",
+        "defects": [],
+    }
+
+
+def _create_shared_runtime_context(client, db_engine, *, suffix: str) -> dict[str, int]:
+    district_id = _create_district_in_db(db_engine, f"{suffix} District")
+    owner_operator_id = _create_operator_in_db(db_engine, f"{suffix} Owner")
+    shared_operator_id = _create_operator_in_db(db_engine, f"{suffix} Shared")
+    owner_driver_id = _create_driver_in_db(
+        db_engine,
+        owner_operator_id,
+        f"{suffix} Owner Driver",
+        f"{suffix.lower().replace(' ', '-')}-owner@test.com",
+    )
+
+    _logout(client)
+    _login(client, owner_operator_id)
+
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": f"{suffix} School", "address": f"{suffix} Way"},
+    )
+    assert school.status_code == 201
+    school_id = school.json()["id"]
+
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": f"{suffix}-ROUTE", "school_ids": [school_id]},
+    )
+    assert route.status_code == 201
+    route_id = route.json()["id"]
+
+    assign_driver = client.post(f"/routes/{route_id}/assign_driver/{owner_driver_id}")
+    assert assign_driver.status_code in (200, 201)
+
+    run = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
+    assert run.status_code == 201
+    run_id = run.json()["id"]
+
+    stop = client.post(
+        f"/runs/{run_id}/stops",
+        json={"sequence": 1, "type": "pickup", "name": f"{suffix} Stop"},
+    )
+    assert stop.status_code == 201
+    stop_id = stop.json()["id"]
+
+    student = client.post(
+        f"/runs/{run_id}/stops/{stop_id}/students",
+        json={"name": f"{suffix} Student", "grade": "5", "school_id": school_id},
+    )
+    assert student.status_code == 201
+    student_id = student.json()["id"]
+
+    bus = client.post(
+        "/buses/",
+        json={
+            "bus_number": f"{suffix[:12]}-BUS",
+            "license_plate": f"{suffix[:8]}-PLT",
+            "capacity": 48,
+            "size": "full",
+        },
+    )
+    assert bus.status_code in (200, 201)
+    bus_id = bus.json()["id"]
+
+    bus_assign = client.post(f"/routes/{route_id}/assign_bus/{bus_id}")
+    assert bus_assign.status_code == 200
+
+    pretrip = client.post(
+        "/pretrips/",
+        json=_execution_pretrip_payload(
+            bus_number=bus.json()["bus_number"],
+            license_plate=bus.json()["license_plate"],
+            driver_name=f"{suffix} Owner Driver",
+    ),
+    )
+    assert pretrip.status_code in (200, 201)
+
+    _share_route(client, route_id, shared_operator_id, "operate")
+    _logout(client)
+
+    return {
+        "district_id": district_id,
+        "owner_operator_id": owner_operator_id,
+        "shared_operator_id": shared_operator_id,
+        "owner_driver_id": owner_driver_id,
+        "school_id": school_id,
+        "route_id": route_id,
+        "run_id": run_id,
+        "stop_id": stop_id,
+        "student_id": student_id,
+    }
+
+
 def _create_shared_planning_context(client, db_engine, *, suffix: str) -> dict[str, int]:
     district_id = _create_district_in_db(db_engine, f"{suffix} District")
     owner_operator_id = _create_operator_in_db(db_engine, f"{suffix} Owner")
@@ -3015,6 +3126,70 @@ def test_runs_active_ignores_active_runs_on_routes_outside_execution_yard_scope(
     assert active_response.json()["id"] == visible_run.json()["id"]
 
 
+def test_start_run_requires_execution_visibility_even_with_operate_grant(client, db_engine):
+    context = _create_shared_runtime_context(client, db_engine, suffix="Execution Start Grant")
+
+    _login(client, context["shared_operator_id"])
+    blocked = client._wrapped_client.post(f"/runs/start?run_id={context['run_id']}")
+    assert blocked.status_code == 404
+
+    _assign_route_to_operator_yard(
+        client,
+        db_engine,
+        operator_id=context["shared_operator_id"],
+        route_id=context["route_id"],
+        yard_name="Execution Start Shared Yard",
+    )
+
+    started = client._wrapped_client.post(f"/runs/start?run_id={context['run_id']}")
+    assert started.status_code == 200
+    assert started.json()["id"] == context["run_id"]
+
+
+def test_end_run_is_blocked_outside_execution_scope(client, db_engine):
+    context = _create_shared_runtime_context(client, db_engine, suffix="Execution End Block")
+
+    _assign_route_to_operator_yard(
+        client,
+        db_engine,
+        operator_id=context["owner_operator_id"],
+        route_id=context["route_id"],
+        yard_name="Execution End Owner Yard",
+    )
+
+    _login(client, context["owner_operator_id"])
+    started = client._wrapped_client.post(f"/runs/start?run_id={context['run_id']}")
+    assert started.status_code == 200
+
+    _logout(client)
+    _login(client, context["shared_operator_id"])
+
+    blocked = client.post(f"/runs/end?run_id={context['run_id']}")
+    assert blocked.status_code == 404
+
+
+def test_run_action_is_blocked_outside_execution_scope(client, db_engine):
+    context = _create_shared_runtime_context(client, db_engine, suffix="Execution Action Block")
+
+    _assign_route_to_operator_yard(
+        client,
+        db_engine,
+        operator_id=context["owner_operator_id"],
+        route_id=context["route_id"],
+        yard_name="Execution Action Owner Yard",
+    )
+
+    _login(client, context["owner_operator_id"])
+    started = client._wrapped_client.post(f"/runs/start?run_id={context['run_id']}")
+    assert started.status_code == 200
+
+    _logout(client)
+    _login(client, context["shared_operator_id"])
+
+    blocked = client.post(f"/runs/{context['run_id']}/arrive_stop?stop_sequence=1")
+    assert blocked.status_code == 404
+
+
 def test_planning_student_mutation_still_allows_owner_access_without_yard_assignment(client, db_engine):
     operator_id = _create_operator_in_db(db_engine, "Planning Student Regression Operator")
     _create_driver_in_db(db_engine, operator_id, "Planning Student Regression Driver", "planning-student-regression@test.com")
@@ -3173,4 +3348,3 @@ def test_school_reports_summary_blocked_for_operator_without_yard(client, db_eng
 
     response = client.get(f"/reports/school/{school_id}")
     assert response.status_code == 404
-

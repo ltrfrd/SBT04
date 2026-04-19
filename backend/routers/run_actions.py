@@ -24,7 +24,7 @@ from backend.utils.operator_scope import get_operator_context
 from backend.routers.run_helpers import (
     _assert_dropoff_transition_allowed,
     _assert_pickup_transition_allowed,
-    _get_operator_scoped_run_or_404,
+    _get_execution_scoped_run_or_404,
     _get_ordered_run_stops,
     _get_runtime_assignment_or_404,
     _get_runtime_run_or_404,
@@ -60,7 +60,7 @@ def arrive_at_stop(
     db: Session = Depends(get_db),                  # Database session dependency
     operator: Operator = Depends(get_operator_context),
 ):
-    _get_operator_scoped_run_or_404(run_id, db, operator.id, "operate")
+    _get_execution_scoped_run_or_404(run_id, db, operator.id)
     run = _require_active_runtime_run(_get_runtime_run_or_404(run_id, db))
     stop = _resolve_runtime_stop_target_or_404(
         run_id=run_id,
@@ -96,7 +96,7 @@ def advance_to_next_stop(
     db: Session = Depends(get_db),                  # Database session dependency
     operator: Operator = Depends(get_operator_context),
 ):
-    _get_operator_scoped_run_or_404(run_id, db, operator.id, "operate")
+    _get_execution_scoped_run_or_404(run_id, db, operator.id)
     run = _require_active_runtime_run(_get_runtime_run_or_404(run_id, db))
     stops = _get_ordered_run_stops(run_id, db)      # Stable ordered list for convenience-only navigation
 
@@ -151,7 +151,7 @@ def pickup_student(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    _get_operator_scoped_run_or_404(run_id, db, operator.id, "operate")
+    _get_execution_scoped_run_or_404(run_id, db, operator.id)
     run = _require_active_runtime_run(_get_runtime_run_or_404(run_id, db))
     current_stop = _require_current_runtime_stop(run, db)  # Pickup must happen at the actual current stop
     assignment = _get_runtime_assignment_or_404(
@@ -226,7 +226,7 @@ def dropoff_student(
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    _get_operator_scoped_run_or_404(run_id, db, operator.id, "operate")
+    _get_execution_scoped_run_or_404(run_id, db, operator.id)
     run = _require_active_runtime_run(_get_runtime_run_or_404(run_id, db))
     current_stop = _require_current_runtime_stop(run, db)  # Dropoff must happen at the actual current stop
     assignment = _get_runtime_assignment_or_404(
