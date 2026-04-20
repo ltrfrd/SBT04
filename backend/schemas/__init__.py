@@ -87,6 +87,7 @@ from .run import (
     RunDetailRouteOut,
     RunDetailStopOut,
     RunDetailStudentOut,
+    QRScanRequest,
     RouteRunCreate,
     RunOut,          # Standard run response schema
     RunSummaryOut,   # Operational run summary schema
@@ -190,6 +191,7 @@ __all__ = [
     "RunDetailDriverOut",
     "RunDetailStopOut",
     "RunDetailStudentOut",
+    "QRScanRequest",
     "RouteRunCreate",
     "RunSummaryOut",
     "PreTripDefectBase",

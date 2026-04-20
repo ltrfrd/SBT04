@@ -12,15 +12,23 @@ from sqlalchemy.orm import Session
 from database import get_db
 
 from backend import schemas
+from backend.models.associations import StudentRunAssignment
 from backend.models.operator import Operator
 from backend.models.run_event import RunEvent
+from backend.models.student import Student
 from backend.schemas.run import (
     DropoffStudentRequest,
     DropoffStudentResponse,
     PickupStudentRequest,
     PickupStudentResponse,
+    QRScanRequest,
 )
 from backend.utils.operator_scope import get_operator_context
+from backend.utils.run_verification import (
+    confirm_run_verification,
+    normalize_run_direction,
+    sync_run_verification,
+)
 from backend.routers.run_execution_helpers import (
     _assert_dropoff_transition_allowed,
     _assert_pickup_transition_allowed,
@@ -173,10 +181,14 @@ def pickup_student(
     # -------------------------------------------------------------------------
     now = datetime.now(timezone.utc)  # Current UTC timestamp (timezone-aware)
     
+    direction = normalize_run_direction(run.run_type)
+
     assignment.picked_up = True  # Student has boarded
     assignment.picked_up_at = now  # Store pickup time
     assignment.is_onboard = True  # Student is now physically on the bus
     assignment.actual_pickup_stop_id = current_stop.id  # Record the actual boarding stop
+    if direction == "PM":
+        assignment.boarded_by_driver = True
 
     # -----------------------------------------------------------
     # Log pickup event
@@ -190,6 +202,8 @@ def pickup_student(
     )
 
     db.add(event)                                                           # Add event to current transaction
+    if direction is not None:
+        sync_run_verification(db=db, run=run)
     # -------------------------------------------------------------------------
     # Save changes
     # -------------------------------------------------------------------------
@@ -206,6 +220,48 @@ def pickup_student(
         picked_up=assignment.picked_up,
         is_onboard=assignment.is_onboard,
         picked_up_at=assignment.picked_up_at,
+    )
+
+
+@router.post(
+    "/{run_id}/qr/scan-board",
+    response_model=PickupStudentResponse,
+    summary="Scan QR for boarding",
+    description="Resolve one assignment by QR token and use the existing boarding flow.",
+    response_description="Pickup confirmation",
+)
+def scan_qr_board(
+    run_id: int,
+    payload: QRScanRequest,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    student = (
+        db.query(Student)
+        .filter(Student.qr_token == payload.qr_token)
+        .first()
+    )
+    if not student:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    if not student.qr_active:
+        raise HTTPException(status_code=403, detail="QR token is inactive")
+
+    assignment = (
+        db.query(StudentRunAssignment)
+        .filter(
+            StudentRunAssignment.run_id == run_id,
+            StudentRunAssignment.student_id == student.id,
+        )
+        .first()
+    )
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    return pickup_student(
+        run_id=run_id,
+        payload=PickupStudentRequest(student_id=assignment.student_id),
+        db=db,
+        operator=operator,
     )
 
 
@@ -248,6 +304,8 @@ def dropoff_student(
     # -------------------------------------------------------------------------
     now = datetime.now(timezone.utc)  # Current UTC timestamp (timezone-aware)
 
+    direction = normalize_run_direction(run.run_type)
+
     assignment.dropped_off = True  # Student has been dropped off
     assignment.dropped_off_at = now  # Store drop-off time
     assignment.is_onboard = False  # Student is no longer on the bus
@@ -264,6 +322,8 @@ def dropoff_student(
         event_type="DROPOFF",                                                # Event type
     )
     db.add(event)                                                            # Add event to current transaction
+    if direction is not None:
+        sync_run_verification(db=db, run=run)
     
     # -------------------------------------------------------------------------
     # Save changes
@@ -282,3 +342,41 @@ def dropoff_student(
         is_onboard=assignment.is_onboard,
         dropped_off_at=assignment.dropped_off_at,
     )
+
+
+@router.post(
+    "/{run_id}/confirm_driver_verification",
+    summary="Confirm driver verification",
+    description="Finalize PM verification after driver boarding matches the school release list.",
+    response_description="Driver verification status",
+)
+def confirm_driver_verification(
+    run_id: int,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    _get_execution_scoped_run_or_404(run_id, db, operator.id)
+    run = _get_runtime_run_or_404(run_id, db)
+    direction = normalize_run_direction(run.run_type)
+    if direction != "PM":
+        raise HTTPException(status_code=400, detail="Driver confirmation is only available for PM runs")
+
+    verification = confirm_run_verification(
+        db=db,
+        run=run,
+        confirmed_by_role="driver",
+    )
+    if verification.mismatch_count > 0:
+        db.commit()
+        raise HTTPException(status_code=400, detail="Verification mismatch remains for this run")
+
+    db.commit()
+    db.refresh(verification)
+    return {
+        "message": "Driver verification confirmed",
+        "run_id": run.id,
+        "status": verification.status,
+        "mismatch_count": verification.mismatch_count,
+        "confirmed_at": verification.confirmed_at,
+        "confirmed_by_role": verification.confirmed_by_role,
+    }

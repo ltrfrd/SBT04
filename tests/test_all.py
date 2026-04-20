@@ -86,6 +86,24 @@ def _get_client_db_engine(client):
     raise AssertionError("Unable to resolve test database engine from client fixture")
 
 
+def _get_student_qr_token(client, student_id: int) -> str:
+    db_engine = _get_client_db_engine(client)
+    with Session(db_engine) as db:
+        student = db.get(Student, student_id)
+        assert student is not None
+        assert student.qr_token
+        return student.qr_token
+
+
+def _revoke_student_qr(client, student_id: int) -> None:
+    db_engine = _get_client_db_engine(client)
+    with Session(db_engine) as db:
+        student = db.get(Student, student_id)
+        assert student is not None
+        student.qr_active = False
+        db.commit()
+
+
 def _get_route_snapshot(db_engine, route_id: int):
     with Session(db_engine) as db:
         route = db.get(Route, route_id)
@@ -1608,6 +1626,229 @@ def test_pickup_student_success(client):
     assert body["picked_up"] is True
     assert body["is_onboard"] is True
     assert body["picked_up_at"] is not None
+
+
+def test_qr_scan_board_uses_existing_boarding_flow(client):
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(),
+            "name": "QR Driver",
+            "email": "qr-driver@test.com",
+            "phone": "11113",
+            "pin": "1234",
+        },
+    )
+    driver_id = driver.json()["id"]
+
+    school = client.post(
+        "/schools/",
+        json={
+            "name": "QR School",
+            "address": "125 Test St",
+        },
+    )
+    school_id = school.json()["id"]
+
+    route = client.post(
+        "/routes/",
+        json={
+            "route_number": "QR-R1",
+            "driver_id": driver_id,
+            "school_ids": [school_id],
+        },
+    )
+    run = _create_planned_run(client, route.json()["id"], "AM")
+    run_id = run.json()["id"]
+
+    client.post(
+        "/stops/",
+        json={
+            "name": "QR Stop 1",
+            "latitude": 53.5461,
+            "longitude": -113.4938,
+            "type": "pickup",
+            "run_id": run_id,
+            "sequence": 1,
+        },
+    )
+    stop2 = client.post(
+        "/stops/",
+        json={
+            "name": "QR Stop 2",
+            "latitude": 53.5561,
+            "longitude": -113.4838,
+            "type": "pickup",
+            "run_id": run_id,
+            "sequence": 2,
+        },
+    )
+    stop2_id = stop2.json()["id"]
+
+    student = client.post(
+        f"/runs/{run_id}/stops/{stop2_id}/students",
+        json={
+            "name": "QR Student",
+            "grade": "5",
+            "school_id": school_id,
+        },
+    )
+    student_id = student.json()["id"]
+    qr_token = _get_student_qr_token(client, student_id)
+
+    started_run = _start_run_by_id(client, run_id)
+    run_id = started_run.json()["id"]
+
+    arrive = client.post(f"/runs/{run_id}/arrive_stop?stop_sequence=2")
+    assert arrive.status_code == 200
+
+    pickup = client.post(
+        f"/runs/{run_id}/qr/scan-board",
+        json={"qr_token": qr_token},
+    )
+
+    assert pickup.status_code == 200
+    body = pickup.json()
+    assert body["message"] == "Student picked up successfully"
+    assert body["run_id"] == run_id
+    assert body["student_id"] == student_id
+    assert body["picked_up"] is True
+    assert body["is_onboard"] is True
+    assert body["picked_up_at"] is not None
+
+
+def test_qr_scan_board_rejects_invalid_or_wrong_run_token(client):
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(),
+            "name": "QR Wrong Run Driver",
+            "email": "qr-wrong-run-driver@test.com",
+            "phone": "11114",
+            "pin": "1234",
+        },
+    )
+    driver_id = driver.json()["id"]
+
+    school = client.post(
+        "/schools/",
+        json={
+            "name": "QR Wrong Run School",
+            "address": "126 Test St",
+        },
+    )
+    school_id = school.json()["id"]
+
+    route = client.post(
+        "/routes/",
+        json={
+            "route_number": "QR-R2",
+            "driver_id": driver_id,
+            "school_ids": [school_id],
+        },
+    )
+    route_id = route.json()["id"]
+
+    first_run = _create_planned_run(client, route_id, "AM")
+    first_run_id = first_run.json()["id"]
+    second_run = _create_planned_run(client, route_id, "PM")
+    second_run_id = second_run.json()["id"]
+
+    first_stop = client.post(
+        "/stops/",
+        json={
+            "name": "QR First Stop",
+            "latitude": 53.5461,
+            "longitude": -113.4938,
+            "type": "pickup",
+            "run_id": first_run_id,
+            "sequence": 1,
+        },
+    )
+    student = client.post(
+        f"/runs/{first_run_id}/stops/{first_stop.json()['id']}/students",
+        json={
+            "name": "QR Wrong Run Student",
+            "grade": "4",
+            "school_id": school_id,
+        },
+    )
+    token = _get_student_qr_token(client, student.json()["id"])
+
+    invalid = client.post(
+        f"/runs/{first_run_id}/qr/scan-board",
+        json={"qr_token": str(uuid.uuid4())},
+    )
+    assert invalid.status_code == 404
+    assert invalid.json()["detail"] == "Assignment not found"
+
+    wrong_run = client.post(
+        f"/runs/{second_run_id}/qr/scan-board",
+        json={"qr_token": token},
+    )
+    assert wrong_run.status_code == 404
+    assert wrong_run.json()["detail"] == "Assignment not found"
+
+
+def test_qr_scan_board_blocks_revoked_student_token(client):
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(),
+            "name": "QR Revoked Driver",
+            "email": "qr-revoked-driver@test.com",
+            "phone": "11115",
+            "pin": "1234",
+        },
+    )
+    driver_id = driver.json()["id"]
+
+    school = client.post(
+        "/schools/",
+        json={
+            "name": "QR Revoked School",
+            "address": "127 Test St",
+        },
+    )
+    school_id = school.json()["id"]
+
+    route = client.post(
+        "/routes/",
+        json={
+            "route_number": "QR-R3",
+            "driver_id": driver_id,
+            "school_ids": [school_id],
+        },
+    )
+    run = _create_planned_run(client, route.json()["id"], "AM")
+    run_id = run.json()["id"]
+
+    stop = client.post(
+        "/stops/",
+        json={
+            "name": "QR Revoked Stop",
+            "latitude": 53.5461,
+            "longitude": -113.4938,
+            "type": "pickup",
+            "run_id": run_id,
+            "sequence": 1,
+        },
+    )
+    student = client.post(
+        f"/runs/{run_id}/stops/{stop.json()['id']}/students",
+        json={
+            "name": "QR Revoked Student",
+            "grade": "5",
+            "school_id": school_id,
+        },
+    )
+    student_id = student.json()["id"]
+    qr_token = _get_student_qr_token(client, student_id)
+    _revoke_student_qr(client, student_id)
+
+    started_run = _start_run_by_id(client, run_id)
+    run_id = started_run.json()["id"]
+
+    arrive = client.post(f"/runs/{run_id}/arrive_stop?stop_sequence=1")
+    assert arrive.status_code == 200
+
+    blocked = client.post(
+        f"/runs/{run_id}/qr/scan-board",
+        json={"qr_token": qr_token},
+    )
+    assert blocked.status_code == 403
+    assert blocked.json()["detail"] == "QR token is inactive"
 
 
 # =============================================================================
@@ -3537,7 +3778,8 @@ def test_school_confirmation_persists_after_refresh(client):
     assert confirm_body["message"] == "School reports confirmed"
     assert confirm_body["school_id"] == school_id
     assert confirm_body["run_id"] == run_id
-    assert confirm_body["confirmed_by"] == "Front Desk"
+    assert confirm_body["confirmed_by_role"] == "school"
+    assert confirm_body["status"] == "confirmed"
     assert confirm_body["confirmed_at"] is not None
 
     # -------------------------------------------------------------------------
@@ -3637,7 +3879,7 @@ def test_update_school_status(client, db_engine):                              #
     # Call school status update endpoint
     # -------------------------------------------------------------------------
     response = client.post(
-        f"/runs/{run_id}/students/{student_id}/school-status",
+        f"/reports/run/{run_id}/students/{student_id}/school-status",
         json={"status": "present"},
     )
 
@@ -3886,6 +4128,12 @@ def test_school_status_update_rejects_missing_assignment(client):
 def test_school_status_update_rejects_confirmed_runs(client):
     ids = _build_school_reports_fixture(client)
 
+    update = client.post(
+        f"/runs/{ids['run_1_id']}/students/{ids['student_id']}/school-status",
+        json={"status": "absent"},
+    )
+    assert update.status_code == 200
+
     confirm = client.post(
         f"/reports/school/{ids['school_id']}/confirm/{ids['run_1_id']}",
         json={"confirmed_by": "lock-test"},
@@ -3908,6 +4156,12 @@ def test_school_status_update_rejects_confirmed_runs(client):
 def test_school_confirmation_persists_into_school_reports(client):
     ids = _build_school_reports_fixture(client)                     # Build minimal reports setup
 
+    update = client.post(
+        f"/runs/{ids['run_1_id']}/students/{ids['student_id']}/school-status",
+        json={"status": "absent"},
+    )
+    assert update.status_code == 200
+
     confirm = client.post(
         f"/reports/school/{ids['school_id']}/confirm/{ids['run_1_id']}",
         json={
@@ -3917,7 +4171,8 @@ def test_school_confirmation_persists_into_school_reports(client):
     assert confirm.status_code == 200
     assert confirm.json()["school_id"] == ids["school_id"]         # Correct school confirmed
     assert confirm.json()["run_id"] == ids["run_1_id"]             # Correct run confirmed
-    assert confirm.json()["confirmed_by"] == "frd"                 # Confirmer persisted
+    assert confirm.json()["confirmed_by_role"] == "school"         # Role persisted
+    assert confirm.json()["status"] == "confirmed"                 # Verification confirmed
     assert confirm.json()["confirmed_at"] is not None              # Timestamp persisted
 
     response = client.get(f"/reports/school/{ids['school_id']}")
@@ -3929,8 +4184,294 @@ def test_school_confirmation_persists_into_school_reports(client):
 
     run_1 = runs_by_id[ids["run_1_id"]]
     assert run_1["confirmation"]["is_confirmed"] is True           # Report shows confirmed state
-    assert run_1["confirmation"]["confirmed_by"] == "frd"         # Report shows confirmer
+    assert run_1["confirmation"]["confirmed_by_role"] == "school" # Report shows confirmer role
     assert run_1["confirmation"]["confirmed_at"] is not None      # Report shows timestamp   
+
+
+def test_am_verification_blocks_confirmation_on_mismatch(client):
+    ids = _build_school_reports_fixture(client)
+
+    update = client.post(
+        f"/reports/run/{ids['run_1_id']}/students/{ids['student_id']}/school-status",
+        json={"status": "present"},
+    )
+    assert update.status_code == 200
+
+    confirm = client.post(
+        f"/reports/school/{ids['school_id']}/confirm/{ids['run_1_id']}",
+        json={"confirmed_by": "front-desk"},
+    )
+    assert confirm.status_code == 400
+    assert confirm.json()["detail"] == "Verification mismatch remains for this run"
+
+    summary = client.get(f"/reports/school/{ids['school_id']}")
+    assert summary.status_code == 200
+    route = summary.json()["routes"][0]
+    run_data = {run["run_id"]: run for run in route["runs"]}[ids["run_1_id"]]
+    assert run_data["confirmation"]["status"] == "mismatch"
+    assert run_data["confirmation"]["mismatch_count"] == 1
+
+
+def test_pm_verification_match_confirms_after_release_and_boarding(client):
+    ids = _build_school_reports_fixture(client)
+
+    student = client.post(
+        f"/runs/{ids['run_2_id']}/stops/{ids['stop_2_id']}/students",
+        json={
+            "name": "PM Student",
+            "grade": "5",
+            "school_id": ids["school_id"],
+        },
+    )
+    assert student.status_code == 201
+    student_id = student.json()["id"]
+
+    ensure_run_has_execution_yard(client, ids["run_2_id"])
+    started_run = _start_run_by_id(client, ids["run_2_id"])
+    assert started_run.status_code == 200
+
+    release = client.post(
+        f"/reports/run/{ids['run_2_id']}/students/{student_id}/pm/release",
+    )
+    assert release.status_code == 200
+    assert release.json()["verification_status"] == "mismatch"
+
+    arrive = client.post(f"/runs/{ids['run_2_id']}/arrive_stop?stop_sequence=1")
+    assert arrive.status_code == 200
+
+    pickup = client.post(
+        f"/runs/{ids['run_2_id']}/pickup_student",
+        json={"student_id": student_id},
+    )
+    assert pickup.status_code == 200
+
+    confirm = client.post(f"/runs/{ids['run_2_id']}/confirm_driver_verification")
+    assert confirm.status_code == 200
+    assert confirm.json()["status"] == "confirmed"
+    assert confirm.json()["confirmed_by_role"] == "driver"
+
+
+def test_qr_pm_release_uses_existing_release_flow(client):
+    ids = _build_school_reports_fixture(client)
+
+    student = client.post(
+        f"/runs/{ids['run_2_id']}/stops/{ids['stop_2_id']}/students",
+        json={
+            "name": "QR PM Student",
+            "grade": "5",
+            "school_id": ids["school_id"],
+        },
+    )
+    assert student.status_code == 201
+    student_id = student.json()["id"]
+    qr_token = _get_student_qr_token(client, student_id)
+
+    ensure_run_has_execution_yard(client, ids["run_2_id"])
+    started_run = _start_run_by_id(client, ids["run_2_id"])
+    assert started_run.status_code == 200
+
+    release = client.post(
+        f"/reports/run/{ids['run_2_id']}/qr/scan-release",
+        json={"qr_token": qr_token},
+    )
+    assert release.status_code == 200
+    assert release.json()["student_id"] == student_id
+    assert release.json()["released_by_school"] is True
+    assert release.json()["verification_status"] == "mismatch"
+
+
+def test_qr_pm_release_rejects_invalid_or_wrong_run_token(client):
+    ids = _build_school_reports_fixture(client)
+
+    student = client.post(
+        f"/runs/{ids['run_2_id']}/stops/{ids['stop_2_id']}/students",
+        json={
+            "name": "QR PM Wrong Run Student",
+            "grade": "5",
+            "school_id": ids["school_id"],
+        },
+    )
+    assert student.status_code == 201
+    student_id = student.json()["id"]
+    qr_token = _get_student_qr_token(client, student_id)
+
+    invalid = client.post(
+        f"/reports/run/{ids['run_2_id']}/qr/scan-release",
+        json={"qr_token": str(uuid.uuid4())},
+    )
+    assert invalid.status_code == 404
+    assert invalid.json()["detail"] == "Assignment not found"
+
+    wrong_run = client.post(
+        f"/reports/run/{ids['run_1_id']}/qr/scan-release",
+        json={"qr_token": qr_token},
+    )
+    assert wrong_run.status_code == 404
+    assert wrong_run.json()["detail"] == "Assignment not found"
+
+
+def test_qr_pm_release_is_idempotent_and_confirmation_rules_still_apply(client):
+    ids = _build_school_reports_fixture(client)
+
+    student = client.post(
+        f"/runs/{ids['run_2_id']}/stops/{ids['stop_2_id']}/students",
+        json={
+            "name": "QR PM Idempotent Student",
+            "grade": "3",
+            "school_id": ids["school_id"],
+        },
+    )
+    assert student.status_code == 201
+    student_id = student.json()["id"]
+    qr_token = _get_student_qr_token(client, student_id)
+
+    ensure_run_has_execution_yard(client, ids["run_2_id"])
+    started_run = _start_run_by_id(client, ids["run_2_id"])
+    assert started_run.status_code == 200
+
+    first_release = client.post(
+        f"/reports/run/{ids['run_2_id']}/qr/scan-release",
+        json={"qr_token": qr_token},
+    )
+    assert first_release.status_code == 200
+    assert first_release.json()["released_by_school"] is True
+
+    second_release = client.post(
+        f"/reports/run/{ids['run_2_id']}/qr/scan-release",
+        json={"qr_token": qr_token},
+    )
+    assert second_release.status_code == 200
+    assert second_release.json()["released_by_school"] is True
+    assert second_release.json()["verification_status"] == first_release.json()["verification_status"]
+
+    confirm = client.post(f"/runs/{ids['run_2_id']}/confirm_driver_verification")
+    assert confirm.status_code == 400
+    assert confirm.json()["detail"] == "Verification mismatch remains for this run"
+
+
+def test_pm_verification_blocks_driver_confirmation_on_mismatch(client):
+    ids = _build_school_reports_fixture(client)
+
+    student = client.post(
+        f"/runs/{ids['run_2_id']}/stops/{ids['stop_2_id']}/students",
+        json={
+            "name": "PM Mismatch Student",
+            "grade": "5",
+            "school_id": ids["school_id"],
+        },
+    )
+    assert student.status_code == 201
+    student_id = student.json()["id"]
+
+    ensure_run_has_execution_yard(client, ids["run_2_id"])
+    started_run = _start_run_by_id(client, ids["run_2_id"])
+    assert started_run.status_code == 200
+
+    release = client.post(
+        f"/reports/run/{ids['run_2_id']}/students/{student_id}/pm/release",
+    )
+    assert release.status_code == 200
+
+    confirm = client.post(f"/runs/{ids['run_2_id']}/confirm_driver_verification")
+    assert confirm.status_code == 400
+    assert confirm.json()["detail"] == "Verification mismatch remains for this run"
+
+
+# =============================================================================
+# test_pm_release_idempotent
+# - Releasing the same student twice does not change state or error
+# =============================================================================
+def test_pm_release_idempotent(client):
+    ids = _build_school_reports_fixture(client)
+
+    student = client.post(
+        f"/runs/{ids['run_2_id']}/stops/{ids['stop_2_id']}/students",
+        json={"name": "Idempotent Student", "grade": "3", "school_id": ids["school_id"]},
+    )
+    assert student.status_code == 201
+    student_id = student.json()["id"]
+
+    ensure_run_has_execution_yard(client, ids["run_2_id"])
+    started = _start_run_by_id(client, ids["run_2_id"])
+    assert started.status_code == 200
+
+    r1 = client.post(f"/reports/run/{ids['run_2_id']}/students/{student_id}/pm/release")
+    assert r1.status_code == 200
+    assert r1.json()["released_by_school"] is True
+
+    r2 = client.post(f"/reports/run/{ids['run_2_id']}/students/{student_id}/pm/release")
+    assert r2.status_code == 200
+    assert r2.json()["released_by_school"] is True
+    assert r2.json()["verification_status"] == r1.json()["verification_status"]
+
+
+# =============================================================================
+# test_pm_mismatch_when_driver_boards_without_school_release
+# - Driver boarding without school release produces a mismatch
+# =============================================================================
+def test_pm_mismatch_when_driver_boards_without_school_release(client):
+    ids = _build_school_reports_fixture(client)
+
+    student = client.post(
+        f"/runs/{ids['run_2_id']}/stops/{ids['stop_2_id']}/students",
+        json={"name": "Unmatched Boarder", "grade": "4", "school_id": ids["school_id"]},
+    )
+    assert student.status_code == 201
+    student_id = student.json()["id"]
+
+    ensure_run_has_execution_yard(client, ids["run_2_id"])
+    started = _start_run_by_id(client, ids["run_2_id"])
+    assert started.status_code == 200
+
+    arrive = client.post(f"/runs/{ids['run_2_id']}/arrive_stop?stop_sequence=1")
+    assert arrive.status_code == 200
+
+    pickup = client.post(
+        f"/runs/{ids['run_2_id']}/pickup_student",
+        json={"student_id": student_id},
+    )
+    assert pickup.status_code == 200
+
+    confirm = client.post(f"/runs/{ids['run_2_id']}/confirm_driver_verification")
+    assert confirm.status_code == 400
+    assert confirm.json()["detail"] == "Verification mismatch remains for this run"
+
+
+# =============================================================================
+# test_pm_resolved_after_release_and_boarding
+# - Verification resolves when school releases AND driver boards
+# =============================================================================
+def test_pm_resolved_after_release_and_boarding(client):
+    ids = _build_school_reports_fixture(client)
+
+    student = client.post(
+        f"/runs/{ids['run_2_id']}/stops/{ids['stop_2_id']}/students",
+        json={"name": "Matched Student", "grade": "2", "school_id": ids["school_id"]},
+    )
+    assert student.status_code == 201
+    student_id = student.json()["id"]
+
+    ensure_run_has_execution_yard(client, ids["run_2_id"])
+    started = _start_run_by_id(client, ids["run_2_id"])
+    assert started.status_code == 200
+
+    release = client.post(f"/reports/run/{ids['run_2_id']}/students/{student_id}/pm/release")
+    assert release.status_code == 200
+    assert release.json()["verification_status"] == "mismatch"
+
+    arrive = client.post(f"/runs/{ids['run_2_id']}/arrive_stop?stop_sequence=1")
+    assert arrive.status_code == 200
+
+    pickup = client.post(
+        f"/runs/{ids['run_2_id']}/pickup_student",
+        json={"student_id": student_id},
+    )
+    assert pickup.status_code == 200
+
+    confirm = client.post(f"/runs/{ids['run_2_id']}/confirm_driver_verification")
+    assert confirm.status_code == 200
+    assert confirm.json()["status"] == "confirmed"
+    assert confirm.json()["mismatch_count"] == 0
 
 
 # -----------------------------------------------------------

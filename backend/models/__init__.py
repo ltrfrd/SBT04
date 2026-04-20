@@ -10,6 +10,7 @@ from .student import Student
 from .route import Route
 from .stop import Stop, StopType
 from .run import Run
+from .run_verification import RunVerification
 from .dispatch import DispatchRecord
 from .run_event import RunEvent
 from .associations import route_schools, StudentRunAssignment, RouteDriverAssignment
@@ -33,6 +34,7 @@ __all__ = [
     "Stop",
     "StopType",
     "Run",
+    "RunVerification",
     "DispatchRecord",
     "route_schools",
     "StudentRunAssignment",

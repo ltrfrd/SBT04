@@ -14,7 +14,7 @@ from backend.models.run import Run
 from backend.models.school import School
 from backend.models.stop import Stop
 from backend.models.yard import Yard
-from backend.models.operator import OperatorRouteAccess
+from backend.models.operator import Operator, OperatorRouteAccess
 from backend.routers.run_helpers import EXECUTION_RUN_BLOCKED_DETAIL
 from backend.utils.planning_scope import EXECUTION_ROUTE_BLOCKED_DETAIL
 from tests.conftest import TEST_DRIVER_PIN, _create_operator_in_db, _create_driver_in_db
@@ -1721,6 +1721,12 @@ def test_shared_operator_can_update_school_status_for_district_owned_student(cli
 def test_shared_operator_can_confirm_school_reports_for_district_owned_school(client, db_engine):
     context = _build_shared_school_reports_context(client, db_engine)
 
+    update = client.post(
+        f"/runs/{context['run_id']}/students/{context['student_id']}/school-status",
+        json={"status": "absent"},
+    )
+    assert update.status_code == 200
+
     response = client.post(
         f"/reports/school/{context['school_id']}/confirm/{context['run_id']}",
         json={"confirmed_by": "Shared Front Desk"},
@@ -1729,7 +1735,7 @@ def test_shared_operator_can_confirm_school_reports_for_district_owned_school(cl
     assert response.status_code == 200
     assert response.json()["school_id"] == context["school_id"]
     assert response.json()["run_id"] == context["run_id"]
-    assert response.json()["confirmed_by"] == "Shared Front Desk"
+    assert response.json()["confirmed_by_role"] == "school"
 
 
 def test_shared_operator_can_view_school_reports_by_date_and_mobile_for_district_owned_school(client, db_engine):
@@ -3082,6 +3088,14 @@ def test_bootstrap_operator_fails_when_operator_exists(empty_client, db_engine):
     _create_operator_in_db(db_engine, "Existing Operator")
     r = empty_client.post("/session/bootstrap-operator", json={"name": "Second Operator"})
     assert r.status_code == 409
+
+
+def test_no_default_operator_is_auto_created_for_unauthenticated_requests(empty_client, db_engine):
+    response = empty_client.get("/drivers/")
+    assert response.status_code == 401
+
+    with Session(db_engine) as db:
+        assert db.query(Operator).count() == 0
 
 
 def test_bootstrap_operator_sets_session(empty_client):

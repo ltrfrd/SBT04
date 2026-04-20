@@ -75,6 +75,8 @@ class StudentRunAssignment(Base):
     dropped_off_at = Column(DateTime, nullable=True)  # Track when exit happened
     is_onboard = Column(Boolean, default=False, nullable=False)  # Track current onboard state
     school_status = Column(String, nullable=True)  # "present" or "absent"
+    released_by_school = Column(Boolean, default=False, nullable=False)  # PM school-side release decision
+    boarded_by_driver = Column(Boolean, default=False, nullable=False)  # PM driver-side boarding verification
 
 
 class YardRouteAssignment(Base):

@@ -212,6 +212,10 @@ class DropoffStudentResponse(BaseModel):
     dropped_off_at: datetime  # Timestamp when drop-off occurred
 
 
+class QRScanRequest(BaseModel):
+    qr_token: str  # QR token for one student
+
+
 class OnboardStudentItem(BaseModel):
     student_id: int  # Student ID
     student_name: str  # Student name

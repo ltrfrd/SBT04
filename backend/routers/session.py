@@ -52,7 +52,8 @@ def set_operator_session(
     if not operator:
         raise HTTPException(status_code=404, detail="Operator not found")
 
-    # Transitional/dev-only session bootstrap. This preserves the existing
+    # DEV ONLY — NOT FOR PRODUCTION.
+    # Transitional session bootstrap that preserves the existing
     # session["operator_id"] contract used by operator-scoped endpoints.
     request.session["operator_id"] = operator.id
     request.session.pop("driver_id", None)

@@ -14,28 +14,11 @@ from backend.models.yard import Yard
 # -----------------------------------------------------------
 # Yard-domain operator scope helpers
 # -----------------------------------------------------------
-DEFAULT_OPERATOR_NAME = "Default Operator"
 ROUTE_ACCESS_PRIORITY = {
     "read": 1,
     "operate": 2,
     "owner": 3,
 }
-
-
-def get_or_create_default_operator(db: Session) -> Operator:
-    operator = (
-        db.query(Operator)
-        .order_by(Operator.id.asc())
-        .first()
-    )
-    if operator:
-        return operator
-
-    operator = Operator(name=DEFAULT_OPERATOR_NAME)
-    db.add(operator)
-    db.commit()
-    db.refresh(operator)
-    return operator
 
 
 def get_operator_context(

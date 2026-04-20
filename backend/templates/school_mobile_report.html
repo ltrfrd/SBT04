@@ -386,7 +386,7 @@
                         </thead>
                         <tbody>
                             {% for student in run.students %}
-                            <tr data-student-id="{{ student.student_id }}" data-run-id="{{ run.run_id }}">
+                            <tr data-student-id="{{ student.student_id }}" data-run-id="{{ run.run_id }}" data-run-type="{{ run.run_type }}">
                                 <td>{{ student.student_name }}</td>
                                 <td>
                                     {% if student.status == "present" %}
@@ -494,12 +494,30 @@
 
             const studentId = parseInt(row.dataset.studentId);
             const runId = parseInt(row.dataset.runId);
+            const runType = row.dataset.runType;
 
             if (!studentId || !runId) {
                 return;
             }
 
-            const response = await fetch(`/runs/${runId}/students/${studentId}/school-status`, {
+            if (runType === "PM") {
+                if (statusValue !== "present") {
+                    return;
+                }
+                const response = await fetch(`/reports/run/${runId}/students/${studentId}/pm/release`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.detail || "Save failed");
+                }
+                return;
+            }
+
+            const response = await fetch(`/reports/run/${runId}/students/${studentId}/school-status`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json"

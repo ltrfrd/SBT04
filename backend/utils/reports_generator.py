@@ -2,24 +2,24 @@
 # - Reports generator
 # - Build reports-layer summaries behind canonical /reports endpoints
 # -----------------------------------------------------------
-from sqlalchemy.orm import Session  # Database session type
-from datetime import date, datetime, time # Date filter type
-from backend.models import (  # Existing summary data sources
+from datetime import date, datetime, time
+
+from sqlalchemy.orm import Session
+
+from backend.models import (
+    associations as assoc_model,
+    dispatch as dispatch_model,
     driver as driver_model,
     route as route_model,
     run as run_model,
-    dispatch as dispatch_model,
-    associations as assoc_model,
     student as student_model,
 )
+from backend.models.run import Run
+from backend.models.run_event import RunEvent
+from backend.models.associations import StudentRunAssignment
+from backend.models.run_verification import RunVerification
 from backend.models.yard import Yard
-
-from backend.models.run import Run  # Import locally to avoid circular dependency
-from backend.models.run_event import RunEvent  # Run event history
-from backend.models.associations import StudentRunAssignment  # Runtime assignments
-from backend.utils.student_bus_absence import has_student_bus_absence  # Absence check
-from backend.models import school as school_model  # School model
-from backend.models import SchoolAttendanceVerification  # School confirmation state
+from backend.models import school as school_model
 from backend.utils.planning_scope import (
     accessible_route_filter,
     accessible_school_filter,
@@ -28,31 +28,31 @@ from backend.utils.planning_scope import (
     yards_accessible_school_filter,
 )
 from backend.utils.route_driver_assignment import get_route_driver_name, resolve_route_driver_assignment
+from backend.utils.run_verification import (
+    assignment_mismatch,
+    assignment_operational_school_truth,
+    assignment_school_truth,
+    get_run_verification,
+    normalize_run_direction,
+)
+from backend.utils.student_bus_absence import has_student_bus_absence
 
 
-# -----------------------------------------------------------
-# Yard-scope report helpers
-# -----------------------------------------------------------
 def driver_summary(db: Session, driver_id: int, operator_id: int | None = None) -> dict:
     driver_query = db.query(driver_model.Driver).filter(driver_model.Driver.id == driver_id)
     if operator_id is not None:
-        driver_query = (
-            driver_query
-            .join(driver_model.Driver.yard)
-            .filter(Yard.operator_id == operator_id)
-        )
-    drv = driver_query.first()  # Load driver with optional operator scope
+        driver_query = driver_query.join(driver_model.Driver.yard).filter(Yard.operator_id == operator_id)
+    drv = driver_query.first()
     if not drv:
-        return {"error": "Driver not found"}  # Return stable missing-driver payload
+        return {"error": "Driver not found"}
 
     total_charter_hours = (
         db.query(dispatch_model.DispatchRecord)
         .filter(dispatch_model.DispatchRecord.driver_id == driver_id)
         .with_entities(dispatch_model.DispatchRecord.charter_hours)
         .all()
-    )  # Load dispatch hour fragments for this driver
-
-    total_hours = sum(float(h[0]) for h in total_charter_hours if h[0])  # Sum non-null charter hours
+    )
+    total_hours = sum(float(hours[0]) for hours in total_charter_hours if hours[0])
 
     approved = (
         db.query(dispatch_model.DispatchRecord)
@@ -61,8 +61,7 @@ def driver_summary(db: Session, driver_id: int, operator_id: int | None = None) 
             dispatch_model.DispatchRecord.approved.is_(True),
         )
         .count()
-    )  # Count approved dispatch days
-
+    )
     pending = (
         db.query(dispatch_model.DispatchRecord)
         .filter(
@@ -70,7 +69,7 @@ def driver_summary(db: Session, driver_id: int, operator_id: int | None = None) 
             dispatch_model.DispatchRecord.approved.is_(False),
         )
         .count()
-    )  # Count pending dispatch days
+    )
 
     return {
         "driver_id": driver_id,
@@ -78,77 +77,73 @@ def driver_summary(db: Session, driver_id: int, operator_id: int | None = None) 
         "charter_hours": round(total_hours, 2),
         "approved_days": approved,
         "pending_days": pending,
-    }  # Preserve existing payload shape
+    }
 
 
 def route_summary_execution(db: Session, route_id: int) -> dict:
-    r = db.get(route_model.Route, route_id)  # Load route
-    if not r:
-        return {"error": "Route not found"}  # Return stable missing-route payload
-    assigned_bus = r.bus  # Current assigned bus when present
+    route = db.get(route_model.Route, route_id)
+    if not route:
+        return {"error": "Route not found"}
+    assigned_bus = route.bus
 
-    active_driver_id = None  # Default unresolved route driver
+    active_driver_id = None
     try:
-        active_assignment = resolve_route_driver_assignment(r)  # Resolve active route driver
+        active_assignment = resolve_route_driver_assignment(route)
         active_driver_id = active_assignment.driver_id
     except ValueError:
-        active_assignment = None  # Leave unresolved when route has no active driver
+        active_assignment = None
 
-    schools_list = [{"id": s.id, "name": s.name} for s in r.schools]  # Serialize assigned schools
+    schools_list = [{"id": school.id, "name": school.name} for school in route.schools]
 
     stops_list = []
-    for run in r.runs:
-        run_stops = sorted(run.stops, key=lambda st: st.sequence)  # Keep stable stop order
-        for st in run_stops:
+    for run in route.runs:
+        for stop in sorted(run.stops, key=lambda row: row.sequence):
             stops_list.append(
                 {
-                    "id": st.id,
+                    "id": stop.id,
                     "run_id": run.id,
-                    "sequence": st.sequence,
-                    "type": st.type.value if hasattr(st.type, "value") else str(st.type),
+                    "sequence": stop.sequence,
+                    "type": stop.type.value if hasattr(stop.type, "value") else str(stop.type),
                 }
-            )  # Preserve existing stop payload shape
+            )
 
-    route_run_ids = [run.id for run in r.runs]  # Collect child run IDs once
+    route_run_ids = [run.id for run in route.runs]
     assignments = []
     if route_run_ids:
         assignments = (
             db.query(assoc_model.StudentRunAssignment)
             .filter(assoc_model.StudentRunAssignment.run_id.in_(route_run_ids))
             .all()
-        )  # Load runtime student assignments for the route
+        )
 
     students_by_id = {}
     for assignment in assignments:
-        student = db.get(student_model.Student, assignment.student_id)  # Resolve assigned student
+        student = db.get(student_model.Student, assignment.student_id)
         if not student or student.id in students_by_id:
-            continue  # Keep unique serialized students only
+            continue
         students_by_id[student.id] = {
             "id": student.id,
             "name": student.name,
             "grade": student.grade,
         }
 
-    students_list = list(students_by_id.values())  # Convert unique student map back to list
-    total_runs = db.query(run_model.Run).filter(run_model.Run.route_id == route_id).count()  # Count route runs
-
     return {
         "route_id": route_id,
-        "route_number": r.route_number,
+        "route_number": route.route_number,
         "bus_id": assigned_bus.id if assigned_bus else None,
         "bus_unit_number": assigned_bus.unit_number if assigned_bus else None,
         "bus_license_plate": assigned_bus.license_plate if assigned_bus else None,
         "bus_capacity": assigned_bus.capacity if assigned_bus else None,
         "bus_size": assigned_bus.size if assigned_bus else None,
-        "num_runs": r.num_runs,
-        "driver_id": active_driver_id,  # Compatibility shim for existing report payloads
+        "num_runs": route.num_runs,
+        "driver_id": active_driver_id,
         "active_driver_id": active_driver_id,
-        "active_driver_name": get_route_driver_name(r),
+        "active_driver_name": get_route_driver_name(route),
         "schools": schools_list,
         "stops": stops_list,
-        "students": students_list,
-        "total_runs": total_runs,
-    }  # Preserve existing payload shape
+        "students": list(students_by_id.values()),
+        "total_runs": db.query(run_model.Run).filter(run_model.Run.route_id == route_id).count(),
+    }
 
 
 def dispatch_summary(
@@ -169,10 +164,8 @@ def dispatch_summary(
         )
     )
     if operator_id is not None:
-        query = (
-            query
-            .filter(Yard.operator_id == operator_id)
-        )
+        query = query.filter(Yard.operator_id == operator_id)
+
     records = (
         query
         .order_by(
@@ -181,30 +174,27 @@ def dispatch_summary(
             dispatch_model.DispatchRecord.id.asc(),
         )
         .all()
-    )  # Load dispatch rows inside the requested range
+    )
 
     driver_records = {}
-    for r in records:
-        driver_name = r.driver.name if r.driver else None
-        if r.driver_id not in driver_records:
-            driver_records[r.driver_id] = {
-                "driver_id": r.driver_id,
+    for record in records:
+        driver_name = record.driver.name if record.driver else None
+        if record.driver_id not in driver_records:
+            driver_records[record.driver_id] = {
+                "driver_id": record.driver_id,
                 "driver_name": driver_name,
                 "records": [],
             }
-        driver_records[r.driver_id]["records"].append(
+        driver_records[record.driver_id]["records"].append(
             {
-                "work_date": r.work_date,
-                "charter_hours": float(r.charter_hours or 0),
-                "approved": r.approved,
+                "work_date": record.work_date,
+                "charter_hours": float(record.charter_hours or 0),
+                "approved": record.approved,
             }
-        )  # Preserve existing dispatch row data while grouping by driver
+        )
     return list(driver_records.values())
 
 
-# -----------------------------------------------------------
-# Shared report entrypoint
-# -----------------------------------------------------------
 def generate_reports(
     db: Session,
     reports_type: str,
@@ -215,118 +205,71 @@ def generate_reports(
     yard_ids: list[int] | None = None,
 ):
     if reports_type == "driver" and ref_id:
-        return driver_summary(db, ref_id, operator_id=operator_id)  # Return driver reports summary
+        return driver_summary(db, ref_id, operator_id=operator_id)
     if reports_type == "route" and ref_id:
-        return route_summary_execution(db, ref_id)  # Return route reports summary
+        return route_summary_execution(db, ref_id)
     if reports_type == "dispatch" and ref_id and start and end:
-        return dispatch_summary(db, ref_id, start, end, operator_id=operator_id)  # Return dispatch summary
+        return dispatch_summary(db, ref_id, start, end, operator_id=operator_id)
     if reports_type == "run" and ref_id:
-        run = db.get(Run, ref_id)  # Load run for run-level reports
+        run = db.get(Run, ref_id)
         if not run:
-            return {"error": "Run not found"}  # Preserve error-style contract
-
-        assignments = (
-            db.query(StudentRunAssignment)
-            .filter(StudentRunAssignment.run_id == run.id)
-            .all()
-        )  # Load run assignments
-
-        events = (
-            db.query(RunEvent)
-            .filter(RunEvent.run_id == run.id)
-            .all()
-        )  # Load run events
-
-        absence_lookup = {}  # Cache planned absences by student
-        for assignment in assignments:
-            absence_lookup[assignment.student_id] = has_student_bus_absence(
-                assignment.student_id,  # Student identifier
-                run,  # Run object
-                db,  # Database session
-            )
-
-        return run_reports_summary(
-            db,
-            run,
-            assignments,
-            events,
-            absence_lookup,
-        )  # Return run reports summary
+            return {"error": "Run not found"}
+        assignments = db.query(StudentRunAssignment).filter(StudentRunAssignment.run_id == run.id).all()
+        events = db.query(RunEvent).filter(RunEvent.run_id == run.id).all()
+        absence_lookup = {
+            assignment.student_id: has_student_bus_absence(assignment.student_id, run, db)
+            for assignment in assignments
+        }
+        return run_reports_summary(db, run, assignments, events, absence_lookup)
     if reports_type == "date" and start and end:
         return date_summary_execution(db, start, end, operator_id=operator_id)
     if reports_type == "school" and ref_id:
         return school_reports_summary_execution(db, ref_id, yard_ids=yard_ids, operator_id=operator_id)
-    return {"error": "Invalid reports type or parameters"}  # Preserve error-style contract
+    return {"error": "Invalid reports type or parameters"}
 
-# -----------------------------------------------------------
-# Student Reports Status
-# - Derive unified reports state from run events and absence
-# -----------------------------------------------------------
 
 def classify_student_status(assignment, events, absence_lookup):
-    """Return reports status for a student assignment."""  # Unified reports state
-
-    student_id = assignment.student_id  # Student identifier
+    student_id = assignment.student_id
 
     if absence_lookup.get(student_id):
-        return "planned_absent"  # Student planned not to ride
-
+        return "planned_absent"
     if assignment.picked_up and assignment.dropped_off:
-        return "dropped_off"  # Student completed ride
-
+        return "dropped_off"
     if assignment.picked_up:
-        return "picked_up"  # Student boarded but dropoff not yet recorded
-
+        return "picked_up"
     for event in events:
         if event.student_id == student_id and event.event_type == "STUDENT_NO_SHOW":
-            return "no_show"  # Automatically generated no-show
-
-    return "expected"  # Student expected but no event yet
-
+            return "no_show"
+    return "expected"
 
 
-# -----------------------------------------------------------
-# Run Reports Summary
-# - Build student and stop reports view for a run
-# -----------------------------------------------------------
 def run_reports_summary(db, run, assignments, events, absence_lookup):
-    """Return reports status for each student in a run."""  # Reports-layer computation
-
-    results = []  # Output list
-
+    results = []
     for assignment in assignments:
-        status = classify_student_status(assignment, events, absence_lookup)  # Determine status
-
+        status = classify_student_status(assignment, events, absence_lookup)
         results.append(
             {
-                "student_id": assignment.student_id,  # Student identifier
-                "student_name": assignment.student.name if assignment.student else None,  # Student display name
-                "stop_id": assignment.stop_id,  # Assigned stop identifier
-                "stop_name": assignment.stop.name if assignment.stop else None,  # Stop display name
-                "status": status,  # Reports status
+                "student_id": assignment.student_id,
+                "student_name": assignment.student.name if assignment.student else None,
+                "stop_id": assignment.stop_id,
+                "stop_name": assignment.stop.name if assignment.stop else None,
+                "status": status,
             }
         )
 
-    # -----------------------------------------------------------
-    # Stop Reports Totals
-    # - Aggregate reports by stop
-    # -----------------------------------------------------------
-    stop_totals = {}  # Stop-level counters
-
-    for r in results:
-        stop_id = r["stop_id"]  # Current stop identifier
-
+    stop_totals = {}
+    for result in results:
+        stop_id = result["stop_id"]
         if stop_id not in stop_totals:
             stop_totals[stop_id] = {
-                "stop_name": r["stop_name"],  # Stop display name
+                "stop_name": result["stop_name"],
                 "planned_absent": 0,
                 "picked_up": 0,
                 "dropped_off": 0,
                 "no_show": 0,
                 "expected": 0,
             }
-
-        stop_totals[stop_id][r["status"]] += 1  # Increment stop counter
+        stop_totals[stop_id][result["status"]] += 1
 
     totals = {
         "planned_absent": 0,
@@ -334,22 +277,19 @@ def run_reports_summary(db, run, assignments, events, absence_lookup):
         "dropped_off": 0,
         "no_show": 0,
         "expected": 0,
-    }  # Reports counters
-
-    for r in results:
-        totals[r["status"]] += 1  # Increment status count
+    }
+    for result in results:
+        totals[result["status"]] += 1
 
     return {
-        "route_number": run.route.route_number if run.route else None,  # Operational route identifier
-        "run_type": run.run_type,                                       # Flexible run label
-        "students": results,                                            # Student-level reports
-        "totals": totals,                                               # Run totals
-        "stop_totals": stop_totals,                                     # Stop-level totals
+        "route_number": run.route.route_number if run.route else None,
+        "run_type": run.run_type,
+        "students": results,
+        "totals": totals,
+        "stop_totals": stop_totals,
     }
 
-# -----------------------------------------------------------
-# Execution-Scoped Report Helpers
-# -----------------------------------------------------------
+
 def date_summary_execution(db: Session, start: date, end: date, operator_id: int | None = None):
     day_start = datetime.combine(start, time.min)
     day_end = datetime.combine(end, time.max)
@@ -360,75 +300,104 @@ def date_summary_execution(db: Session, start: date, end: date, operator_id: int
         .filter(Run.start_time <= day_end)
     )
     if operator_id is not None:
-        route_f = execution_route_filter(db=db, operator_id=operator_id)
-        accessible_route_ids = db.query(route_model.Route.id).filter(route_f).scalar_subquery()
+        route_filter = execution_route_filter(db=db, operator_id=operator_id)
+        accessible_route_ids = db.query(route_model.Route.id).filter(route_filter).scalar_subquery()
         runs_query = runs_query.filter(Run.route_id.in_(accessible_route_ids))
 
     runs = runs_query.all()
+    results = []
 
-    results = []                                              # Collect run reports summaries
+    for run in runs:
+        assignments = db.query(StudentRunAssignment).filter(StudentRunAssignment.run_id == run.id).all()
+        events = db.query(RunEvent).filter(RunEvent.run_id == run.id).all()
+        absence_lookup = {
+            assignment.student_id: has_student_bus_absence(assignment.student_id, run, db)
+            for assignment in assignments
+        }
+        summary = run_reports_summary(db, run, assignments, events, absence_lookup)
+        if summary and "error" not in summary:
+            results.append(summary)
 
-    for run in runs:                                          # Iterate through runs
-        assignments = (                                               # Load run assignments
-            db.query(StudentRunAssignment)                            # Query runtime assignments
-            .filter(StudentRunAssignment.run_id == run.id)            # Match current run
-            .all()                                                    # Execute query
-        )
-
-        events = (                                                    # Load run events
-            db.query(RunEvent)                                        # Query run events
-            .filter(RunEvent.run_id == run.id)                        # Match current run
-            .all()                                                    # Execute query
-        )
-
-        absence_lookup = {}                                           # Cache planned absences by student
-        for assignment in assignments:
-            absence_lookup[assignment.student_id] = has_student_bus_absence(
-                assignment.student_id,                                # Student identifier
-                run,                                                  # Current run object
-                db,                                                   # Database session
-            )
-
-        summary = run_reports_summary(
-            db,                                                       # Database session
-            run,                                                      # Current run object
-            assignments,                                              # Run assignments
-            events,                                                   # Run events
-            absence_lookup,                                           # Planned absence lookup
-        )
-        
-        if summary and "error" not in summary:                # Skip invalid summaries
-            results.append(summary)                           # Add valid run summary
     return {
-        "date_range": {"start": str(start), "end": str(end)},  # Requested date window
-        "total_runs": len(results),                            # Number of runs returned
-        "runs": results,                                       # Run reports payloads
+        "date_range": {"start": str(start), "end": str(end)},
+        "total_runs": len(results),
+        "runs": results,
     }
-# -----------------------------------------------------------
-# - School status normalizer
-# - Convert operational reports states into school-facing status
-# -----------------------------------------------------------
+
+
 def normalize_school_status(status: str) -> str:
-    """Convert detailed reports state to present/absent for schools."""  # School-safe status view
-
     if status in {"picked_up", "dropped_off"}:
-        return "present"                                                     # Student rode the bus
+        return "present"
+    return "absent"
 
-    return "absent"                                                          # Hide operational absence reason
 
-# -----------------------------------------------------------
-# - School reports summary
-# - Build school-facing reports grouped by route and run
-# - Execution-scoped by default; no yard_ids triggers planning fallback for school reports only.
-# -----------------------------------------------------------
+def _serialize_run_verification(*, verification: RunVerification | None) -> dict:
+    if verification is None:
+        return {
+            "status": "pending",
+            "mismatch_count": 0,
+            "is_confirmed": False,
+            "confirmed_at": None,
+            "confirmed_by_role": None,
+        }
+    return {
+        "status": verification.status,
+        "mismatch_count": verification.mismatch_count,
+        "is_confirmed": verification.status == "confirmed",
+        "confirmed_at": verification.confirmed_at,
+        "confirmed_by_role": verification.confirmed_by_role,
+    }
+
+
+def _build_school_student_row(
+    *,
+    assignment: StudentRunAssignment,
+    direction: str | None,
+    operational_reports_status: str,
+) -> dict:
+    effective_direction = direction or "AM"
+    operational_truth = assignment_operational_school_truth(
+        assignment=assignment,
+        direction=effective_direction,
+    )
+    operational_status = "present" if operational_truth else "absent"
+    school_status = assignment.school_status
+
+    mismatch = False
+    mismatch_reason = None
+    if direction in {"AM", "PM"}:
+        mismatch, mismatch_reason = assignment_mismatch(
+            assignment=assignment,
+            direction=direction,
+        )
+
+    if direction == "PM":
+        status = "present" if assignment.released_by_school else "absent"
+    else:
+        status = school_status if school_status in {"present", "absent"} else operational_status
+
+    return {
+        "student_id": assignment.student_id,
+        "student_name": assignment.student.name if assignment.student else None,
+        "status": status,
+        "operational_status": operational_status,
+        "school_status": school_status,
+        "school_truth": assignment_school_truth(assignment=assignment, direction=effective_direction),
+        "reports_status": operational_reports_status,
+        "mismatch": mismatch,
+        "mismatch_reason": mismatch_reason,
+        "released_by_school": assignment.released_by_school,
+        "boarded_by_driver": assignment.boarded_by_driver,
+        "is_assigned": True,
+    }
+
+
 def school_reports_summary_execution(
     db: Session,
     school_id: int,
     yard_ids: list[int] | None = None,
     operator_id: int | None = None,
 ):
-    # No yard assignment means there is no execution context for school reports yet,
-    # so school visibility falls back to planning scope instead of blacking out.
     school_query = db.query(school_model.School).filter(school_model.School.id == school_id)
     if yard_ids is not None:
         school_query = school_query.filter(yards_accessible_school_filter(yard_ids))
@@ -436,14 +405,15 @@ def school_reports_summary_execution(
         school_query = school_query.filter(accessible_school_filter(operator_id))
     else:
         return {"error": "School not found"}
-    school = school_query.first()  # Load school once for final payload
+
+    school = school_query.first()
     if not school:
         return {"error": "School not found"}
 
-    routes_query = (  # Load routes serving the school
-        db.query(route_model.Route)  # Query routes
-        .join(route_model.route_schools)  # Join route-school association
-        .filter(route_model.route_schools.c.school_id == school_id)  # Keep only this school's routes
+    routes_query = (
+        db.query(route_model.Route)
+        .join(route_model.route_schools)
+        .filter(route_model.route_schools.c.school_id == school_id)
     )
     if yard_ids is not None:
         routes_query = routes_query.filter(yards_accessible_route_filter(yard_ids))
@@ -451,187 +421,101 @@ def school_reports_summary_execution(
         routes_query = routes_query.filter(accessible_route_filter(operator_id))
     else:
         return {"error": "School not found"}
-    routes = routes_query.all()  # Execute query
 
-    results = []  # Collect run reports summaries
+    routes = routes_query.all()
+    results = []
 
-    for route in routes:  # Iterate through routes serving this school
-        runs = (  # Load runs for this route
-            db.query(Run)  # Query runs
-            .filter(Run.route_id == route.id)  # Match current route
-            .all()  # Execute query
-        )
-
-        for run in runs:  # Iterate through route runs
-            school_students = (  # Load full school roster for this route
-                db.query(student_model.Student)  # Query students
-                .filter(student_model.Student.school_id == school_id)  # Keep only this school
-                .filter(student_model.Student.route_id == route.id)  # Keep only this route
-                .all()  # Execute query
-            )
-
-            assignments = (  # Load runtime assignments for this run
-                db.query(StudentRunAssignment)  # Query runtime assignments
-                .filter(StudentRunAssignment.run_id == run.id)  # Match current run
-                .all()  # Execute query
-            )
-
-            events = (  # Load runtime events for this run
-                db.query(RunEvent)  # Query run events
-                .filter(RunEvent.run_id == run.id)  # Match current run
-                .all()  # Execute query
-            )
-
-            # -----------------------------------------------------------
-            # - Map runtime assignments by student id
-            # - Used for filtering and status lookup
-            # -----------------------------------------------------------
-            assignment_by_student_id = {
-                assignment.student_id: assignment
+    for route in routes:
+        runs = db.query(Run).filter(Run.route_id == route.id).all()
+        for run in runs:
+            assignments = db.query(StudentRunAssignment).filter(StudentRunAssignment.run_id == run.id).all()
+            events = db.query(RunEvent).filter(RunEvent.run_id == run.id).all()
+            direction = normalize_run_direction(run.run_type)
+            visible_assignments = [
+                assignment
                 for assignment in assignments
-            }
-
-            # -----------------------------------------------------------
-            # - Visible students for this run
-            # - Show only students assigned to the current run
-            # -----------------------------------------------------------
-            visible_students = [
-                student for student in school_students                     # Route + school roster
-                if student.id in assignment_by_student_id                  # Keep only current run assignments
+                if assignment.student and assignment.student.school_id == school_id
             ]
 
-            absence_lookup = {}  # Planned absence cache for current run
-
-            if run.start_time:  # Only resolve absences when run date exists
-                run_date = run.start_time.date()  # Authoritative run date
-
-                for student in visible_students:  # Preload planned absence for assigned students only
-                    absence_lookup[student.id] = has_student_bus_absence(
-                        student.id,  # Student identifier
-                        run,  # Current run object
-                        db,  # Database session
+            absence_lookup = {}
+            if run.start_time:
+                for assignment in visible_assignments:
+                    absence_lookup[assignment.student_id] = has_student_bus_absence(
+                        assignment.student_id,
+                        run,
+                        db,
                     )
 
-            # -----------------------------------------------------------
-            # - Build student rows (school-facing)
-            # - Apply persisted school status if exists
-            # -----------------------------------------------------------
-            school_students_rows = []  # Final school-facing rows
-            for student in visible_students:                                      # Always build from full school roster
-                assignment = assignment_by_student_id.get(student.id)            # Runtime assignment if present
-
-                if assignment:                                                   # Use runtime state when assigned
-                    operational_status = classify_student_status(
-                        assignment,                                              # Runtime assignment
-                        events,                                                  # Run event history
-                        absence_lookup,                                          # Planned absence lookup
-                    )
-                    final_status = (
-                        assignment.school_status                                 # Persisted school-side override
-                        if assignment.school_status
-                        else normalize_school_status(operational_status)         # Fallback to operational state
-                    )
-                else:
-                    operational_status = (
-                        "planned_absent"
-                        if absence_lookup.get(student.id)
-                        else "expected"
-                    )
-                    final_status = normalize_school_status(operational_status)   # No assignment → derive normally
-
+            school_students_rows = []
+            for assignment in visible_assignments:
+                operational_reports_status = classify_student_status(
+                    assignment,
+                    events,
+                    absence_lookup,
+                )
                 school_students_rows.append(
-                    {
-                        "student_id": student.id,                                # Required for frontend/backend
-                        "student_name": student.name,                            # Display name
-                        "status": final_status,                                  # Final school-facing status
-                        "is_assigned": assignment is not None,                   # Controls button enable/disable
-                    }
+                    _build_school_student_row(
+                        assignment=assignment,
+                        direction=direction,
+                        operational_reports_status=operational_reports_status,
+                    )
                 )
-            school_students_rows.sort(
-                key=lambda s: (s.get("student_name") or "").lower()
-            )  # Stable safe alphabetical order
+            school_students_rows.sort(key=lambda row: (row.get("student_name") or "").lower())
 
-            verification = (
-                db.query(SchoolAttendanceVerification)
-                .filter(
-                    SchoolAttendanceVerification.school_id == school_id,
-                    SchoolAttendanceVerification.run_id == run.id,
+            verification = None
+            if direction is not None:
+                verification = get_run_verification(
+                    db=db,
+                    run_id=run.id,
+                    direction=direction,
                 )
-                .first()
-            )  # Load confirmation for this specific school/run pair
 
-            confirmation = {
-                "is_confirmed": verification is not None,  # True when school confirmed this run
-                "confirmed_at": verification.confirmed_at if verification else None,  # Confirmation timestamp
-                "confirmed_by": verification.confirmed_by if verification else None,  # Optional confirmer name
-            }
-            # -----------------------------------------------------------
-            # - Build run payload
-            # - Add current run to school results
-            # -----------------------------------------------------------
             results.append(
                 {
-                    "id": run.id,                                           # Template uses run.id
-                    "run_id": run.id,                                       # Explicit run identifier
-                    "route_id": route.id,                                   # Route identifier for navigation
-                    "route_number": route.route_number,                     # Grouping key
-                    "driver_name": run.driver.name if run.driver else "Unassigned",  # Display driver
-                    "run_type": run.run_type,                                   # Flexible run label
-                    "date": run.start_time.date().isoformat() if run.start_time else None,    # Run date
-                    "students": school_students_rows,                       # Current school-facing rows
-                    "total_students": len(school_students_rows),            # Total visible students
-                    "total_present": sum(
-                        1 for row in school_students_rows if row.get("status") == "present"
-                    ),                                                      # Present count
-                    "total_absent": sum(
-                        1 for row in school_students_rows if row.get("status") == "absent"
-                    ),                                                      # Absent count
-                    "confirmation": confirmation,                           # Per-school confirmation state
+                    "id": run.id,
+                    "run_id": run.id,
+                    "route_id": route.id,
+                    "route_number": route.route_number,
+                    "driver_name": run.driver.name if run.driver else "Unassigned",
+                    "run_type": run.run_type,
+                    "direction": direction,
+                    "date": run.start_time.date().isoformat() if run.start_time else None,
+                    "students": school_students_rows,
+                    "total_students": len(school_students_rows),
+                    "total_present": sum(1 for row in school_students_rows if row.get("status") == "present"),
+                    "total_absent": sum(1 for row in school_students_rows if row.get("status") == "absent"),
+                    "confirmation": _serialize_run_verification(verification=verification),
                 }
-            )   
+            )
 
-    routes_map = {}  # Group runs by route identifier
-
-    for run_data in results:  # Iterate through run reports results
-        route_id = run_data.get("route_id")  # Extract route identifier
-        route_number = run_data.get("route_number")  # Extract route number for display
-
-        if route_id not in routes_map:  # Initialize route bucket if first time seen
+    routes_map = {}
+    for run_data in results:
+        route_id = run_data.get("route_id")
+        route_number = run_data.get("route_number")
+        if route_id not in routes_map:
             routes_map[route_id] = {
-                "route_id": route_id,  # Route identifier
-                "route_number": route_number,  # Route identifier
-                "total_runs": 0,  # Counter for runs under this route
-                "runs": [],  # Runs belonging to this route
+                "route_id": route_id,
+                "route_number": route_number,
+                "total_runs": 0,
+                "runs": [],
             }
+        run_entry = dict(run_data)
+        run_entry.pop("route_number", None)
+        run_entry.pop("route_id", None)
+        routes_map[route_id]["runs"].append(run_entry)
+        routes_map[route_id]["total_runs"] += 1
 
-        run_entry = dict(run_data)  # Copy run payload
-        run_entry.pop("route_number", None)  # Remove duplicate route number
-        run_entry.pop("route_id", None)  # Remove duplicate route id inside run row
-        routes_map[route_id]["runs"].append(run_entry)  # Attach run to its route group
-        routes_map[route_id]["total_runs"] += 1  # Increment route run count
+    for route_data in routes_map.values():
+        route_data["runs"].sort(key=lambda run: (run.get("date") or "", run.get("run_type") or ""))
 
-    for route_data in routes_map.values():  # Sort runs inside each route group
-        route_data["runs"].sort(
-            key=lambda run: (run.get("date") or "", run.get("run_type") or "")
-        )  # Stable order
-
-    
     return {
-        "school_id": school_id,  # School identifier
-        "school_name": school.name if school else None,  # School name
-        "total_routes": len(routes_map),  # Number of routes serving this school
-        "routes": sorted(
-            routes_map.values(),
-            key=lambda route: route.get("route_number") or "",
-        ),  # Stable route order
+        "school_id": school_id,
+        "school_name": school.name if school else None,
+        "total_routes": len(routes_map),
+        "routes": sorted(routes_map.values(), key=lambda route: route.get("route_number") or ""),
     }
 
 
-# -----------------------------------------------------------
-# Planning Fallback Navigation Helpers
-# - These school-report navigation helpers inherit execution scope by default
-# - and use the same no-yard planning fallback via school_reports_summary_execution.
-# -----------------------------------------------------------
 def school_routes_summary(
     db: Session,
     school_id: int,
@@ -639,22 +523,16 @@ def school_routes_summary(
     operator_id: int | None = None,
 ):
     school_data = school_reports_summary_execution(db, school_id, yard_ids=yard_ids, operator_id=operator_id)
-
-    if school_data.get("school_name") is None:  # Guard unknown school requests
+    if school_data.get("school_name") is None:
         return {"error": "School not found"}
-
     return {
-        "school_id": school_data["school_id"],  # School identifier
-        "school_name": school_data["school_name"],  # School display name
-        "total_routes": school_data["total_routes"],  # Route count
-        "routes": school_data["routes"],  # Route navigation list
+        "school_id": school_data["school_id"],
+        "school_name": school_data["school_name"],
+        "total_routes": school_data["total_routes"],
+        "routes": school_data["routes"],
     }
 
 
-# -----------------------------------------------------------
-# - School route run summary
-# - Returns runs for one selected school route
-# -----------------------------------------------------------
 def school_route_runs_summary(
     db: Session,
     school_id: int,
@@ -663,30 +541,24 @@ def school_route_runs_summary(
     operator_id: int | None = None,
 ):
     school_data = school_reports_summary_execution(db, school_id, yard_ids=yard_ids, operator_id=operator_id)
-
-    if school_data.get("school_name") is None:  # Guard unknown school requests
+    if school_data.get("school_name") is None:
         return {"error": "School not found"}
 
     selected_route = next(
         (route for route in school_data.get("routes", []) if route.get("route_id") == route_id),
         None,
-    )  # Find requested route inside school payload
-
-    if not selected_route:  # Reject routes not assigned to this school
+    )
+    if not selected_route:
         return {"error": "Route not found for school"}
 
     return {
-        "school_id": school_data["school_id"],  # School identifier
-        "school_name": school_data["school_name"],  # School display name
-        "route": selected_route,  # Selected route payload
-        "total_runs": selected_route.get("total_runs", 0),  # Route run count
+        "school_id": school_data["school_id"],
+        "school_name": school_data["school_name"],
+        "route": selected_route,
+        "total_runs": selected_route.get("total_runs", 0),
     }
 
 
-# -----------------------------------------------------------
-# - School single run summary
-# - Returns one selected run for one school
-# -----------------------------------------------------------
 def school_single_run_summary(
     db: Session,
     school_id: int,
@@ -695,22 +567,20 @@ def school_single_run_summary(
     operator_id: int | None = None,
 ):
     school_data = school_reports_summary_execution(db, school_id, yard_ids=yard_ids, operator_id=operator_id)
-
-    if school_data.get("school_name") is None:  # Guard unknown school requests
+    if school_data.get("school_name") is None:
         return {"error": "School not found"}
 
-    for route in school_data.get("routes", []):  # Search all school routes
+    for route in school_data.get("routes", []):
         selected_run = next(
             (run for run in route.get("runs", []) if run.get("run_id") == run_id),
             None,
-        )  # Find requested run inside current route
-
+        )
         if selected_run:
             return {
-                "school_id": school_data["school_id"],  # School identifier
-                "school_name": school_data["school_name"],  # School display name
-                "route": route,  # Selected route payload
-                "run": selected_run,  # Single selected run payload
+                "school_id": school_data["school_id"],
+                "school_name": school_data["school_name"],
+                "route": route,
+                "run": selected_run,
             }
 
-    return {"error": "Run not found for school"}  # Reject unrelated runs
+    return {"error": "Run not found for school"}

@@ -24,6 +24,7 @@ from . import student_bus_absence  # Re-export planned absence router through re
 # -----------------------------------------------------------
 # Utilities
 # -----------------------------------------------------------
+from backend import schemas
 from backend.utils import reports_generator  # Reports utility functions
 from backend.utils.student_bus_absence import has_student_bus_absence  # Planned absence check
 # -----------------------------------------------------------
@@ -37,7 +38,6 @@ from backend.models.student_bus_absence import StudentBusAbsence  # Planned abse
 from backend.models.associations import StudentRunAssignment       # Runtime student assignments
 from backend.models.route import Route                                    # Route model
 from backend.models.yard import Yard
-from backend.models import SchoolAttendanceVerification  # Confirmation model
 from backend.models.operator import Operator
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_operator_scoped_record_or_404
@@ -50,6 +50,13 @@ from backend.utils.planning_scope import (
     get_school_for_execution_or_404,
     operator_has_yard_route_assignments,
 )
+from backend.utils.run_verification import (
+    confirm_run_verification,
+    get_run_verification,
+    get_or_create_run_verification,
+    normalize_run_direction,
+    sync_run_verification,
+)
 
 from pydantic import BaseModel  # Small request body schema
 
@@ -61,6 +68,8 @@ router = APIRouter(prefix="/reports", tags=["Reports"])
 # -----------------------------------------------------------
 class SchoolConfirmationRequest(BaseModel):
     confirmed_by: str | None = None  # Optional school staff name
+
+
 
 
 # -----------------------------------------------------------
@@ -356,6 +365,39 @@ def get_school_reports(
     )
     return _serialize_school_report_summary(reports_data)
 
+
+def _get_verification_run_or_404(
+    *,
+    db: Session,
+    operator: Operator,
+    run_id: int,
+    school_id: int | None = None,
+) -> Run:
+    run = (
+        db.query(Run)
+        .options(joinedload(Run.route).joinedload(Route.schools))
+        .filter(Run.id == run_id)
+        .first()
+    )
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+
+    get_route_for_execution_or_404(
+        db=db,
+        route_id=run.route_id,
+        operator_id=operator.id,
+    )
+
+    if school_id is not None:
+        route_school_ids = {school.id for school in run.route.schools} if run.route else set()
+        if school_id not in route_school_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="School is not assigned to this run route",
+            )
+
+    return run
+
 # -----------------------------------------------------------
 # - Confirm school reports
 # - Create or refresh school confirmation for one school/run pair
@@ -374,70 +416,144 @@ def confirm_school_reports(
     db: Session = Depends(get_db),  # Database session
     operator: Operator = Depends(get_operator_context),
 ):
-    school = get_school_for_execution_or_404(
+    get_school_for_execution_or_404(
         db=db,
         operator_id=operator.id,
         school_id=school_id,
         detail="School not found",
     )
-
-    run = (
-        db.query(Run)
-        .options(joinedload(Run.route).joinedload(Route.schools))
-        .filter(Run.id == run_id)
-        .first()
-    )
-    if not run:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Run not found",
-        )
-    get_route_for_execution_or_404(
+    run = _get_verification_run_or_404(
         db=db,
-        route_id=run.route_id,
-        operator_id=operator.id,
+        operator=operator,
+        run_id=run_id,
+        school_id=school_id,
     )
+    direction = normalize_run_direction(run.run_type)
+    if direction != "AM":
+        raise HTTPException(status_code=400, detail="School confirmation is only available for AM runs")
 
-    route_school_ids = {s.id for s in run.route.schools} if run.route else set()
-    if school_id not in route_school_ids:
+    assignments = (
+        db.query(StudentRunAssignment)
+        .filter(StudentRunAssignment.run_id == run.id)
+        .all()
+    )
+    verification = confirm_run_verification(
+        db=db,
+        run=run,
+        confirmed_by_role="school",
+        assignments=assignments,
+    )
+    if verification.mismatch_count > 0:
+        db.commit()
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="School is not assigned to this run route",
+            status_code=400,
+            detail="Verification mismatch remains for this run",
         )
-
-    verification = (
-        db.query(SchoolAttendanceVerification)
-        .filter(
-            SchoolAttendanceVerification.school_id == school_id,
-            SchoolAttendanceVerification.run_id == run_id,
-        )
-        .first()
-    )
-
-    now = datetime.now(timezone.utc)  # Save UTC confirmation time
-
-    if verification:
-        verification.confirmed_at = now  # Refresh confirmation time
-        verification.confirmed_by = payload.confirmed_by  # Update confirmer
-    else:
-        verification = SchoolAttendanceVerification(
-            school_id=school_id,  # Save school reference
-            run_id=run_id,  # Save run reference
-            confirmed_at=now,  # Save timestamp
-            confirmed_by=payload.confirmed_by,  # Save optional confirmer
-        )
-        db.add(verification)
 
     db.commit()
     db.refresh(verification)
 
     return {
         "message": "School reports confirmed",
-        "school_id": verification.school_id,
-        "run_id": verification.run_id,
+        "school_id": school_id,
+        "run_id": run.id,
+        "status": verification.status,
+        "mismatch_count": verification.mismatch_count,
         "confirmed_at": verification.confirmed_at,
-        "confirmed_by": verification.confirmed_by,
+        "confirmed_by_role": verification.confirmed_by_role,
     }
+
+
+@router.post(
+    "/run/{run_id}/students/{student_id}/pm/release",
+    status_code=status.HTTP_200_OK,
+    summary="Release PM student for boarding",
+    description="Mark one student as released by the school for PM boarding. Idempotent.",
+    response_description="PM release state for this student",
+)
+def release_pm_student(
+    run_id: int,
+    student_id: int,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    run = _get_verification_run_or_404(db=db, operator=operator, run_id=run_id)
+    direction = normalize_run_direction(run.run_type)
+    if direction != "PM":
+        raise HTTPException(status_code=400, detail="PM release is only available for PM runs")
+
+    verification = get_or_create_run_verification(db=db, run_id=run.id, direction=direction)
+    if verification.status == "confirmed":
+        raise HTTPException(status_code=400, detail="Verification already confirmed for this run")
+
+    assignment = (
+        db.query(StudentRunAssignment)
+        .filter(
+            StudentRunAssignment.run_id == run.id,
+            StudentRunAssignment.student_id == student_id,
+        )
+        .first()
+    )
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    assignment.released_by_school = True
+
+    sync_run_verification(db=db, run=run)
+    db.commit()
+    db.refresh(assignment)
+    db.refresh(verification)
+
+    return {
+        "message": "Student released",
+        "run_id": run.id,
+        "student_id": student_id,
+        "released_by_school": assignment.released_by_school,
+        "verification_status": verification.status,
+        "mismatch_count": verification.mismatch_count,
+    }
+
+
+@router.post(
+    "/run/{run_id}/qr/scan-release",
+    status_code=status.HTTP_200_OK,
+    summary="Scan QR for PM release",
+    description="Resolve one assignment by QR token and use the existing PM release flow.",
+    response_description="PM release state for this student",
+)
+def scan_qr_release(
+    run_id: int,
+    payload: schemas.QRScanRequest,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    student = (
+        db.query(Student)
+        .filter(Student.qr_token == payload.qr_token)
+        .first()
+    )
+    if not student:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    if not student.qr_active:
+        raise HTTPException(status_code=403, detail="QR token is inactive")
+
+    assignment = (
+        db.query(StudentRunAssignment)
+        .filter(
+            StudentRunAssignment.run_id == run_id,
+            StudentRunAssignment.student_id == student.id,
+        )
+        .first()
+    )
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    return release_pm_student(
+        run_id=run_id,
+        student_id=assignment.student_id,
+        db=db,
+        operator=operator,
+    )
 # -----------------------------------------------------------
 # - Absences by date
 # - Return planned bus absences for one date
@@ -607,83 +723,44 @@ def get_school_reports_by_date(
     db: Session = Depends(get_db),                                               # Database session
     operator: Operator = Depends(get_operator_context),
 ):
-    route_filter = _get_execution_route_filter(db=db, operator_id=operator.id)
     school = get_school_for_execution_or_404(
         db=db,
         operator_id=operator.id,
         school_id=school_id,
         detail="School not found",
     )
-
-    runs = (
-        db.query(Run)                                                            # Query runs
-        .join(Route, Route.id == Run.route_id)
-        .filter(Run.route.has(Route.schools.any(School.id == school_id)))        # Only runs whose route includes this school       
-        .filter(route_filter)
-        .filter(Run.start_time >= target_date)                                   # On or after start of requested day
-        .filter(Run.start_time < (target_date + timedelta(days=1)))              # Before next day
-        .order_by(Run.start_time.asc(), Run.id.asc())                            # Stable ordering
-        .all()                                                                   # Materialize list
+    yard_ids = _get_active_execution_yard_ids(db=db, operator_id=operator.id)
+    summary = reports_generator.school_reports_summary_execution(
+        db=db,
+        school_id=school_id,
+        yard_ids=yard_ids,
+        operator_id=operator.id,
     )
-
-    routes_map = {}
-
-    for run in runs:                                                             # Process each school run
-        assignments = (
-            db.query(StudentRunAssignment)                                       # Query runtime assignments
-            .options(joinedload(StudentRunAssignment.student))                   # Load student relation
-            .filter(StudentRunAssignment.run_id == run.id)                       # Only this run
-            .order_by(StudentRunAssignment.id.asc())                             # Stable ordering
-            .all()                                                               # Materialize list
-        )
-
-        route = run.route
-        route_id = route.id if route else None
-        if route_id not in routes_map:
-            routes_map[route_id] = {
-                "route_id": route_id,
-                "route_number": route.route_number if route else None,
-                "total_runs": 0,
-                "runs": [],
-            }
-
-        students = []
-        for assignment in assignments:                                           # Build school-facing rows
-            students.append(
-                {
-                    "student_id": assignment.student_id,
-                    "student_name": assignment.student.name if assignment.student else None,  # Student name
-                    "status": "present" if assignment.picked_up else "absent",                # School-facing status
-                }
-            )
-        routes_map[route_id]["runs"].append(
+    target_date_iso = target_date.isoformat()
+    filtered_routes = []
+    for route in summary.get("routes", []):
+        route_runs = [
+            run_data
+            for run_data in route.get("runs", [])
+            if run_data.get("date") == target_date_iso
+        ]
+        if not route_runs:
+            continue
+        filtered_routes.append(
             {
-                "run_id": run.id,
-                "run_type": run.run_type,
-                "date": run.start_time.date() if run.start_time else target_date,
-                "students": students,
-                "total_students": len(students),
-                "total_present": sum(1 for student in students if student["status"] == "present"),
-                "total_absent": sum(1 for student in students if student["status"] == "absent"),
+                "route_id": route.get("route_id"),
+                "route_number": route.get("route_number"),
+                "total_runs": len(route_runs),
+                "runs": route_runs,
             }
-        )
-        routes_map[route_id]["total_runs"] += 1
-
-    routes = sorted(
-        routes_map.values(),
-        key=lambda route: route.get("route_number") or "",
-    )
-    for route_data in routes:
-        route_data["runs"].sort(
-            key=lambda run_data: (run_data.get("date") or target_date, run_data.get("run_type") or "")
         )
 
     return {
         "school_id": school.id,
-        "school_name": school.name,                                             # School name
-        "date": target_date,                                                    # Requested date
-        "total_routes": len(routes),
-        "routes": routes,
+        "school_name": school.name,
+        "date": target_date,
+        "total_routes": len(filtered_routes),
+        "routes": filtered_routes,
     }
 
 # -----------------------------------------------------------
@@ -820,9 +897,31 @@ class SchoolStatusUpdate(BaseModel):                       # Canonical request b
     status: str                                            # "present" or "absent"
 
 
+@router.post(
+    "/run/{run_id}/students/{student_id}/school-status",
+    status_code=status.HTTP_200_OK,
+    summary="Update AM school status for one student",
+    description="Record school-side attendance (present/absent) for one student on an AM run.",
+    response_description="School status updated",
+)
+def update_run_student_school_status(
+    run_id: int,
+    student_id: int,
+    payload: SchoolStatusUpdate,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(get_operator_context),
+):
+    return update_school_status_for_assignment(
+        run_id=run_id,
+        student_id=student_id,
+        status_value=payload.status,
+        db=db,
+        operator=operator,
+    )
+
+
 # -------------------------------------------------------------------------
-# School status update helper
-# Reuse one validation path across canonical and compatibility endpoints
+# School status update helper — AM only
 # -------------------------------------------------------------------------
 def update_school_status_for_assignment(
     *,
@@ -867,28 +966,45 @@ def update_school_status_for_assignment(
         operator_id=operator.id,
     )                                                       # Enforce route-level operator visibility
 
-    school_id = assignment.student.school_id if assignment.student else None   # Resolve owning school
-    verification = None                                                        # Default no confirmation
-
-    if school_id is not None:                                                  # Check school/run confirmation
-        verification = (
-            db.query(SchoolAttendanceVerification)
-            .filter(
-                SchoolAttendanceVerification.school_id == school_id,            # Match school
-                SchoolAttendanceVerification.run_id == run_id,                  # Match run
-            )
-            .first()
+    direction = normalize_run_direction(assignment.run.run_type)
+    if direction == "PM":
+        raise HTTPException(
+            status_code=400,
+            detail="Use POST /reports/run/{run_id}/students/{student_id}/pm/release for PM runs",
         )
 
-    if verification:                                                           # Lock updates after confirmation
+    verification = None
+    if direction is not None:
+        verification = get_run_verification(
+            db=db,
+            run_id=run_id,
+            direction=direction,
+        )
+
+    if verification and verification.status == "confirmed":
         raise HTTPException(
             status_code=400,
             detail="Reports already confirmed for this run",
         )
 
-    assignment.school_status = status_value                                    # Save school-layer status
+    assignment.school_status = status_value
 
-    db.commit()                                                                # Persist change
+    if direction is not None:
+        sync_run_verification(
+            db=db,
+            run=assignment.run,
+            assignments=[assignment] + [
+                row
+                for row in (
+                    db.query(StudentRunAssignment)
+                    .filter(StudentRunAssignment.run_id == run_id)
+                    .all()
+                )
+                if row.id != assignment.id
+            ],
+        )
+
+    db.commit()
 
     return {
         "message": "Status updated",

@@ -1,4 +1,6 @@
-from sqlalchemy import Column, Integer, String, ForeignKey
+from uuid import uuid4
+
+from sqlalchemy import Boolean, Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -16,6 +18,8 @@ class Student(Base):
     route_id = Column(Integer, ForeignKey("routes.id", ondelete="SET NULL"), nullable=True)
     stop_id = Column(Integer, ForeignKey("stops.id", ondelete="SET NULL"), nullable=True)
     notification_distance_meters = Column(Integer, default=500)
+    qr_token = Column(String(36), unique=True, index=True, nullable=False, default=lambda: str(uuid4()))
+    qr_active = Column(Boolean, default=True, nullable=False)
 
     district = relationship("District", back_populates="students")
     school = relationship("School", back_populates="students")
