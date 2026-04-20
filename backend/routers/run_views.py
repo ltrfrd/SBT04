@@ -38,12 +38,11 @@ from backend.utils.operator_scope import (
 )
 from backend.utils.student_bus_absence import apply_run_absence_filter
 from backend.utils.planning_scope import accessible_route_filter, execution_route_filter, get_route_for_execution_or_404
-from backend.routers.run_helpers import (
+from backend.routers.run_execution_helpers import (
     EXECUTION_RUN_BLOCKED_DETAIL,
     _build_run_occupancy_counts,
     _build_running_board_stops,
     _get_execution_scoped_run_or_404,
-    _get_operator_scoped_run_or_404,
     _get_run_assignments,
     _group_running_board_students,
     _serialize_run_detail,
@@ -54,6 +53,9 @@ from backend.routers.run_helpers import (
 router = APIRouter(tags=["Runs"])
 
 
+# -----------------------------------------------------------
+# Execution Read Endpoints
+# -----------------------------------------------------------
 # -----------------------------------------------------------
 # - List runs by route
 # - Return only runs that belong to the selected route
@@ -105,6 +107,9 @@ def get_all_runs(
     return [_serialize_run_list_item(run) for run in runs]     # Return run summary list
 
 
+# -----------------------------------------------------------
+# Execution Read Endpoints With Planning Cross-Checks
+# -----------------------------------------------------------
 # =============================================================================
 # GET /runs/active
 # Return the current active run for one driver

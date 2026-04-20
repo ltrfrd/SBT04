@@ -14,7 +14,7 @@ from backend.routers.route_views import router as route_views_router
 
 
 router = APIRouter(prefix="/routes", tags=["Routes"])
+router.include_router(route_views_router)
 router.include_router(route_actions_router)
 router.include_router(route_lifecycle_router)
 router.include_router(route_setup_routes_router)
-router.include_router(route_views_router)

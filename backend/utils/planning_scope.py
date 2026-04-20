@@ -17,7 +17,7 @@ EXECUTION_ROUTE_BLOCKED_DETAIL = "Route is not assigned to a yard for execution 
 
 
 # -----------------------------------------------------------
-# School-domain planning scope helpers
+# Planning Alignment Helpers
 # -----------------------------------------------------------
 def planning_relationship_matches(
     *,
@@ -50,10 +50,27 @@ def validate_planning_alignment(
         raise HTTPException(status_code=400, detail=detail)
 
 
+# -----------------------------------------------------------
+# Planning Visibility Filters
+# -----------------------------------------------------------
 def accessible_route_filter(operator_id: int):
     return Route.operator_access.any(OperatorRouteAccess.operator_id == operator_id)
 
 
+def accessible_school_filter(operator_id: int):
+    return School.routes.any(accessible_route_filter(operator_id))
+
+
+def accessible_student_filter(operator_id: int):
+    return or_(
+        Student.route.has(accessible_route_filter(operator_id)),
+        Student.school.has(School.routes.any(accessible_route_filter(operator_id))),
+    )
+
+
+# -----------------------------------------------------------
+# Execution Visibility Filters
+# -----------------------------------------------------------
 def yard_accessible_route_filter(yard_id: int):
     return Route.yards.any(Yard.id == yard_id)
 
@@ -130,17 +147,6 @@ def yards_accessible_student_filter(yard_ids: list[int]):
     ])
 
 
-def accessible_school_filter(operator_id: int):
-    return School.routes.any(accessible_route_filter(operator_id))
-
-
-def accessible_student_filter(operator_id: int):
-    return or_(
-        Student.route.has(accessible_route_filter(operator_id)),
-        Student.school.has(School.routes.any(accessible_route_filter(operator_id))),
-    )
-
-
 def execution_route_filter(
     *,
     db: Session,
@@ -165,6 +171,9 @@ def execution_student_filter(
     return yards_accessible_student_filter(get_operator_yard_ids(db=db, operator_id=operator_id))
 
 
+# -----------------------------------------------------------
+# Planning Lookup Helpers
+# -----------------------------------------------------------
 def get_route_with_schools_or_404(
     *,
     db: Session,
@@ -199,6 +208,9 @@ def get_school_for_planning_or_404(
     return school
 
 
+# -----------------------------------------------------------
+# Execution Lookup Helpers
+# -----------------------------------------------------------
 def get_route_for_yards_or_404(
     *,
     db: Session,
@@ -402,6 +414,9 @@ def get_schools_for_route_attachment_or_404(
     return schools
 
 
+# -----------------------------------------------------------
+# Planning Route-Nested Context Helpers
+# -----------------------------------------------------------
 def get_route_run_or_404(
     *,
     route_id: int,

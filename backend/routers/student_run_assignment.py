@@ -11,19 +11,20 @@ from sqlalchemy.orm import Session
 from database import get_db
 from backend.models.operator import Operator
 from backend.models.associations import StudentRunAssignment
-from backend.models import student as student_model
 from backend.models import run as run_model
 from backend.schemas.student_run_assignment import (
     StudentRunAssignmentCreate,
     StudentRunAssignmentOut,
 )
 from backend.utils.operator_scope import get_operator_context
-from backend.utils.operator_scope import get_operator_scoped_record_or_404
 from backend.utils.operator_scope import get_operator_scoped_route_or_404
 from backend.utils.planning_scope import get_student_for_planning_or_404
 
 # -----------------------------------------------------------
 # Router setup
+# Internal compatibility router:
+# - kept registered because existing flows/tests still call the read endpoints directly
+# - direct mutation endpoints remain retired
 # -----------------------------------------------------------
 router = APIRouter(prefix="/student-run-assignments", tags=["StudentRunAssignments"])
 

@@ -47,6 +47,9 @@ def _get_or_create_operator_yard(db: Session, operator_id: int) -> Yard:
 
 
 # -----------------------------------------------------------
+# Mixed Planning + Execution Support Endpoints
+# -----------------------------------------------------------
+# -----------------------------------------------------------
 # - Unique bus field guard
 # - Keep stored bus number and license plate conflicts explicit
 # -----------------------------------------------------------
@@ -178,6 +181,8 @@ def get_bus(
     )
 
     bus_operator_id = get_bus_operator_id(bus)
+
+    # Related route detail remains planning-visible on purpose; execution gating lives on run surfaces.
     visible_routes = (
         db.query(Route)
         .options(

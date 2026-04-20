@@ -17,7 +17,7 @@ from backend.models.route import Route  # Route model for active bus resolution
 from backend.models.run import Run  # Run model for context lookup
 from backend.models.operator import Operator
 from backend.utils.operator_scope import get_operator_context
-from backend.routers.run_helpers import _get_execution_scoped_run_or_404
+from backend.routers.run_execution_helpers import _get_execution_scoped_run_or_404
 from backend.utils.posttrip_alerts import sync_posttrip_issue_alerts, sync_posttrip_neglect_alert_if_needed  # Post-trip alert sync helpers
 from backend.utils.posttrip_photos import (
     PHASE1,
@@ -34,6 +34,9 @@ from backend.utils.posttrip_status import evaluate_posttrip_phase2_status  # Rea
 router = APIRouter(prefix="/runs", tags=["Post-Trip Inspection"])
 
 
+# -----------------------------------------------------------
+# Execution Post-Trip Helpers
+# -----------------------------------------------------------
 # -----------------------------------------------------------
 # - Post-trip helpers
 # - Resolve run context and the linked post-trip row safely
@@ -165,6 +168,9 @@ def _close_uploads(*uploads: UploadFile | None) -> None:
         upload.file.close()
 
 
+# -----------------------------------------------------------
+# Execution Post-Trip Endpoints
+# -----------------------------------------------------------
 # -----------------------------------------------------------
 # - Submit post-trip phase 1
 # - Create or update the run's post-trip record

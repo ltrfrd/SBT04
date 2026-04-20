@@ -15,7 +15,7 @@ from backend.models.operator import Operator
 from backend.models.route import Route
 from backend.routers.route_helpers import _serialize_route
 from backend.routers.route_helpers import _serialize_route_detail
-from backend.routers.run_helpers import _serialize_run
+from backend.routers.run_execution_helpers import _serialize_run
 from backend.utils.planning_scope import accessible_route_filter
 from backend.utils.operator_scope import get_operator_context
 
@@ -23,6 +23,9 @@ from backend.utils.operator_scope import get_operator_context
 router = APIRouter(tags=["Routes"])
 
 
+# -----------------------------------------------------------
+# Planning Read Endpoints
+# -----------------------------------------------------------
 @router.get(
     "/",
     response_model=List[schemas.RouteOut],

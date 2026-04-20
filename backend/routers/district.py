@@ -26,7 +26,6 @@ from backend.utils.operator_scope import get_operator_scoped_route_or_404
 from backend.utils.planning_scope import accessible_route_filter, accessible_school_filter
 from backend.utils.planning_scope import get_route_run_or_404
 from backend.utils.planning_scope import get_route_stop_or_404
-from backend.utils.planning_scope import get_route_student_or_404
 
 
 router = APIRouter(prefix="/districts", tags=["Districts"])
@@ -39,6 +38,9 @@ def _get_district_or_404(*, db: Session, district_id: int) -> District:
     return district
 
 
+# -----------------------------------------------------------
+# District Planning Workspace Endpoints
+# -----------------------------------------------------------
 @router.get(
     "/",
     response_model=list[schemas.DistrictOut],
@@ -497,6 +499,9 @@ def delete_district_route_stop(
     )
 
 
+# -----------------------------------------------------------
+# Retired Planning Compatibility Endpoints
+# -----------------------------------------------------------
 @router.post(
     "/{district_id}/routes/{route_id}/students",
     response_model=schemas.StudentOut,

@@ -38,6 +38,10 @@ router = APIRouter(
     tags=["Students"],
 )
 
+
+# -----------------------------------------------------------
+# Planning Validation Helpers
+# -----------------------------------------------------------
 def _validate_student_school_planning_alignment(
     *,
     student_district_id: int | None,
@@ -312,6 +316,9 @@ def _update_student_record(
     return student
 
 
+# -----------------------------------------------------------
+# Planning Read and Maintenance Endpoints
+# -----------------------------------------------------------
 @router.get(
     "/",
     response_model=List[schemas.StudentOut],

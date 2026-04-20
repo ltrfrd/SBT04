@@ -21,6 +21,9 @@ from backend.utils.pretrip_alerts import sync_pretrip_issue_alerts  # Pre-trip a
 router = APIRouter(prefix="/pretrips", tags=["Pre-Trip Inspection"])
 
 
+# -----------------------------------------------------------
+# Execution Pre-Trip Helpers
+# -----------------------------------------------------------
 def _get_pretrip_or_404(pretrip_id: int, db: Session, operator_id: int) -> PreTripInspection:
     inspection = (
         db.query(PreTripInspection)
@@ -144,6 +147,9 @@ def _serialize_pretrip_snapshot(inspection: PreTripInspection) -> dict:
     }                                                          # Preserve the prior final payload before correction
 
 
+# -----------------------------------------------------------
+# Execution Pre-Trip Endpoints
+# -----------------------------------------------------------
 # -----------------------------------------------------------
 # - Create Pre-Trip Inspection
 # - Submit one final bus/day Pre-Trip Inspection with nested defects

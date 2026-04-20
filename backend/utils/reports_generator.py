@@ -348,7 +348,7 @@ def run_reports_summary(db, run, assignments, events, absence_lookup):
     }
 
 # -----------------------------------------------------------
-# School-scope report helpers
+# Execution-Scoped Report Helpers
 # -----------------------------------------------------------
 def date_summary_execution(db: Session, start: date, end: date, operator_id: int | None = None):
     day_start = datetime.combine(start, time.min)
@@ -419,6 +419,7 @@ def normalize_school_status(status: str) -> str:
 # -----------------------------------------------------------
 # - School reports summary
 # - Build school-facing reports grouped by route and run
+# - Execution-scoped by default; no yard_ids triggers planning fallback for school reports only.
 # -----------------------------------------------------------
 def school_reports_summary_execution(
     db: Session,
@@ -426,6 +427,8 @@ def school_reports_summary_execution(
     yard_ids: list[int] | None = None,
     operator_id: int | None = None,
 ):
+    # No yard assignment means there is no execution context for school reports yet,
+    # so school visibility falls back to planning scope instead of blacking out.
     school_query = db.query(school_model.School).filter(school_model.School.id == school_id)
     if yard_ids is not None:
         school_query = school_query.filter(yards_accessible_school_filter(yard_ids))
@@ -625,8 +628,9 @@ def school_reports_summary_execution(
 
 
 # -----------------------------------------------------------
-# - School route navigation summary
-# - Returns routes assigned to one school
+# Planning Fallback Navigation Helpers
+# - These school-report navigation helpers inherit execution scope by default
+# - and use the same no-yard planning fallback via school_reports_summary_execution.
 # -----------------------------------------------------------
 def school_routes_summary(
     db: Session,

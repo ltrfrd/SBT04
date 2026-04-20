@@ -17,7 +17,7 @@ from backend.models.student import Student
 from backend.routers.reports import SchoolStatusUpdate
 from backend.utils.db_errors import raise_conflict_if_unique
 from backend.utils.operator_scope import get_operator_context
-from backend.routers.run_helpers import (
+from backend.routers.run_setup_helpers import (
     _create_stop_context_student,
     _get_operator_scoped_run_or_404,
     _get_run_stop_or_404,

@@ -31,6 +31,9 @@ from backend.utils.route_driver_assignment import resolve_primary_route_driver_a
 from backend.utils.route_driver_assignment import resolve_route_driver_assignment
 
 
+# -----------------------------------------------------------
+# Route Planning Helpers
+# -----------------------------------------------------------
 def _route_identity_query(
     *,
     db: Session,

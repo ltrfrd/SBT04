@@ -45,6 +45,9 @@ def _get_or_create_operator_yard(db: Session, operator_id: int) -> Yard:
 
 
 # -----------------------------------------------------------
+# Mixed Planning + Execution Support Endpoints
+# -----------------------------------------------------------
+# -----------------------------------------------------------
 # - Create driver
 # - Register new driver in the system
 # -----------------------------------------------------------
@@ -151,6 +154,8 @@ def get_driver_routes(
     )
 
     driver_operator_id = get_driver_operator_id(driver)
+
+    # Related route contexts remain planning-visible on purpose; execution gating lives on run surfaces.
     routes = (
         db.query(Route)
         .join(RouteDriverAssignment, RouteDriverAssignment.route_id == Route.id)

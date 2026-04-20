@@ -33,6 +33,11 @@ router = APIRouter(prefix="/stops", tags=["Stops"])
 
 
 # -----------------------------------------------------------
+# Bridge Between Planning and Execution
+# - Run-context creation/update paths are planning/setup only
+# - Generic stop reads still apply execution visibility
+# -----------------------------------------------------------
+# -----------------------------------------------------------
 # - Stop reorder helpers
 # - Keep run stop sequences contiguous during inserts and moves
 # -----------------------------------------------------------

@@ -28,15 +28,17 @@ from backend.utils.operator_scope import (
     get_operator_scoped_driver_or_404,
 )
 from backend.utils.pretrip_alerts import create_missing_pretrip_alert_if_needed
-from backend.routers.run_helpers import (
-    _assert_unique_route_run_type,
+from backend.routers.run_execution_helpers import (
     EXECUTION_RUN_BLOCKED_DETAIL,
     _get_execution_scoped_run_or_404,
-    _get_operator_scoped_run_or_404,
     _get_run_assignments,
     _require_posttrip_phase1_and_phase2_completed,
     _resolve_run_driver,
     _serialize_run,
+)
+from backend.routers.run_setup_helpers import (
+    _assert_unique_route_run_type,
+    _get_operator_scoped_run_or_404,
 )
 
 
@@ -53,6 +55,9 @@ def _raise_district_planning_path_retired() -> None:
     )
 
 
+# -----------------------------------------------------------
+# Execution Lifecycle Endpoints
+# -----------------------------------------------------------
 # -----------------------------------------------------------
 # - Start run
 # - Start a prepared run only
@@ -398,6 +403,9 @@ def complete_run(
     )
 
 
+# -----------------------------------------------------------
+# Retired Planning Compatibility Endpoints
+# -----------------------------------------------------------
 # -----------------------------------------------------------
 # - Update planned run
 # - Correct the run type before the run has started

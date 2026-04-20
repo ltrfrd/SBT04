@@ -49,8 +49,6 @@ from backend.utils.planning_scope import (
     get_school_for_planning_or_404,
     get_school_for_execution_or_404,
     operator_has_yard_route_assignments,
-    yards_accessible_route_filter,
-    yards_accessible_student_filter,
 )
 
 from pydantic import BaseModel  # Small request body schema
@@ -65,6 +63,11 @@ class SchoolConfirmationRequest(BaseModel):
     confirmed_by: str | None = None  # Optional school staff name
 
 
+# -----------------------------------------------------------
+# Reports Access Model Helpers
+# - Reports are execution-scoped by default.
+# - School reports fall back to planning scope only when no yard assignment exists.
+# -----------------------------------------------------------
 def _get_execution_yard_ids(
     *,
     db: Session,
@@ -88,8 +91,6 @@ def _get_execution_student_filter(
     db: Session,
     operator_id: int,
 ):
-    if operator_has_yard_route_assignments(db=db, operator_id=operator_id):
-        return yards_accessible_student_filter(_get_execution_yard_ids(db=db, operator_id=operator_id))
     return execution_student_filter(db=db, operator_id=operator_id)
 
 
@@ -98,8 +99,6 @@ def _get_execution_route_filter(
     db: Session,
     operator_id: int,
 ):
-    if operator_has_yard_route_assignments(db=db, operator_id=operator_id):
-        return yards_accessible_route_filter(_get_execution_yard_ids(db=db, operator_id=operator_id))
     return execution_route_filter(db=db, operator_id=operator_id)
 
 
@@ -331,6 +330,8 @@ def get_school_reports(
     db: Session = Depends(get_db),                            # Database session
     operator: Operator = Depends(get_operator_context),
 ):
+    # School reports are execution-scoped by default, but explicitly fall back to planning visibility
+    # when the operator has no active yard-route execution context.
     yard_ids = _get_active_execution_yard_ids(db=db, operator_id=operator.id)
     if yard_ids is not None:
         get_school_for_execution_or_404(
@@ -702,6 +703,8 @@ def get_school_mobile_reports(
     db: Session = Depends(get_db),                            # Database session
     operator: Operator = Depends(get_operator_context),
 ):
+    # Mobile school reports use the same access model: execution scope by default,
+    # with no-yard planning fallback for school-level navigation only.
     yard_ids = _get_active_execution_yard_ids(db=db, operator_id=operator.id)
     report_data = reports_generator.school_routes_summary(
         db=db,                                                 # Pass DB session
@@ -742,6 +745,8 @@ def get_school_mobile_route_runs(
     db: Session = Depends(get_db),                            # Database session
     operator: Operator = Depends(get_operator_context),
 ):
+    # Mobile school reports use the same access model: execution scope by default,
+    # with no-yard planning fallback for school-level navigation only.
     yard_ids = _get_active_execution_yard_ids(db=db, operator_id=operator.id)
     report_data = reports_generator.school_route_runs_summary(
         db=db,                                                # Pass DB session
@@ -784,6 +789,8 @@ def get_school_mobile_single_run_reports(
     db: Session = Depends(get_db),                            # Database session
     operator: Operator = Depends(get_operator_context),
 ):
+    # Mobile school reports use the same access model: execution scope by default,
+    # with no-yard planning fallback for school-level navigation only.
     yard_ids = _get_active_execution_yard_ids(db=db, operator_id=operator.id)
     report_data = reports_generator.school_single_run_summary(
         db=db,                                                # Pass DB session

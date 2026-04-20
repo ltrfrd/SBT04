@@ -14,7 +14,7 @@ from backend.routers.run_views import router as run_views_router
 
 
 router = APIRouter(prefix="/runs", tags=["Runs"])
-router.include_router(run_actions_router)
-router.include_router(run_lifecycle_router)
 router.include_router(run_setup_routes_router)
 router.include_router(run_views_router)
+router.include_router(run_lifecycle_router)
+router.include_router(run_actions_router)

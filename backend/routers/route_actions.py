@@ -22,6 +22,9 @@ from backend.utils.operator_scope import get_operator_scoped_route_or_404
 router = APIRouter(tags=["Routes"])
 
 
+# -----------------------------------------------------------
+# Planning Route Action Endpoints
+# -----------------------------------------------------------
 @router.post(
     "/{route_id}/assign_bus/{bus_id}",
     response_model=RouteOut,

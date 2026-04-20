@@ -29,6 +29,9 @@ class YardOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# -----------------------------------------------------------
+# Execution Support Endpoints
+# -----------------------------------------------------------
 @router.post("/", response_model=YardOut, status_code=status.HTTP_201_CREATED)
 def create_yard(
     payload: YardCreate,

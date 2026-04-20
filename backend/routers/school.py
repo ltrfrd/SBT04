@@ -12,15 +12,12 @@ from database import get_db
 from backend import schemas
 from backend.models.district import District
 from backend.models.operator import Operator
-from backend.models import route as route_model
 from backend.models import school as school_model
 from backend.utils.operator_scope import get_operator_context
-from backend.utils.operator_scope import get_operator_scoped_route_or_404
 from backend.utils.planning_scope import (
     accessible_school_filter,
     get_school_for_planning_or_404,
     validate_planning_alignment,
-    validate_route_school_alignment,
 )
 
 
@@ -39,6 +36,7 @@ def _raise_district_planning_path_retired() -> None:
         ),
     )
 
+
 def _get_school_for_planning_mutation_or_404(
     *,
     db: Session,
@@ -52,33 +50,6 @@ def _get_school_for_planning_mutation_or_404(
         operator_id=operator_id,
         detail=detail,
     )
-
-
-def _get_school_route_link_context_or_404(
-    *,
-    db: Session,
-    school_id: int,
-    route_id: int,
-    operator_id: int,
-) -> tuple[school_model.School, route_model.Route]:
-    school = _get_school_for_planning_mutation_or_404(
-        db=db,
-        operator_id=operator_id,
-        detail="School or Route not found",
-        school_id=school_id,
-    )
-    route = get_operator_scoped_route_or_404(
-        db=db,
-        route_id=route_id,
-        operator_id=operator_id,
-        required_access="read",
-    )
-    validate_route_school_alignment(
-        route_district_id=route.district_id,
-        route_operator_id=None,
-        school=school,
-    )
-    return school, route
 
 
 @router.post(
@@ -103,6 +74,9 @@ def create_school(
     return new_school
 
 
+# -----------------------------------------------------------
+# Planning CRUD
+# -----------------------------------------------------------
 def create_school_record(
     *,
     school: schemas.SchoolCreate,
@@ -229,6 +203,9 @@ def delete_school(
     return None
 
 
+# -----------------------------------------------------------
+# Retired Planning Compatibility Endpoints
+# -----------------------------------------------------------
 @router.post(
     "/{school_id}/assign_route/{route_id}",
     response_model=schemas.SchoolOut,
@@ -241,21 +218,9 @@ def assign_route_to_school(
     school_id: int,
     route_id: int,
     db: Session = Depends(get_db),
-    operator: Operator = Depends(get_operator_context),
+    _: Operator = Depends(get_operator_context),
 ):
     _raise_district_planning_path_retired()
-    school, route = _get_school_route_link_context_or_404(
-        db=db,
-        school_id=school_id,
-        route_id=route_id,
-        operator_id=operator.id,
-    )
-
-    if school not in route.schools:
-        route.schools.append(school)
-        db.commit()
-    db.refresh(school)
-    return school
 
 
 @router.delete(
@@ -270,19 +235,7 @@ def unassign_route_from_school(
     school_id: int,
     route_id: int,
     db: Session = Depends(get_db),
-    operator: Operator = Depends(get_operator_context),
+    _: Operator = Depends(get_operator_context),
 ):
     _raise_district_planning_path_retired()
-    school, route = _get_school_route_link_context_or_404(
-        db=db,
-        school_id=school_id,
-        route_id=route_id,
-        operator_id=operator.id,
-    )
-
-    if school in route.schools:
-        route.schools.remove(school)
-        db.commit()
-    db.refresh(school)
-    return school
 

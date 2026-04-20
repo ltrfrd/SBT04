@@ -84,24 +84,28 @@ app.mount(settings.MEDIA_URL_PREFIX, StaticFiles(directory=settings.MEDIA_ROOT),
 # -----------------------------------------------------------
 # ROUTERS REGISTRATION
 # -----------------------------------------------------------
-# Yard domain routers
-app.include_router(yard.router)
-app.include_router(driver.router)
-app.include_router(bus.router)
-app.include_router(dispatch.router)
-app.include_router(pretrip.router)
-app.include_router(posttrip.router)
-app.include_router(reports.router)
+# Session / auth router
 app.include_router(session.router)
 
-# School domain routers
+# Planning routers
 app.include_router(district.router)
 app.include_router(school.router)
-app.include_router(student.router)
 app.include_router(route.router)
-app.include_router(stop.router)
 app.include_router(run.router)
+app.include_router(stop.router)
+app.include_router(student.router)
 app.include_router(student_run_assignment.router)
+
+# Execution routers
+app.include_router(yard.router)
+app.include_router(dispatch.router)
+app.include_router(driver.router)
+app.include_router(bus.router)
+app.include_router(pretrip.router)
+app.include_router(posttrip.router)
+
+# Reports routers
+app.include_router(reports.router)
 app.include_router(reports.student_bus_absence_router)
 
 # UI and realtime routers
