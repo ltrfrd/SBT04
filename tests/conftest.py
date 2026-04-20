@@ -346,6 +346,7 @@ def client(db_engine):
             self._wrapped_client = wrapped_client
             self._operator_id: int | None = 1
             self._school_district_ids: dict[int, int] = {}
+            self._yard_ids: dict[int, int] = {}
 
         def _current_operator_id(self):
             return self._operator_id or 1
@@ -363,6 +364,28 @@ def client(db_engine):
                 run_id,
                 operator_id=self._current_operator_id(),
             )
+
+        def ensure_current_operator_yard_id(self, *, name: str | None = None) -> int:
+            operator_id = self._current_operator_id()
+            if operator_id in self._yard_ids:
+                return self._yard_ids[operator_id]
+
+            yards_response = self._wrapped_client.get("/yards/")
+            assert yards_response.status_code == 200, yards_response.text
+            yards = yards_response.json()
+            if yards:
+                yard_id = int(yards[0]["id"])
+                self._yard_ids[operator_id] = yard_id
+                return yard_id
+
+            create_response = self._wrapped_client.post(
+                "/yards/",
+                json={"name": name or f"Operator {operator_id} Yard"},
+            )
+            assert create_response.status_code in (200, 201), create_response.text
+            yard_id = int(create_response.json()["id"])
+            self._yard_ids[operator_id] = yard_id
+            return yard_id
 
         def _ensure_school_payload_has_district(self, payload: dict) -> dict:
             school_payload = dict(payload)
@@ -537,6 +560,7 @@ def client(db_engine):
                 response = self._wrapped_client.post(url, *args, **kwargs)
                 if response.status_code == 200:
                     self._operator_id = int(response.json().get("operator_id", payload["operator_id"]))
+                    self._yard_ids.pop(self._operator_id, None)
                 return response
 
             if url == "/routes/" and isinstance(payload, dict) and "driver_id" in payload:
@@ -801,6 +825,7 @@ def client(db_engine):
                                 bus_response = self._wrapped_client.post(
                                     "/buses/",
                                     json={
+                                        "yard_id": self.ensure_current_operator_yard_id(),
                                         "bus_number": f"AUTO-BUS-{run_id}",
                                         "license_plate": f"AUTO-{run_id}",
                                         "capacity": 48,

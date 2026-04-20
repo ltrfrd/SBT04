@@ -9,9 +9,9 @@ from typing import List
 from database import get_db
 from backend import schemas
 from backend.models import driver as driver_model
-from backend.models.yard import Yard
 from backend.models.associations import RouteDriverAssignment
 from backend.models.route import Route
+from backend.models.yard import Yard
 from backend.schemas.driver import DriverUpdate
 from backend.schemas.route import RouteOut
 from backend.routers.route_helpers import _serialize_route
@@ -21,28 +21,12 @@ from backend.utils.planning_scope import accessible_route_filter
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_driver_operator_id
 from backend.utils.operator_scope import get_operator_scoped_driver_or_404
+from backend.utils.operator_scope import get_operator_scoped_yard_or_404
 
 # -----------------------------------------------------------
 # Router setup
 # -----------------------------------------------------------
 router = APIRouter(prefix="/drivers", tags=["Drivers"])
-
-
-def _get_or_create_operator_yard(db: Session, operator_id: int) -> Yard:
-    yard = (
-        db.query(Yard)
-        .filter(Yard.operator_id == operator_id)
-        .order_by(Yard.id.asc())
-        .first()
-    )
-    if yard:
-        return yard
-
-    yard = Yard(name="Main Yard", operator_id=operator_id)
-    db.add(yard)
-    db.flush()
-    return yard
-
 
 # -----------------------------------------------------------
 # Mixed Planning + Execution Support Endpoints
@@ -66,7 +50,12 @@ def create_driver(
 ):
     payload = driver.model_dump()
     pin = payload.pop("pin")
-    yard = _get_or_create_operator_yard(db, operator.id)
+    yard = get_operator_scoped_yard_or_404(
+        db=db,
+        yard_id=payload.pop("yard_id"),
+        operator_id=operator.id,
+        detail="Yard not found",
+    )
     new_driver = driver_model.Driver(
         **payload,
         yard_id=yard.id,

@@ -41,9 +41,7 @@ def _build_assignment_context(client, route_number: str, run_types: list[str]):
     # -------------------------------------------------------------------------
     # Create driver
     # -------------------------------------------------------------------------
-    driver = client.post(
-        "/drivers/",
-        json={
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), 
             "name": f"{route_number} Driver",
             "email": f"{route_number.lower()}@test.com",
             "phone": "7805553001",

@@ -36,9 +36,7 @@ def _ensure_route_has_active_bus(client, route_id: int, *, label: str):
     if route_snapshot["active_bus_id"] or route_snapshot["bus_id"]:
         return
 
-    bus = client.post(
-        "/buses/",
-        json={
+    bus = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), 
             "bus_number": f"{label}-BUS",
             "license_plate": f"{label[:8]}-PLT",
             "capacity": 48,
@@ -177,7 +175,7 @@ def test_schools_crud(client):
 
 
 def test_routes_crud(client):
-    r = client.post("/drivers/", json={"name": "D1", "email": "d1@x.com", "phone": "1", "pin": "1234"})
+    r = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "D1", "email": "d1@x.com", "phone": "1", "pin": "1234"})
     assert r.status_code in (200, 201)
     driver_id = r.json()["id"]
 
@@ -222,7 +220,7 @@ def test_routes_list_returns_summary_fields(client):
     assert school.status_code in (200, 201)
     school_id = school.json()["id"]
 
-    driver = client.post("/drivers/", json={"name": "Summary Driver", "email": "summary@x.com", "phone": "1", "pin": "1234"})
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Summary Driver", "email": "summary@x.com", "phone": "1", "pin": "1234"})
     assert driver.status_code in (200, 201)
     driver_id = driver.json()["id"]
 
@@ -277,7 +275,7 @@ def test_route_detail_returns_nested_route_data(client):
     assert school.status_code in (200, 201)
     school_id = school.json()["id"]
 
-    driver = client.post("/drivers/", json={"name": "Detail Driver", "email": "detail@x.com", "phone": "2", "pin": "1234"})
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Detail Driver", "email": "detail@x.com", "phone": "2", "pin": "1234"})
     assert driver.status_code in (200, 201)
     driver_id = driver.json()["id"]
 
@@ -386,7 +384,7 @@ def test_students_crud(client):
     assert r.status_code in (200, 201)
     school_id = r.json()["id"]
 
-    r = client.post("/drivers/", json={"name": "D1", "email": "d1@x.com", "phone": "1", "pin": "1234"})
+    r = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "D1", "email": "d1@x.com", "phone": "1", "pin": "1234"})
     assert r.status_code in (200, 201)
     driver_id = r.json()["id"]
 
@@ -436,7 +434,7 @@ def test_create_student_inside_run_stop_context_creates_assignment(client):
     assert school.status_code in (200, 201)
     school_id = school.json()["id"]
 
-    driver = client.post("/drivers/", json={"name": "Context Driver", "email": "context@x.com", "phone": "5", "pin": "1234"})
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Context Driver", "email": "context@x.com", "phone": "5", "pin": "1234"})
     assert driver.status_code in (200, 201)
     driver_id = driver.json()["id"]
 
@@ -495,7 +493,7 @@ def test_update_student_inside_run_stop_context_updates_fields_and_repairs_same_
     assert primary_school.status_code in (200, 201)
     assert secondary_school.status_code in (200, 201)
 
-    driver = client.post("/drivers/", json={"name": "Context Update Driver", "email": "context.update@x.com", "phone": "5a", "pin": "1234"})
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Context Update Driver", "email": "context.update@x.com", "phone": "5a", "pin": "1234"})
     assert driver.status_code in (200, 201)
     driver_id = driver.json()["id"]
 
@@ -582,7 +580,7 @@ def test_bulk_create_students_inside_run_stop_context_creates_assignments(client
     assert school.status_code in (200, 201)
     school_id = school.json()["id"]
 
-    driver = client.post("/drivers/", json={"name": "Bulk Driver", "email": "bulk@x.com", "phone": "6", "pin": "1234"})
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Bulk Driver", "email": "bulk@x.com", "phone": "6", "pin": "1234"})
     assert driver.status_code in (200, 201)
     driver_id = driver.json()["id"]
 
@@ -649,7 +647,7 @@ def test_create_student_inside_run_stop_context_rejects_stop_mismatch(client):
     assert school.status_code in (200, 201)
     school_id = school.json()["id"]
 
-    driver = client.post("/drivers/", json={"name": "Mismatch Driver", "email": "mismatch@x.com", "phone": "7", "pin": "1234"})
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Mismatch Driver", "email": "mismatch@x.com", "phone": "7", "pin": "1234"})
     assert driver.status_code in (200, 201)
     driver_id = driver.json()["id"]
 
@@ -691,7 +689,7 @@ def test_create_student_inside_run_stop_context_returns_404_for_missing_stop(cli
     school = client.post("/schools/", json={"name": "Missing Stop School", "address": "93 Missing Way"})
     assert school.status_code in (200, 201)
 
-    driver = client.post("/drivers/", json={"name": "Missing Stop Driver", "email": "missing.stop@x.com", "phone": "8", "pin": "1234"})
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Missing Stop Driver", "email": "missing.stop@x.com", "phone": "8", "pin": "1234"})
     assert driver.status_code in (200, 201)
     route_id = _create_route_with_assignment(client, "MISS-STOP-1", "BUS-MISS-STOP-1", driver.json()["id"])
     route_update = client.put(
@@ -713,7 +711,7 @@ def test_create_student_inside_run_stop_context_returns_404_for_missing_stop(cli
 
 
 def test_create_student_inside_run_stop_context_rejects_invalid_school(client):
-    driver = client.post("/drivers/", json={"name": "Invalid School Driver", "email": "invalid.school@x.com", "phone": "9", "pin": "1234"})
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Invalid School Driver", "email": "invalid.school@x.com", "phone": "9", "pin": "1234"})
     assert driver.status_code in (200, 201)
     route_id = _create_route_with_assignment(client, "INV-SCH-1", "BUS-INV-SCH-1", driver.json()["id"])
 
@@ -747,7 +745,7 @@ def test_create_student_inside_run_stop_context_rejects_started_run(client):
     assert school.status_code in (200, 201)
     school_id = school.json()["id"]
 
-    driver = client.post("/drivers/", json={"name": "Started Run Driver", "email": "started.run@x.com", "phone": "10", "pin": "1234"})
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Started Run Driver", "email": "started.run@x.com", "phone": "10", "pin": "1234"})
     assert driver.status_code in (200, 201)
     route_id = _create_route_with_assignment(client, "START-CTX-1", "BUS-START-CTX-1", driver.json()["id"])
     route_update = client.put(
@@ -795,7 +793,7 @@ def test_update_student_inside_run_stop_context_rejects_wrong_run_or_stop_pairin
     school = client.post("/schools/", json={"name": "Mismatch Update School", "address": "91 Mismatch Way"})
     assert school.status_code in (200, 201)
 
-    driver = client.post("/drivers/", json={"name": "Mismatch Update Driver", "email": "mismatch.update@x.com", "phone": "7a", "pin": "1234"})
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Mismatch Update Driver", "email": "mismatch.update@x.com", "phone": "7a", "pin": "1234"})
     assert driver.status_code in (200, 201)
 
     route_id = _create_route_with_assignment(client, "MM-UP-1", "BUS-MM-UP-1", driver.json()["id"])
@@ -840,7 +838,7 @@ def test_update_student_inside_run_stop_context_updates_existing_assignment_for_
     school = client.post("/schools/", json={"name": "Missing Assignment School", "address": "95 Missing Way"})
     assert school.status_code in (200, 201)
 
-    driver = client.post("/drivers/", json={"name": "Missing Assignment Driver", "email": "missing.assignment@x.com", "phone": "8a", "pin": "1234"})
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Missing Assignment Driver", "email": "missing.assignment@x.com", "phone": "8a", "pin": "1234"})
     assert driver.status_code in (200, 201)
 
     route_id = _create_route_with_assignment(client, "MISS-ASN-1", "BUS-MISS-ASN-1", driver.json()["id"])
@@ -879,7 +877,7 @@ def test_update_student_inside_run_stop_context_reassigns_student_from_different
     school = client.post("/schools/", json={"name": "Different Route School", "address": "96 Different Way"})
     assert school.status_code in (200, 201)
 
-    driver = client.post("/drivers/", json={"name": "Different Route Driver", "email": "different.route@x.com", "phone": "8b", "pin": "1234"})
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Different Route Driver", "email": "different.route@x.com", "phone": "8b", "pin": "1234"})
     assert driver.status_code in (200, 201)
 
     route_one_id = _create_route_with_assignment(client, "DIFF-ROUTE-1", "BUS-DIFF-1", driver.json()["id"])
@@ -938,7 +936,7 @@ def test_update_student_inside_run_stop_context_validates_route_school_membershi
     assert also_assigned_school.status_code in (200, 201)
     assert unassigned_school.status_code in (200, 201)
 
-    driver = client.post("/drivers/", json={"name": "School Update Driver", "email": "school.update@x.com", "phone": "8", "pin": "1234"})
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "School Update Driver", "email": "school.update@x.com", "phone": "8", "pin": "1234"})
     assert driver.status_code in (200, 201)
 
     route_id = _create_route_with_assignment(client, "SCH-UP-1", "BUS-SCH-UP-1", driver.json()["id"])
@@ -988,7 +986,7 @@ def test_update_student_assignment_moves_student_and_synchronizes_runtime_rows(c
     assert school.status_code in (200, 201)
     school_id = school.json()["id"]
 
-    driver = client.post("/drivers/", json={"name": "Assignment Move Driver", "email": "assignment.move@x.com", "phone": "8c", "pin": "1234"})
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Assignment Move Driver", "email": "assignment.move@x.com", "phone": "8c", "pin": "1234"})
     assert driver.status_code in (200, 201)
     driver_id = driver.json()["id"]
 
@@ -1076,7 +1074,7 @@ def test_update_student_assignment_rejects_invalid_route_stop_combination(client
     school = client.post("/schools/", json={"name": "Invalid Combo School", "address": "98 Combo Way"})
     assert school.status_code in (200, 201)
 
-    driver = client.post("/drivers/", json={"name": "Invalid Combo Driver", "email": "invalid.combo@x.com", "phone": "8d", "pin": "1234"})
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Invalid Combo Driver", "email": "invalid.combo@x.com", "phone": "8d", "pin": "1234"})
     assert driver.status_code in (200, 201)
 
     route_one_id = _create_route_with_assignment(client, "ASN-COMB-1", "BUS-ASN-COMB-1", driver.json()["id"])
@@ -1128,7 +1126,7 @@ def test_update_student_assignment_validates_target_route_school_membership(clie
     assert school.status_code in (200, 201)
     assert other_school.status_code in (200, 201)
 
-    driver = client.post("/drivers/", json={"name": "Assignment School Driver", "email": "assignment.school@x.com", "phone": "8e", "pin": "1234"})
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Assignment School Driver", "email": "assignment.school@x.com", "phone": "8e", "pin": "1234"})
     assert driver.status_code in (200, 201)
 
     source_route_id = _create_route_with_assignment(client, "ASN-SCH-1", "BUS-ASN-SCH-1", driver.json()["id"])
@@ -1251,7 +1249,7 @@ def test_run_detail_returns_nested_run_data(client):
     assert school.status_code in (200, 201)
     school_id = school.json()["id"]
 
-    driver = client.post("/drivers/", json={"name": "Run Detail Driver", "email": "run.detail@x.com", "phone": "3", "pin": "1234"})
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Run Detail Driver", "email": "run.detail@x.com", "phone": "3", "pin": "1234"})
     assert driver.status_code in (200, 201)
     driver_id = driver.json()["id"]
 
@@ -1315,7 +1313,7 @@ def test_run_detail_returns_nested_run_data(client):
 # - Require route_id and reject legacy list modes
 # -----------------------------------------------------------
 def test_runs_list_requires_route_id_and_returns_route_runs_only(client):
-    driver = client.post("/drivers/", json={"name": "Run List Driver", "email": "run.list@x.com", "phone": "4", "pin": "1234"})
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Run List Driver", "email": "run.list@x.com", "phone": "4", "pin": "1234"})
     assert driver.status_code in (200, 201)
     driver_id = driver.json()["id"]
 
@@ -1395,7 +1393,7 @@ def test_school_create_read_update_works_without_school_code(client):
 
 
 def test_route_context_run_creation_normalizes_and_rejects_duplicates(client):
-    driver = client.post("/drivers/", json={"name": "Context Run Driver", "email": "ctx.run@test.com", "phone": "9", "pin": "1234"})
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Context Run Driver", "email": "ctx.run@test.com", "phone": "9", "pin": "1234"})
     assert driver.status_code in (200, 201)
     route_id = _create_route_with_assignment(client, "  5305  ", "BUS-5305", driver.json()["id"])
 
@@ -1476,7 +1474,7 @@ def test_stop_context_student_create_rejects_school_not_on_route(client):
     assert valid_school.status_code in (200, 201)
     assert other_school.status_code in (200, 201)
 
-    driver = client.post("/drivers/", json={"name": "Route School Driver", "email": "route.school@test.com", "phone": "10", "pin": "1234"})
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Route School Driver", "email": "route.school@test.com", "phone": "10", "pin": "1234"})
     assert driver.status_code in (200, 201)
     route = client.post(
         "/routes/",

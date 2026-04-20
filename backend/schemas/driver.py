@@ -25,6 +25,7 @@ class DriverBase(BaseModel):
 class DriverCreate(DriverBase):
     """Schema used when creating a new driver."""
 
+    yard_id: int
     pin: str
 
     @field_validator("pin")

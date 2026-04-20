@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from database import get_db
 from backend.models import bus as bus_model
+from backend.models.dispatcher import Dispatcher
 from backend.models import driver as driver_model
 from backend.models.operator import Operator
 from backend.models.operator import OperatorRouteAccess
@@ -51,6 +52,24 @@ def get_operator_context(
     if not operator:
         raise HTTPException(status_code=404, detail="Operator not found")
     return operator
+
+
+def get_operator_scoped_yard_or_404(
+    *,
+    db: Session,
+    yard_id: int,
+    operator_id: int,
+    detail: str,
+) -> Yard:
+    yard = (
+        db.query(Yard)
+        .filter(Yard.id == yard_id)
+        .filter(Yard.operator_id == operator_id)
+        .first()
+    )
+    if not yard:
+        raise HTTPException(status_code=404, detail=detail)
+    return yard
 
 
 def get_operator_scoped_record_or_404(
@@ -104,6 +123,25 @@ def get_operator_scoped_driver_or_404(
     if not driver:
         raise HTTPException(status_code=404, detail=detail)
     return driver
+
+
+def get_operator_scoped_dispatcher_or_404(
+    *,
+    db: Session,
+    dispatcher_id: int,
+    operator_id: int,
+    detail: str,
+) -> Dispatcher:
+    dispatcher = (
+        db.query(Dispatcher)
+        .join(Dispatcher.yard)
+        .filter(Dispatcher.id == dispatcher_id)
+        .filter(Yard.operator_id == operator_id)
+        .first()
+    )
+    if not dispatcher:
+        raise HTTPException(status_code=404, detail=detail)
+    return dispatcher
 
 
 def get_operator_scoped_bus_or_404(

@@ -8,7 +8,7 @@ from tests.conftest import ensure_prepared_run_student, ensure_route_has_executi
 def _setup_run(client):
     unique = uuid.uuid4().hex[:8]
 
-    r = client.post("/drivers/", json={"name": f"D-{unique}", "email": f"d-{unique}@d.com", "phone": "1", "pin": "1234"})
+    r = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": f"D-{unique}", "email": f"d-{unique}@d.com", "phone": "1", "pin": "1234"})
     assert r.status_code in (200, 201)
     driver_id = r.json()["id"]
 

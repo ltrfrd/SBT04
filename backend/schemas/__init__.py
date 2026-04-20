@@ -15,12 +15,14 @@
 # Bus schemas
 # -------------------------------------------------------------------------
 from .bus import BusCreate, BusDetailOut, BusOut, BusUpdate  # Bus creation and response schemas
+from .dispatcher import DispatcherCreate, DispatcherOut, DispatcherUpdate
 
 
 # -------------------------------------------------------------------------
 # Driver schemas
 # -------------------------------------------------------------------------
 from .driver import DriverCreate, DriverOut  # Driver creation and response schemas
+from .operator import OperatorOut, OperatorUpdate
 
 
 # -------------------------------------------------------------------------
@@ -33,6 +35,7 @@ from .district import DistrictCreate, DistrictOut, DistrictSummaryOut  # Distric
 # School schemas
 # -------------------------------------------------------------------------
 from .school import SchoolCreate, SchoolOut  # School creation and response schemas
+from .yard_supervisor import YardSupervisorCreate, YardSupervisorOut, YardSupervisorUpdate
 
 
 # -------------------------------------------------------------------------
@@ -108,6 +111,7 @@ from .posttrip import (
 # - Dispatch schema exports
 # -----------------------------------------------------------
 from .dispatch import (
+    DispatchApprovalRequest,
     DispatchCreate,
     DispatchOut,
 )  # Dispatch creation and response schemas
@@ -134,9 +138,15 @@ __all__ = [
     "BusDetailOut",
     "BusUpdate",
     "BusOut",
+    "DispatcherCreate",
+    "DispatcherOut",
+    "DispatcherUpdate",
 
     "DriverCreate",
     "DriverOut",
+
+    "OperatorOut",
+    "OperatorUpdate",
 
     "DistrictCreate",
     "DistrictOut",
@@ -144,6 +154,9 @@ __all__ = [
 
     "SchoolCreate",
     "SchoolOut",
+    "YardSupervisorCreate",
+    "YardSupervisorOut",
+    "YardSupervisorUpdate",
 
     "StudentCreate",
     "StudentCompatibilityCreate",
@@ -190,6 +203,7 @@ __all__ = [
     "PostTripPhotoOut",
     "PostTripOut",
 
+    "DispatchApprovalRequest",
     "DispatchCreate",
     "DispatchOut",
 

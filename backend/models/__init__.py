@@ -1,6 +1,8 @@
 from .district import District
 from .operator import Operator, OperatorRouteAccess
 from .yard import Yard
+from .yard_supervisor import YardSupervisor
+from .dispatcher import Dispatcher
 from .driver import Driver
 from .bus import Bus
 from .school import School
@@ -22,6 +24,8 @@ __all__ = [
     "Operator",
     "OperatorRouteAccess",
     "Yard",
+    "YardSupervisor",
+    "Dispatcher",
     "Bus",
     "School",
     "Student",

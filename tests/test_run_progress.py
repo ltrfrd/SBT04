@@ -22,9 +22,7 @@ def test_start_run_requires_prepared_stops(client):
     # -------------------------------------------------------------------------
     # Create driver
     # -------------------------------------------------------------------------
-    driver_response = client.post(
-        "/drivers/",
-        json={
+    driver_response = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), 
             "name": "John Driver",
             "email": "john.driver@example.com",
             "phone": "111-222-3333",
@@ -84,9 +82,7 @@ def test_start_run_requires_prepared_students(client):
     # -------------------------------------------------------------------------
     # Create driver
     # -------------------------------------------------------------------------
-    driver_response = client.post(
-        "/drivers/",
-        json={
+    driver_response = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), 
             "name": "Student Guard Driver",
             "email": "student.guard@example.com",
             "phone": "111-222-4444",
@@ -157,9 +153,7 @@ def test_run_state_uses_stored_current_stop_sequence(client):
     # -------------------------------------------------------------------------
     # Create driver
     # -------------------------------------------------------------------------
-    driver_res = client.post(
-        "/drivers/",
-        json={
+    driver_res = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), 
             "name": "Driver State Stored",
             "email": "driver_state_stored@example.com",
             "phone": "780-555-1101",

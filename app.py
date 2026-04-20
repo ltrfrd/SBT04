@@ -25,9 +25,11 @@ from backend.config import settings
 # ---------- ROUTERS ----------
 from backend.routers import (
     bus,
+    dispatcher,
     district,
     dispatch,
     driver,
+    operator,
     posttrip,
     pretrip,
     reports,
@@ -40,6 +42,7 @@ from backend.routers import (
     student_run_assignment,
     ws,
     yard,
+    yard_supervisor,
 )
 from backend.web import web_pages
 
@@ -96,11 +99,16 @@ app.include_router(stop.router)
 app.include_router(student.router)
 app.include_router(student_run_assignment.router)
 
-# Execution routers
+# Operator and execution people/entity routers
+app.include_router(operator.router)
 app.include_router(yard.router)
-app.include_router(dispatch.router)
+app.include_router(yard_supervisor.router)
+app.include_router(dispatcher.router)
 app.include_router(driver.router)
 app.include_router(bus.router)
+
+# Execution workflow routers
+app.include_router(dispatch.router)
 app.include_router(pretrip.router)
 app.include_router(posttrip.router)
 

@@ -26,6 +26,10 @@ class DispatchCreate(BaseModel):
     approved: Optional[bool] = False  # Default not verified
 
 
+class DispatchApprovalRequest(BaseModel):
+    dispatcher_id: int
+
+
 # -----------------------------------------------------------
 # DispatchOut
 # - Return dispatch work entry data
@@ -38,6 +42,7 @@ class DispatchOut(BaseModel):
     charter_end: Optional[time] = None
     charter_hours: Decimal
     approved: bool
+    approved_by_dispatcher_id: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
 

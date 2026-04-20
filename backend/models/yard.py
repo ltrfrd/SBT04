@@ -17,6 +17,17 @@ class Yard(Base):
     operator_id = Column(Integer, ForeignKey("operators.id"), nullable=False)
 
     operator = relationship("Operator", back_populates="yards")
+    yard_supervisor = relationship(
+        "YardSupervisor",
+        back_populates="yard",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    dispatchers = relationship(
+        "Dispatcher",
+        back_populates="yard",
+        cascade="all, delete-orphan",
+    )
     drivers = relationship("Driver", back_populates="yard")
     buses = relationship("Bus", back_populates="yard")
     routes = relationship(

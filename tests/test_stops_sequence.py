@@ -2,7 +2,7 @@ from tests.conftest import ensure_route_has_execution_yard
 
 
 def _create_driver(client):
-    r = client.post("/drivers/", json={"name": "T", "email": "t@t.com", "phone": "1", "pin": "1234"})
+    r = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "T", "email": "t@t.com", "phone": "1", "pin": "1234"})
     assert r.status_code in (200, 201)
     return r.json()["id"]
 

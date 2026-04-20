@@ -48,6 +48,7 @@ class BusBase(BaseModel):
 # Schema for bus creation (POST request)
 # -----------------------------------------------------------
 class BusCreate(BusBase):
+    yard_id: int
     model_config = ConfigDict(extra="forbid")
 
 

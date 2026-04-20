@@ -16,6 +16,7 @@ from backend.models import driver as driver_model  # Validate driver link
 from backend.models.yard import Yard
 from database import get_db  # DB dependency
 from backend.utils.operator_scope import get_operator_context
+from backend.utils.operator_scope import get_operator_scoped_dispatcher_or_404
 from backend.utils.operator_scope import get_operator_scoped_driver_or_404
 
 
@@ -129,20 +130,41 @@ def get_driver_dispatch_records(
 @router.put("/{dispatch_id}/approve", response_model=schemas.DispatchOut)
 def approve_dispatch_record(
     dispatch_id: int,
+    payload: schemas.DispatchApprovalRequest,
     db: Session = Depends(get_db),
     operator: Operator = Depends(get_operator_context),
 ):
-    """Approve a dispatch record."""
+    """Approve a dispatch record as a dispatcher."""
     record = db.get(dispatch_model.DispatchRecord, dispatch_id)
     if not record:
         raise HTTPException(status_code=404, detail="Dispatch record not found")
-    get_operator_scoped_driver_or_404(
+
+    dispatcher = get_operator_scoped_dispatcher_or_404(
+        db=db,
+        dispatcher_id=payload.dispatcher_id,
+        operator_id=operator.id,
+        detail="Dispatcher not found",
+    )
+    driver = get_operator_scoped_driver_or_404(
         db=db,
         driver_id=record.driver_id,
         operator_id=operator.id,
         detail="Dispatch record not found",
     )
+    if driver.yard_id is None:
+        raise HTTPException(status_code=400, detail="Driver is missing yard assignment")
+    if dispatcher.yard_id != driver.yard_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Dispatcher cannot approve records outside assigned yard",
+        )
+    if record.approved:
+        if record.approved_by_dispatcher_id == dispatcher.id:
+            return record
+        raise HTTPException(status_code=409, detail="Dispatch record already approved")
+
     record.approved = True
+    record.approved_by_dispatcher_id = dispatcher.id
     db.commit()
     db.refresh(record)
     return record

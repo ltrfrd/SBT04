@@ -21,7 +21,7 @@ def test_running_board_basic(client):  # Test the running board endpoint
     # -------------------------------------------------------------------------
     # Create driver
     # -------------------------------------------------------------------------
-    driver = client.post("/drivers/", json={  # Create a driver
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(),   # Create a driver
         "name": "Test Driver",
         "email": "driver@test.com",
         "phone": "7801110000",

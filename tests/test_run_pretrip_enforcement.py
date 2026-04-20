@@ -3,6 +3,7 @@
 # - Verify scheduled create payloads and start blocking rules
 # -----------------------------------------------------------
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 from sqlalchemy.orm import Session
 
@@ -39,9 +40,7 @@ def _pretrip_payload(context, **overrides):
 # - Create one prepared run with driver and active bus
 # -----------------------------------------------------------
 def _create_pretrip_enforced_run(client, *, route_number: str, run_type: str = "AM", scheduled_start_time: str = "07:00:00"):
-    driver = client.post(
-        "/drivers/",
-        json={"name": f"{route_number} Driver", "email": f"{route_number.lower()}@test.com", "phone": "5550000", "pin": "1234"},
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": f"{route_number} Driver", "email": f"{route_number.lower()}@test.com", "phone": "5550000", "pin": "1234"},
     )
     assert driver.status_code in (200, 201)
 
@@ -52,9 +51,7 @@ def _create_pretrip_enforced_run(client, *, route_number: str, run_type: str = "
     assigned_driver = client.post(f"/routes/{route_id}/assign_driver/{driver.json()['id']}")
     assert assigned_driver.status_code in (200, 201)
 
-    bus = client.post(
-        "/buses/",
-        json={
+    bus = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), 
             "bus_number": f"{route_number}-BUS",
             "license_plate": f"{route_number[:3]}-PLATE",
             "capacity": 48,
@@ -110,9 +107,7 @@ def test_start_run_blocks_when_no_pretrip_for_active_bus(client):
 
 
 def test_start_run_blocks_when_route_has_no_active_bus(client):
-    driver = client.post(
-        "/drivers/",
-        json={"name": "No Bus Driver", "email": "no.bus.driver@test.com", "phone": "5550001", "pin": "1234"},
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "No Bus Driver", "email": "no.bus.driver@test.com", "phone": "5550001", "pin": "1234"},
     )
     assert driver.status_code in (200, 201)
 
@@ -230,15 +225,30 @@ def test_pretrip_create_and_correct_persist_checklist_history(client):
 
 
 def test_start_run_creates_one_missing_pretrip_alert_within_window(client, db_engine):
-    soon = (datetime.now() + timedelta(minutes=10)).time().replace(microsecond=0)
+    current_day = datetime.now()
+
+    class _FixedAlertDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(
+                current_day.year,
+                current_day.month,
+                current_day.day,
+                12,
+                0,
+                0,
+                tzinfo=tz,
+            )
+
     context = _create_pretrip_enforced_run(
         client,
         route_number="MISSING-PRETRIP-ALERT",
-        scheduled_start_time=soon.isoformat(),
+        scheduled_start_time="12:10:00",
     )
 
-    first_response = client._wrapped_client.post(f"/runs/start?run_id={context['run']['id']}")
-    second_response = client._wrapped_client.post(f"/runs/start?run_id={context['run']['id']}")
+    with patch("backend.utils.pretrip_alerts.datetime", _FixedAlertDateTime):
+        first_response = client._wrapped_client.post(f"/runs/start?run_id={context['run']['id']}")
+        second_response = client._wrapped_client.post(f"/runs/start?run_id={context['run']['id']}")
 
     assert first_response.status_code == 400
     assert second_response.status_code == 400

@@ -14,9 +14,7 @@ from tests.conftest import ensure_prepared_run_student
 
 
 def _create_started_run_ready_for_posttrip(client, *, route_number: str = "POSTTRIP-ROUTE"):
-    driver = client.post(
-        "/drivers/",
-        json={"name": f"{route_number} Driver", "email": f"{route_number.lower()}@test.com", "phone": "5551000", "pin": "1234"},
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": f"{route_number} Driver", "email": f"{route_number.lower()}@test.com", "phone": "5551000", "pin": "1234"},
     )
     assert driver.status_code in (200, 201)
 
@@ -27,9 +25,7 @@ def _create_started_run_ready_for_posttrip(client, *, route_number: str = "POSTT
     assigned_driver = client.post(f"/routes/{route_id}/assign_driver/{driver.json()['id']}")
     assert assigned_driver.status_code in (200, 201)
 
-    bus = client.post(
-        "/buses/",
-        json={
+    bus = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), 
             "bus_number": f"{route_number}-BUS",
             "license_plate": f"{route_number[:3]}-POST",
             "capacity": 48,

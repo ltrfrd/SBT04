@@ -175,9 +175,7 @@ def _create_shared_runtime_context(client, db_engine, *, suffix: str) -> dict[st
     assert student.status_code == 201
     student_id = student.json()["id"]
 
-    bus = client.post(
-        "/buses/",
-        json={
+    bus = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), 
             "bus_number": f"{suffix[:12]}-BUS",
             "license_plate": f"{suffix[:8]}-PLT",
             "capacity": 48,
@@ -338,7 +336,7 @@ def test_xoperator_id_header_without_session_is_rejected(client, db_engine):
     # Log out so there is no active session
     _logout(client)
 
-    # Unauthenticated request with X-Operator-ID header — must be 401, not 200
+    # Unauthenticated request with X-Operator-ID header â€” must be 401, not 200
     r = client.get("/drivers/", headers={"x-operator-id": str(operator_id)})
     assert r.status_code == 401, (
         f"Expected 401 (unauthenticated), got {r.status_code}. "
@@ -348,7 +346,7 @@ def test_xoperator_id_header_without_session_is_rejected(client, db_engine):
 
 def test_single_operator_anonymous_access_is_rejected(client, db_engine):
     # The test DB already has exactly one operator (from bootstrap). Unauthenticated
-    # access to that single operator must be rejected — not silently granted.
+    # access to that single operator must be rejected â€” not silently granted.
     _logout(client)
 
     r = client.get("/routes/")
@@ -359,7 +357,7 @@ def test_single_operator_anonymous_access_is_rejected(client, db_engine):
 
 
 # ---------------------------------------------------------------------------
-# C2: Tenant isolation — cross-operator reads and writes are blocked
+# C2: Tenant isolation â€” cross-operator reads and writes are blocked
 # ---------------------------------------------------------------------------
 
 def test_operator_isolation_blocks_cross_operator_reads_and_writes(client, db_engine):
@@ -430,7 +428,7 @@ def test_shared_route_access_requires_explicit_grant(client, db_engine):
     assert grant.status_code == 200
     assert grant.json()["access_level"] == "read"
 
-    # --- Shared operator has planning grant but no yard assignment → no execution visibility ---
+    # --- Shared operator has planning grant but no yard assignment â†’ no execution visibility ---
     _logout(client)
     _login(client, shared_operator_id)
 
@@ -582,9 +580,7 @@ def test_operator_lists_only_show_owned_records(client, db_engine):
 
     # --- Operator one creates assets ---
     _login(client, operator_one_id)
-    extra_driver_one = client.post(
-        "/drivers/",
-        json={"name": "Extra One", "email": "extra-one@test.com", "phone": "101", "pin": TEST_DRIVER_PIN},
+    extra_driver_one = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Extra One", "email": "extra-one@test.com", "phone": "101", "pin": TEST_DRIVER_PIN},
     )
     route_one = client.post("/routes/", json={"route_number": "LIST-ONE"})
     assert extra_driver_one.status_code == 201
@@ -593,9 +589,7 @@ def test_operator_lists_only_show_owned_records(client, db_engine):
     # --- Operator two creates assets ---
     _logout(client)
     _login(client, operator_two_id)
-    extra_driver_two = client.post(
-        "/drivers/",
-        json={"name": "Extra Two", "email": "extra-two@test.com", "phone": "202", "pin": TEST_DRIVER_PIN},
+    extra_driver_two = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Extra Two", "email": "extra-two@test.com", "phone": "202", "pin": TEST_DRIVER_PIN},
     )
     route_two = client.post("/routes/", json={"route_number": "LIST-TWO"})
     assert extra_driver_two.status_code == 201
@@ -1661,9 +1655,7 @@ def _build_shared_school_reports_context(client, db_engine):
     assert route.status_code == 201
     route_id = route.json()["id"]
 
-    route_driver = client.post(
-        "/drivers/",
-        json={"name": "Shared Reports Route Driver", "email": "shared-reports-route@test.com", "phone": "5551000", "pin": "1234"},
+    route_driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Shared Reports Route Driver", "email": "shared-reports-route@test.com", "phone": "5551000", "pin": "1234"},
     )
     assert route_driver.status_code == 201
     assign_driver = client.post(f"/routes/{route_id}/assign_driver/{route_driver.json()['id']}")
@@ -2128,9 +2120,7 @@ def test_pretrip_create_and_read_are_operator_scoped(client, db_engine):
 
     # --- Operator A creates a bus and a pretrip ---
     _login(client, operator_a_id)
-    bus_a = client.post(
-        "/buses/",
-        json={"bus_number": "PT-BUS-A", "license_plate": "PT-A-001", "capacity": 48, "size": "full"},
+    bus_a = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "PT-BUS-A", "license_plate": "PT-A-001", "capacity": 48, "size": "full"},
     )
     assert bus_a.status_code in (200, 201)
     bus_a_id = bus_a.json()["id"]
@@ -2175,9 +2165,7 @@ def test_pretrip_correct_is_operator_scoped(client, db_engine):
 
     # Operator A creates bus and pretrip
     _login(client, operator_a_id)
-    bus_a = client.post(
-        "/buses/",
-        json={"bus_number": "CORR-BUS-A", "license_plate": "CORR-A-001", "capacity": 48, "size": "full"},
+    bus_a = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "CORR-BUS-A", "license_plate": "CORR-A-001", "capacity": 48, "size": "full"},
     )
     assert bus_a.status_code in (200, 201)
 
@@ -2185,7 +2173,7 @@ def test_pretrip_correct_is_operator_scoped(client, db_engine):
     assert pretrip_a.status_code in (200, 201)
     pretrip_a_id = pretrip_a.json()["id"]
 
-    # Operator B tries to correct operator A's pretrip — must get 404
+    # Operator B tries to correct operator A's pretrip â€” must get 404
     _logout(client)
     _login(client, operator_b_id)
 
@@ -2210,14 +2198,12 @@ def test_pretrip_uniqueness_cannot_block_another_operator(client, db_engine):
 
     # Operator A creates its bus
     _login(client, operator_a_id)
-    bus_a = client.post(
-        "/buses/",
-        json={"bus_number": "UNIQ-BUS-A", "license_plate": "UNIQ-A-001", "capacity": 48, "size": "full"},
+    bus_a = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "UNIQ-BUS-A", "license_plate": "UNIQ-A-001", "capacity": 48, "size": "full"},
     )
     assert bus_a.status_code in (200, 201)
     bus_a_id = bus_a.json()["id"]
 
-    # Operator B tries to create a pretrip for Operator A's bus_id — must be 404 (bus not found in B's scope)
+    # Operator B tries to create a pretrip for Operator A's bus_id â€” must be 404 (bus not found in B's scope)
     _logout(client)
     _login(client, operator_b_id)
 
@@ -2254,28 +2240,22 @@ def test_bus_uniqueness_does_not_leak_across_operators(client, db_engine):
 
     # Operator A creates a bus with number "FLEET-001"
     _login(client, operator_a_id)
-    bus_a = client.post(
-        "/buses/",
-        json={"bus_number": "FLEET-001", "license_plate": "AAA-001", "capacity": 48, "size": "full"},
+    bus_a = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "FLEET-001", "license_plate": "AAA-001", "capacity": 48, "size": "full"},
     )
     assert bus_a.status_code in (200, 201)
 
-    # Operator B must be able to create a bus with the same number — not a 409
+    # Operator B must be able to create a bus with the same number â€” not a 409
     _logout(client)
     _login(client, operator_b_id)
 
-    bus_b = client.post(
-        "/buses/",
-        json={"bus_number": "FLEET-001", "license_plate": "BBB-001", "capacity": 40, "size": "mid"},
+    bus_b = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "FLEET-001", "license_plate": "BBB-001", "capacity": 40, "size": "mid"},
     )
     assert bus_b.status_code in (200, 201), (
         f"Expected operator B to create bus 'FLEET-001' independently, got {bus_b.status_code}: {bus_b.text}"
     )
 
     # Within the same operator, duplicates are still rejected
-    bus_b_dup = client.post(
-        "/buses/",
-        json={"bus_number": "FLEET-001", "license_plate": "BBB-002", "capacity": 40, "size": "mid"},
+    bus_b_dup = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "FLEET-001", "license_plate": "BBB-002", "capacity": 40, "size": "mid"},
     )
     assert bus_b_dup.status_code == 409, (
         f"Expected 409 for duplicate bus within same operator, got {bus_b_dup.status_code}"
@@ -3029,7 +3009,7 @@ def test_date_summary_excludes_runs_outside_yard_scope(client, db_engine):
     assert run_b.status_code == 201
     run_b_id = run_b.json()["id"]
 
-    # Inject start_time directly — avoids the full run-start prerequisite chain (bus/pretrip/stops/students)
+    # Inject start_time directly â€” avoids the full run-start prerequisite chain (bus/pretrip/stops/students)
     now = datetime.now(UTC)
     with Session(db_engine) as db:
         db.get(Run, run_a_id).start_time = now
@@ -3107,7 +3087,7 @@ def test_bootstrap_operator_fails_when_operator_exists(empty_client, db_engine):
 def test_bootstrap_operator_sets_session(empty_client):
     r = empty_client.post("/session/bootstrap-operator", json={"name": "Session Bootstrap Operator"})
     assert r.status_code == 200
-    # Authenticated endpoint must succeed — session was set by bootstrap
+    # Authenticated endpoint must succeed â€” session was set by bootstrap
     drivers = empty_client.get("/drivers/")
     assert drivers.status_code == 200
 
@@ -3123,6 +3103,68 @@ def test_create_yard_with_operator_session(client):
     assert body["name"] == "Alpha Yard"
     assert "id" in body
     assert "operator_id" in body
+
+
+def test_driver_create_requires_explicit_yard(client):
+    response = client.post(
+        "/drivers/",
+        json={"name": "No Yard Driver", "email": "no-yard-driver@test.com", "phone": "100", "pin": "1234"},
+    )
+    assert response.status_code == 422
+
+
+def test_bus_create_requires_explicit_yard(client):
+    response = client.post(
+        "/buses/",
+        json={"bus_number": "NO-YARD-BUS", "license_plate": "NO-YARD-PLATE", "capacity": 40, "size": "full"},
+    )
+    assert response.status_code == 422
+
+
+def test_driver_create_rejects_invalid_yard(client):
+    response = client.post(
+        "/drivers/",
+        json={"yard_id": 999999, "name": "Invalid Yard Driver", "email": "invalid-yard-driver@test.com", "phone": "101", "pin": "1234"},
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Yard not found"
+
+
+def test_bus_create_rejects_invalid_yard(client):
+    response = client.post(
+        "/buses/",
+        json={"yard_id": 999999, "bus_number": "INVALID-YARD-BUS", "license_plate": "INVALID-YARD-PLATE", "capacity": 40, "size": "full"},
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Yard not found"
+
+
+def test_driver_create_rejects_cross_operator_yard(client, db_engine):
+    owner_operator_id = _create_operator_in_db(db_engine, "Driver Yard Owner")
+    other_operator_id = _create_operator_in_db(db_engine, "Driver Yard Other")
+    other_yard_id = _create_yard_in_db(db_engine, other_operator_id, "Driver Other Yard")
+
+    _login(client, owner_operator_id)
+    response = client.post(
+        "/drivers/",
+        json={"yard_id": other_yard_id, "name": "Cross Yard Driver", "email": "cross-yard-driver@test.com", "phone": "102", "pin": "1234"},
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Yard not found"
+
+
+def test_bus_create_rejects_cross_operator_yard(client, db_engine):
+    owner_operator_id = _create_operator_in_db(db_engine, "Bus Yard Owner")
+    other_operator_id = _create_operator_in_db(db_engine, "Bus Yard Other")
+    other_yard_id = _create_yard_in_db(db_engine, other_operator_id, "Bus Other Yard")
+
+    _login(client, owner_operator_id)
+    response = client.post(
+        "/buses/",
+        json={"yard_id": other_yard_id, "bus_number": "CROSS-YARD-BUS", "license_plate": "CROSS-YARD-PLATE", "capacity": 40, "size": "full"},
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Yard not found"
 
 
 def test_list_yards_returns_only_current_operator_yards(client, db_engine):

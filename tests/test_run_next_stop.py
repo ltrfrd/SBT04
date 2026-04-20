@@ -5,7 +5,7 @@
 #   Verify that POST /runs/{run_id}/next_stop advances run progress correctly.
 #
 # Behavior verified:
-#   - If current_stop_sequence is None → next_stop sets it to 1
+#   - If current_stop_sequence is None â†’ next_stop sets it to 1
 #   - Calling next_stop again increments to the next sequence
 #   - Stop must exist in the run
 # =============================================================================
@@ -17,9 +17,7 @@ def test_next_stop_advances_progress(client):
     # -------------------------------------------------------------------------
     # Create driver
     # -------------------------------------------------------------------------
-    driver_res = client.post(
-        "/drivers/",
-        json={
+    driver_res = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), 
             "name": "Driver Next Stop",
             "email": "driver_next_stop@example.com",
             "phone": "555-000-1111",
@@ -86,7 +84,7 @@ def test_next_stop_advances_progress(client):
     assert start_res.status_code in (200, 201)
 
     # -------------------------------------------------------------------------
-    # First next_stop → should set progress to 1
+    # First next_stop â†’ should set progress to 1
     # -------------------------------------------------------------------------
     res1 = client.post(f"/runs/{run_id}/next_stop")
     assert res1.status_code in (200, 201)
@@ -95,7 +93,7 @@ def test_next_stop_advances_progress(client):
     assert data1["current_stop_sequence"] == 1
 
     # -------------------------------------------------------------------------
-    # Second next_stop → should advance to 2
+    # Second next_stop â†’ should advance to 2
     # -------------------------------------------------------------------------
     res2 = client.post(f"/runs/{run_id}/next_stop")
     assert res2.status_code in (200, 201)
@@ -109,9 +107,7 @@ def test_next_stop_uses_actual_current_stop_after_manual_jump(client):
     # -------------------------------------------------------------------------
     # Create driver
     # -------------------------------------------------------------------------
-    driver_res = client.post(
-        "/drivers/",
-        json={
+    driver_res = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), 
             "name": "Driver Next Stop Jump",
             "email": "driver_next_stop_jump@example.com",
             "phone": "555-000-2222",
@@ -189,9 +185,7 @@ def test_arrive_stop_accepts_explicit_stop_id_for_flexible_runtime_location(clie
     # -------------------------------------------------------------------------
     # Create driver
     # -------------------------------------------------------------------------
-    driver_res = client.post(
-        "/drivers/",
-        json={
+    driver_res = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), 
             "name": "Driver Stop Id",
             "email": "driver_stop_id@example.com",
             "phone": "555-000-3333",

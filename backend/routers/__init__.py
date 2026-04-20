@@ -5,6 +5,9 @@
 
 from .driver import router as driver_router                      # Driver management endpoints
 from .bus import router as bus_router                            # Bus management endpoints
+from .operator import router as operator_router                  # Operator profile endpoints
+from .yard_supervisor import router as yard_supervisor_router    # Yard supervisor management endpoints
+from .dispatcher import router as dispatcher_router              # Dispatcher management endpoints
 from .session import router as session_router                    # Transitional session endpoints
 from .ws import router as ws_router                              # WebSocket endpoints
 from .school import router as school_router                      # School management endpoints
@@ -23,6 +26,9 @@ from .posttrip import router as posttrip_router                  # Post-trip ins
 __all__ = [
     "driver_router",                     # Export driver router
     "bus_router",                        # Export bus router
+    "operator_router",                   # Export operator router
+    "yard_supervisor_router",            # Export yard supervisor router
+    "dispatcher_router",                 # Export dispatcher router
     "session_router",                    # Export session router
     "ws_router",                         # Export websocket router
     "school_router",                     # Export school router

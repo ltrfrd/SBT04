@@ -25,26 +25,10 @@ from backend.utils.planning_scope import accessible_route_filter
 from backend.utils.operator_scope import get_bus_operator_id
 from backend.utils.operator_scope import get_operator_context
 from backend.utils.operator_scope import get_operator_scoped_bus_or_404
+from backend.utils.operator_scope import get_operator_scoped_yard_or_404
 
 
 router = APIRouter(prefix="/buses", tags=["Buses"])
-
-
-def _get_or_create_operator_yard(db: Session, operator_id: int) -> Yard:
-    yard = (
-        db.query(Yard)
-        .filter(Yard.operator_id == operator_id)
-        .order_by(Yard.id.asc())
-        .first()
-    )
-    if yard:
-        return yard
-
-    yard = Yard(name="Main Yard", operator_id=operator_id)
-    db.add(yard)
-    db.flush()
-    return yard
-
 
 # -----------------------------------------------------------
 # Mixed Planning + Execution Support Endpoints
@@ -104,7 +88,12 @@ def create_bus(
     operator: Operator = Depends(get_operator_context),
 ):
     payload = bus.model_dump()
-    yard = _get_or_create_operator_yard(db, operator.id)
+    yard = get_operator_scoped_yard_or_404(
+        db=db,
+        yard_id=payload.pop("yard_id"),
+        operator_id=operator.id,
+        detail="Yard not found",
+    )
     _validate_bus_uniqueness(
         db=db,
         yard_id=yard.id,

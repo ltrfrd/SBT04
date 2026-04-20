@@ -17,7 +17,7 @@ class Bus(Base):
     __tablename__ = "buses"  # Database table name
 
     id = Column(Integer, primary_key=True, index=True)  # Unique bus identifier
-    yard_id = Column(Integer, ForeignKey("yards.id"), nullable=True)
+    yard_id = Column(Integer, ForeignKey("yards.id"), nullable=False)
     unit_number = Column(String(50), index=True, nullable=False)  # Visible bus unit number, unique per yard
     license_plate = Column(String(50), index=True, nullable=False)  # Registration plate, unique per yard
     capacity = Column(Integer, nullable=False)  # Total seating capacity

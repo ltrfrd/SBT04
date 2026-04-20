@@ -14,6 +14,7 @@ class DispatchRecord(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     driver_id = Column(Integer, ForeignKey("drivers.id"), nullable=False)
+    approved_by_dispatcher_id = Column(Integer, ForeignKey("dispatchers.id"), nullable=True, index=True)
     work_date = Column(Date, nullable=False)  # Workday date
     charter_start = Column(Time, nullable=True)  # Start time for charter
     charter_end = Column(Time, nullable=True)  # End time for charter
@@ -24,6 +25,7 @@ class DispatchRecord(Base):
     # Relationships
     # -------------------------------------------------------
     driver = relationship("Driver", back_populates="dispatch_records")
+    approved_by_dispatcher = relationship("Dispatcher", back_populates="approved_dispatch_records")
 
     # -------------------------------------------------------
     # Auto-calculate charter hours from start → end

@@ -46,10 +46,7 @@ def _ensure_route_has_execution_yard(client, route_id: int):
 
 
 def test_create_bus(client):
-    response = client.post(
-        "/buses/",
-        json={
-            "bus_number": "BUS-101",
+    response = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "BUS-101",
             "license_plate": "ABC-101",
             "capacity": 48,
             "size": "full",
@@ -67,19 +64,13 @@ def test_create_bus(client):
 
 
 def test_list_buses(client):
-    first = client.post(
-        "/buses/",
-        json={
-            "bus_number": "BUS-201",
+    first = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "BUS-201",
             "license_plate": "ABC-201",
             "capacity": 40,
             "size": "mid",
         },
     )
-    second = client.post(
-        "/buses/",
-        json={
-            "bus_number": "BUS-202",
+    second = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "BUS-202",
             "license_plate": "ABC-202",
             "capacity": 52,
             "size": "full",
@@ -110,10 +101,7 @@ def test_list_buses(client):
 
 
 def test_get_bus(client):
-    created = client.post(
-        "/buses/",
-        json={
-            "bus_number": "BUS-301",
+    created = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "BUS-301",
             "license_plate": "ABC-301",
             "capacity": 36,
             "size": "small",
@@ -134,10 +122,7 @@ def test_get_bus(client):
 
 
 def test_update_bus(client):
-    created = client.post(
-        "/buses/",
-        json={
-            "bus_number": "BUS-401",
+    created = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "BUS-401",
             "license_plate": "ABC-401",
             "capacity": 30,
             "size": "mini",
@@ -166,10 +151,7 @@ def test_update_bus(client):
 
 
 def test_delete_bus(client):
-    created = client.post(
-        "/buses/",
-        json={
-            "bus_number": "BUS-501",
+    created = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "BUS-501",
             "license_plate": "ABC-501",
             "capacity": 44,
             "size": "full",
@@ -186,10 +168,7 @@ def test_delete_bus(client):
 
 
 def test_create_bus_rejects_duplicate_bus_number(client):
-    first = client.post(
-        "/buses/",
-        json={
-            "bus_number": "BUS-601",
+    first = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "BUS-601",
             "license_plate": "ABC-601",
             "capacity": 50,
             "size": "full",
@@ -197,10 +176,7 @@ def test_create_bus_rejects_duplicate_bus_number(client):
     )
     assert first.status_code in (200, 201)
 
-    duplicate = client.post(
-        "/buses/",
-        json={
-            "bus_number": "BUS-601",
+    duplicate = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "BUS-601",
             "license_plate": "ABC-602",
             "capacity": 50,
             "size": "full",
@@ -212,10 +188,7 @@ def test_create_bus_rejects_duplicate_bus_number(client):
 
 
 def test_create_bus_rejects_duplicate_license_plate(client):
-    first = client.post(
-        "/buses/",
-        json={
-            "bus_number": "BUS-701",
+    first = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "BUS-701",
             "license_plate": "ABC-701",
             "capacity": 24,
             "size": "mini",
@@ -223,10 +196,7 @@ def test_create_bus_rejects_duplicate_license_plate(client):
     )
     assert first.status_code in (200, 201)
 
-    duplicate = client.post(
-        "/buses/",
-        json={
-            "bus_number": "BUS-702",
+    duplicate = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "BUS-702",
             "license_plate": "ABC-701",
             "capacity": 24,
             "size": "mini",
@@ -242,10 +212,7 @@ def test_assign_bus_to_route(client):
         "/routes/",
         json={"route_number": "BUS-LINK-1"},
     )
-    bus = client.post(
-        "/buses/",
-        json={
-            "bus_number": "BUS-801",
+    bus = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "BUS-801",
             "license_plate": "ABC-801",
             "capacity": 42,
             "size": "full",
@@ -266,10 +233,7 @@ def test_unassign_bus_from_route(client):
         "/routes/",
         json={"route_number": "BUS-LINK-2"},
     )
-    bus = client.post(
-        "/buses/",
-        json={
-            "bus_number": "BUS-802",
+    bus = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "BUS-802",
             "license_plate": "ABC-802",
             "capacity": 36,
             "size": "mid",
@@ -293,10 +257,7 @@ def test_route_detail_and_list_show_bus_id_when_assigned(client):
         "/routes/",
         json={"route_number": "BUS-LINK-3"},
     )
-    bus = client.post(
-        "/buses/",
-        json={
-            "bus_number": "BUS-803",
+    bus = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "BUS-803",
             "license_plate": "ABC-803",
             "capacity": 54,
             "size": "full",
@@ -322,10 +283,7 @@ def test_route_detail_and_list_show_bus_id_when_assigned(client):
 
 
 def test_assign_bus_to_route_rejects_missing_route_or_bus(client):
-    bus = client.post(
-        "/buses/",
-        json={
-            "bus_number": "BUS-804",
+    bus = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "BUS-804",
             "license_plate": "ABC-804",
             "capacity": 28,
             "size": "mini",
@@ -356,10 +314,7 @@ def test_unassign_bus_from_route_rejects_missing_route(client):
 
 
 def test_bus_detail_returns_empty_assigned_routes_when_unassigned(client):
-    created = client.post(
-        "/buses/",
-        json={
-            "bus_number": "BUS-901",
+    created = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "BUS-901",
             "license_plate": "ABC-901",
             "capacity": 44,
             "size": "full",
@@ -377,18 +332,13 @@ def test_bus_detail_returns_assigned_route_with_nested_context(client):
         "/schools/",
         json={"name": "Bus Detail School", "address": "901 Bus Detail Rd"},
     )
-    driver = client.post(
-        "/drivers/",
-        json={"name": "Bus Detail Driver", "email": "bus.detail.driver@test.com", "phone": "901", "pin": "1234"},
+    driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Bus Detail Driver", "email": "bus.detail.driver@test.com", "phone": "901", "pin": "1234"},
     )
     route = client.post(
         "/routes/",
         json={"route_number": "BUS-DETAIL-ROUTE", "school_ids": [school.json()["id"]]},
     )
-    bus = client.post(
-        "/buses/",
-        json={
-            "bus_number": "BUS-902",
+    bus = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "BUS-902",
             "license_plate": "ABC-902",
             "capacity": 48,
             "size": "full",
