@@ -17,7 +17,7 @@ from backend.models.yard import Yard
 from backend.models.operator import Operator, OperatorRouteAccess
 from backend.routers.run_helpers import EXECUTION_RUN_BLOCKED_DETAIL
 from backend.utils.planning_scope import EXECUTION_ROUTE_BLOCKED_DETAIL
-from tests.conftest import TEST_DRIVER_PIN, _create_operator_in_db, _create_driver_in_db
+from tests.conftest import TEST_DRIVER_PIN, _create_operator_in_db, _create_driver_in_db, _set_operator_session
 
 
 # ---------------------------------------------------------------------------
@@ -25,8 +25,7 @@ from tests.conftest import TEST_DRIVER_PIN, _create_operator_in_db, _create_driv
 # ---------------------------------------------------------------------------
 
 def _login(client, operator_id: int) -> None:
-    r = client.post("/session/operator", json={"operator_id": operator_id})
-    assert r.status_code == 200, f"Session bootstrap failed: {r.text}"
+    _set_operator_session(client, operator_id)
 
 
 def _logout(client) -> None:
@@ -312,18 +311,11 @@ def _create_student_via_run_stop(
 # AUTH: temporary operator session behaviour
 # ---------------------------------------------------------------------------
 
-def test_session_operator_requires_valid_operator(client, db_engine):
+def test_session_operator_path_is_unavailable(client, db_engine):
     operator_id = _create_operator_in_db(db_engine, "Session Operator")
 
-    missing_operator = client.post("/session/operator", json={})
-    assert missing_operator.status_code == 422
-
-    invalid_operator = client.post("/session/operator", json={"operator_id": 999999})
-    assert invalid_operator.status_code == 404
-
     valid_session = client.post("/session/operator", json={"operator_id": operator_id})
-    assert valid_session.status_code == 200
-    assert valid_session.json()["operator_id"] == operator_id
+    assert valid_session.status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -1722,7 +1714,7 @@ def test_shared_operator_can_confirm_school_reports_for_district_owned_school(cl
     context = _build_shared_school_reports_context(client, db_engine)
 
     update = client.post(
-        f"/runs/{context['run_id']}/students/{context['student_id']}/school-status",
+        f"/reports/run/{context['run_id']}/students/{context['student_id']}/school-status",
         json={"status": "absent"},
     )
     assert update.status_code == 200
@@ -1735,7 +1727,7 @@ def test_shared_operator_can_confirm_school_reports_for_district_owned_school(cl
     assert response.status_code == 200
     assert response.json()["school_id"] == context["school_id"]
     assert response.json()["run_id"] == context["run_id"]
-    assert response.json()["confirmed_by_role"] == "school"
+    assert response.json()["confirmed_by"] == "Shared Front Desk"
 
 
 def test_shared_operator_can_view_school_reports_by_date_and_mobile_for_district_owned_school(client, db_engine):
@@ -3078,16 +3070,17 @@ def test_school_reports_summary_blocked_for_operator_without_yard(client, db_eng
 # Bootstrap endpoint tests
 # ---------------------------------------------------------------------------
 
-def test_bootstrap_operator_works_on_empty_db(empty_client):
+def test_bootstrap_operator_path_is_unavailable_on_empty_db(empty_client, db_engine):
     r = empty_client.post("/session/bootstrap-operator", json={"name": "First Operator"})
-    assert r.status_code == 200
-    assert "operator_id" in r.json()
+    assert r.status_code == 404
+    with Session(db_engine) as db:
+        assert db.query(Operator).count() == 0
 
 
-def test_bootstrap_operator_fails_when_operator_exists(empty_client, db_engine):
+def test_bootstrap_operator_path_is_unavailable_when_operator_exists(empty_client, db_engine):
     _create_operator_in_db(db_engine, "Existing Operator")
     r = empty_client.post("/session/bootstrap-operator", json={"name": "Second Operator"})
-    assert r.status_code == 409
+    assert r.status_code == 404
 
 
 def test_no_default_operator_is_auto_created_for_unauthenticated_requests(empty_client, db_engine):
@@ -3098,12 +3091,12 @@ def test_no_default_operator_is_auto_created_for_unauthenticated_requests(empty_
         assert db.query(Operator).count() == 0
 
 
-def test_bootstrap_operator_sets_session(empty_client):
+def test_bootstrap_operator_path_does_not_create_session(empty_client):
     r = empty_client.post("/session/bootstrap-operator", json={"name": "Session Bootstrap Operator"})
-    assert r.status_code == 200
+    assert r.status_code == 404
     # Authenticated endpoint must succeed â€” session was set by bootstrap
     drivers = empty_client.get("/drivers/")
-    assert drivers.status_code == 200
+    assert drivers.status_code == 401
 
 
 # ---------------------------------------------------------------------------

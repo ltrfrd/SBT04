@@ -1,7 +1,10 @@
 import uuid
 
 import pytest
+from sqlalchemy.orm import Session
 
+from app import get_db
+from backend.models.route import Route
 from tests.conftest import ensure_prepared_run_student, ensure_route_has_execution_yard
 
 
@@ -12,7 +15,11 @@ def _setup_run(client):
     assert r.status_code in (200, 201)
     driver_id = r.json()["id"]
 
-    r = client.post("/routes/", json={"route_number": f"R1-{unique}"})
+    district = client.post("/districts/", json={"name": f"DIST-{unique}"})
+    assert district.status_code in (200, 201)
+    district_id = district.json()["id"]
+
+    r = client.post(f"/districts/{district_id}/routes", json={"route_number": f"R1-{unique}"})
     assert r.status_code in (200, 201)
     route_id = r.json()["id"]
 
@@ -20,7 +27,14 @@ def _setup_run(client):
     assert r.status_code in (200, 201)
     ensure_route_has_execution_yard(client, route_id)
 
-    r = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
+    r = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs",
+        json={
+            "run_type": "AM",
+            "scheduled_start_time": "07:00:00",
+            "scheduled_end_time": "08:00:00",
+        },
+    )
     assert r.status_code in (200, 201)
     return r.json()["id"]
 
@@ -98,9 +112,23 @@ def test_stop_create_normalizes_flexible_type_values(client, stop_type, expected
     school_id = None
 
     if "school" in stop_type:
-        school = client.post("/schools/", json={"name": "Normalize School", "address": "1 School Way"})
+        run_response = client.get(f"/runs/{run_id}")
+        assert run_response.status_code == 200
+        route_id = run_response.json()["route"]["route_id"]
+        db_engine = client._wrapped_client.app.dependency_overrides[get_db].__closure__[0].cell_contents.kw["bind"]
+        with Session(db_engine) as db:
+            route = db.get(Route, route_id)
+            assert route is not None
+            district_id = route.district_id
+            route_number = route.route_number
+        school = client.post(f"/districts/{district_id}/schools", json={"name": "Normalize School", "address": "1 School Way"})
         assert school.status_code in (200, 201)
         school_id = school.json()["id"]
+        route_update = client.put(
+            f"/districts/{district_id}/routes/{route_id}",
+            json={"route_number": route_number, "school_ids": [school_id]},
+        )
+        assert route_update.status_code == 200
 
     response = client.post(
         "/stops/",
@@ -189,10 +217,19 @@ def test_run_context_stop_update_path_is_retired(client):
     run_a = client.get(f"/runs/{run_a_id}")
     assert run_a.status_code == 200
     route_id = run_a.json()["route"]["route_id"]
+    db_engine = client._wrapped_client.app.dependency_overrides[get_db].__closure__[0].cell_contents.kw["bind"]
+    with Session(db_engine) as db:
+        route = db.get(Route, route_id)
+        assert route is not None
+        district_id = route.district_id
 
     created_run = client.post(
-        "/runs/",
-        json={"route_id": route_id, "run_type": "PM"},
+        f"/districts/{district_id}/routes/{route_id}/runs",
+        json={
+            "run_type": "PM",
+            "scheduled_start_time": "07:00:00",
+            "scheduled_end_time": "08:00:00",
+        },
     )
     assert created_run.status_code in (200, 201)
     run_b_id = created_run.json()["id"]
@@ -326,11 +363,28 @@ def test_school_stop_requires_school_id(client):
 
 def test_run_context_school_stop_update_requires_school_id_and_sets_school_name(client):
     run_id = _setup_run(client)
+    run_response = client.get(f"/runs/{run_id}")
+    assert run_response.status_code == 200
+    route_id = run_response.json()["route"]["route_id"]
+    db_engine = client._wrapped_client.app.dependency_overrides[get_db].__closure__[0].cell_contents.kw["bind"]
+    with Session(db_engine) as db:
+        route = db.get(Route, route_id)
+        assert route is not None
+        district_id = route.district_id
+        route_number = route.route_number
 
-    first_school = client.post("/schools/", json={"name": "First School", "address": "1 School Way"})
-    second_school = client.post("/schools/", json={"name": "Second School", "address": "2 School Way"})
+    first_school = client.post(f"/districts/{district_id}/schools", json={"name": "First School", "address": "1 School Way"})
+    second_school = client.post(f"/districts/{district_id}/schools", json={"name": "Second School", "address": "2 School Way"})
     assert first_school.status_code in (200, 201)
     assert second_school.status_code in (200, 201)
+    route_update = client.put(
+        f"/districts/{district_id}/routes/{route_id}",
+        json={
+            "route_number": route_number,
+            "school_ids": [first_school.json()["id"], second_school.json()["id"]],
+        },
+    )
+    assert route_update.status_code == 200
 
     created = client.post(
         f"/runs/{run_id}/stops",

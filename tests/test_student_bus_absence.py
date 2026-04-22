@@ -3,33 +3,44 @@
 # - Verify planned no-ride creation and deletion behavior
 # -----------------------------------------------------------
 def _create_student(client):
-    school_response = client.post("/schools/", json={"name": "Absence School", "address": "100 Main St"})  # Create school dependency
+    district_response = client.post(
+        "/districts/",
+        json={"name": "Absence District"},
+    )
+    assert district_response.status_code in (200, 201)
+    district_id = district_response.json()["id"]
+
+    school_response = client.post(f"/districts/{district_id}/schools", json={"name": "Absence School", "address": "100 Main St"})  # Create school dependency
     assert school_response.status_code in (200, 201)  # Confirm school creation succeeded
     school_id = school_response.json()["id"]  # Extract school ID
 
     route_response = client.post(
-        "/routes/",
+        f"/districts/{district_id}/routes",
         json={"route_number": "ABSENCE-STUDENT-ROUTE", "school_ids": [school_id]},
     )  # Create route context for student planning
     assert route_response.status_code in (200, 201)
     route_id = route_response.json()["id"]
 
     run_response = client.post(
-        f"/routes/{route_id}/runs",
-        json={"run_type": "AM"},
+        f"/districts/{district_id}/routes/{route_id}/runs",
+        json={
+            "run_type": "AM",
+            "scheduled_start_time": "07:00:00",
+            "scheduled_end_time": "08:00:00",
+        },
     )
     assert run_response.status_code in (200, 201)
     run_id = run_response.json()["id"]
 
     stop_response = client.post(
-        f"/runs/{run_id}/stops",
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops",
         json={"sequence": 1, "type": "pickup", "name": "Absence Stop"},
     )
     assert stop_response.status_code in (200, 201)
     stop_id = stop_response.json()["id"]
 
     student_response = client.post(
-        f"/runs/{run_id}/stops/{stop_id}/students",
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops/{stop_id}/students",
         json={"name": "Absence Student", "grade": "4", "school_id": school_id},
     )  # Create student for absence tests
     assert student_response.status_code in (200, 201)  # Confirm student creation succeeded

@@ -18,6 +18,7 @@ from backend.models.run import Run
 from backend.models.run_event import RunEvent
 from backend.models.associations import StudentRunAssignment
 from backend.models.run_verification import RunVerification
+from backend.models.school_attendance_verification import SchoolAttendanceVerification
 from backend.models.yard import Yard
 from backend.models import school as school_model
 from backend.utils.planning_scope import (
@@ -338,14 +339,14 @@ def _serialize_run_verification(*, verification: RunVerification | None) -> dict
             "mismatch_count": 0,
             "is_confirmed": False,
             "confirmed_at": None,
-            "confirmed_by_role": None,
+            "confirmed_by": None,
         }
     return {
         "status": verification.status,
         "mismatch_count": verification.mismatch_count,
         "is_confirmed": verification.status == "confirmed",
         "confirmed_at": verification.confirmed_at,
-        "confirmed_by_role": verification.confirmed_by_role,
+        "confirmed_by": None,
     }
 
 
@@ -462,13 +463,42 @@ def school_reports_summary_execution(
                 )
             school_students_rows.sort(key=lambda row: (row.get("student_name") or "").lower())
 
-            verification = None
-            if direction is not None:
-                verification = get_run_verification(
-                    db=db,
-                    run_id=run.id,
-                    direction=direction,
+            if direction == "AM":
+                mismatch_count = sum(
+                    1
+                    for assignment in visible_assignments
+                    if assignment_mismatch(assignment=assignment, direction=direction)[0]
                 )
+                missing_school_truth = any(
+                    assignment_school_truth(assignment=assignment, direction=direction) is None
+                    for assignment in visible_assignments
+                )
+                school_confirmation = (
+                    db.query(SchoolAttendanceVerification)
+                    .filter(
+                        SchoolAttendanceVerification.school_id == school_id,
+                        SchoolAttendanceVerification.run_id == run.id,
+                    )
+                    .first()
+                )
+                confirmation = {
+                    "status": "confirmed" if school_confirmation is not None else (
+                        "pending" if missing_school_truth else ("mismatch" if mismatch_count > 0 else "resolved")
+                    ),
+                    "mismatch_count": mismatch_count,
+                    "is_confirmed": school_confirmation is not None,
+                    "confirmed_at": school_confirmation.confirmed_at if school_confirmation is not None else None,
+                    "confirmed_by": school_confirmation.confirmed_by if school_confirmation is not None else None,
+                }
+            else:
+                verification = None
+                if direction is not None:
+                    verification = get_run_verification(
+                        db=db,
+                        run_id=run.id,
+                        direction=direction,
+                    )
+                confirmation = _serialize_run_verification(verification=verification)
 
             results.append(
                 {
@@ -484,7 +514,7 @@ def school_reports_summary_execution(
                     "total_students": len(school_students_rows),
                     "total_present": sum(1 for row in school_students_rows if row.get("status") == "present"),
                     "total_absent": sum(1 for row in school_students_rows if row.get("status") == "absent"),
-                    "confirmation": _serialize_run_verification(verification=verification),
+                    "confirmation": confirmation,
                 }
             )
 

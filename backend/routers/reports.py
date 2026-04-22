@@ -35,6 +35,7 @@ from backend.models.run_event import RunEvent                   # Run event hist
 from backend.models.student import Student                      # Student model
 from backend.models.school import School                        # School model
 from backend.models.student_bus_absence import StudentBusAbsence  # Planned absence model
+from backend.models.school_attendance_verification import SchoolAttendanceVerification
 from backend.models.associations import StudentRunAssignment       # Runtime student assignments
 from backend.models.route import Route                                    # Route model
 from backend.models.yard import Yard
@@ -51,7 +52,7 @@ from backend.utils.planning_scope import (
     operator_has_yard_route_assignments,
 )
 from backend.utils.run_verification import (
-    confirm_run_verification,
+    assignment_mismatch,
     get_run_verification,
     get_or_create_run_verification,
     normalize_run_direction,
@@ -434,33 +435,58 @@ def confirm_school_reports(
 
     assignments = (
         db.query(StudentRunAssignment)
+        .options(joinedload(StudentRunAssignment.student))
         .filter(StudentRunAssignment.run_id == run.id)
         .all()
     )
-    verification = confirm_run_verification(
-        db=db,
-        run=run,
-        confirmed_by_role="school",
-        assignments=assignments,
+    school_assignments = [
+        assignment
+        for assignment in assignments
+        if assignment.student and assignment.student.school_id == school_id
+    ]
+
+    mismatch_count = sum(
+        1
+        for assignment in school_assignments
+        if assignment_mismatch(assignment=assignment, direction=direction)[0]
     )
-    if verification.mismatch_count > 0:
-        db.commit()
+    if mismatch_count > 0:
         raise HTTPException(
             status_code=400,
             detail="Verification mismatch remains for this run",
         )
 
+    confirmation = (
+        db.query(SchoolAttendanceVerification)
+        .filter(
+            SchoolAttendanceVerification.school_id == school_id,
+            SchoolAttendanceVerification.run_id == run.id,
+        )
+        .first()
+    )
+    if confirmation is None:
+        confirmation = SchoolAttendanceVerification(
+            school_id=school_id,
+            run_id=run.id,
+            confirmed_at=datetime.now(timezone.utc),
+            confirmed_by=payload.confirmed_by,
+        )
+        db.add(confirmation)
+    else:
+        confirmation.confirmed_at = datetime.now(timezone.utc)
+        confirmation.confirmed_by = payload.confirmed_by
+
     db.commit()
-    db.refresh(verification)
+    db.refresh(confirmation)
 
     return {
         "message": "School reports confirmed",
         "school_id": school_id,
         "run_id": run.id,
-        "status": verification.status,
-        "mismatch_count": verification.mismatch_count,
-        "confirmed_at": verification.confirmed_at,
-        "confirmed_by_role": verification.confirmed_by_role,
+        "status": "confirmed",
+        "mismatch_count": mismatch_count,
+        "confirmed_at": confirmation.confirmed_at,
+        "confirmed_by": confirmation.confirmed_by,
     }
 
 
@@ -973,15 +999,16 @@ def update_school_status_for_assignment(
             detail="Use POST /reports/run/{run_id}/students/{student_id}/pm/release for PM runs",
         )
 
-    verification = None
-    if direction is not None:
-        verification = get_run_verification(
-            db=db,
-            run_id=run_id,
-            direction=direction,
+    confirmation = (
+        db.query(SchoolAttendanceVerification)
+        .filter(
+            SchoolAttendanceVerification.school_id == assignment.student.school_id,
+            SchoolAttendanceVerification.run_id == run_id,
         )
+        .first()
+    )
 
-    if verification and verification.status == "confirmed":
+    if confirmation is not None:
         raise HTTPException(
             status_code=400,
             detail="Reports already confirmed for this run",

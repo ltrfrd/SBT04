@@ -1,66 +1,13 @@
 # ===========================================================
-# backend/routers/session.py - Transitional Session Router
+# backend/routers/session.py - Session Router
 # -----------------------------------------------------------
-# Temporary operator-session injection for legacy cleanup.
+# Session clearing endpoint only.
 # ===========================================================
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from pydantic import BaseModel
-from sqlalchemy.orm import Session
-
-from database import get_db
-from backend.models.operator import Operator
+from fastapi import APIRouter, Request
 
 
 router = APIRouter()
-
-
-class OperatorSessionRequest(BaseModel):
-    operator_id: int
-
-
-class BootstrapOperatorRequest(BaseModel):
-    name: str
-
-
-@router.post("/session/bootstrap-operator")
-def bootstrap_operator(
-    payload: BootstrapOperatorRequest = Body(...),
-    request: Request = None,
-    db: Session = Depends(get_db),
-):
-    if db.query(Operator).count() > 0:
-        raise HTTPException(status_code=409, detail="Bootstrap refused: operators already exist")
-
-    operator = Operator(name=payload.name)
-    db.add(operator)
-    db.commit()
-    db.refresh(operator)
-
-    request.session["operator_id"] = operator.id
-    request.session.pop("driver_id", None)
-    return {"operator_id": operator.id}
-
-
-@router.post("/session/operator")
-def set_operator_session(
-    payload: OperatorSessionRequest = Body(...),
-    request: Request = None,
-    db: Session = Depends(get_db),
-):
-    operator = db.get(Operator, payload.operator_id)
-    if not operator:
-        raise HTTPException(status_code=404, detail="Operator not found")
-
-    # DEV ONLY — NOT FOR PRODUCTION.
-    # Transitional session bootstrap that preserves the existing
-    # session["operator_id"] contract used by operator-scoped endpoints.
-    request.session["operator_id"] = operator.id
-    request.session.pop("driver_id", None)
-    return {
-        "message": "Operator session set",
-        "operator_id": operator.id,
-    }
 
 
 @router.post("/session/logout")

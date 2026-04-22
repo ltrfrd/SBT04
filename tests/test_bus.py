@@ -1,6 +1,8 @@
-from tests.conftest import client, ensure_prepared_run_student
+from tests.conftest import client
+from datetime import date
 from sqlalchemy.orm import Session
 from app import get_db
+from backend.models.district import District
 from backend.models.route import Route
 from backend.models.yard import Yard
 
@@ -208,8 +210,16 @@ def test_create_bus_rejects_duplicate_license_plate(client):
 
 
 def test_assign_bus_to_route(client):
+    db_engine = _get_client_db_engine(client)
+    with Session(db_engine) as db:
+        district = District(name="BUS-LINK-1 District")
+        db.add(district)
+        db.commit()
+        db.refresh(district)
+        district_id = district.id
+
     route = client.post(
-        "/routes/",
+        f"/districts/{district_id}/routes",
         json={"route_number": "BUS-LINK-1"},
     )
     bus = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "BUS-801",
@@ -229,8 +239,16 @@ def test_assign_bus_to_route(client):
 
 
 def test_unassign_bus_from_route(client):
+    db_engine = _get_client_db_engine(client)
+    with Session(db_engine) as db:
+        district = District(name="BUS-LINK-2 District")
+        db.add(district)
+        db.commit()
+        db.refresh(district)
+        district_id = district.id
+
     route = client.post(
-        "/routes/",
+        f"/districts/{district_id}/routes",
         json={"route_number": "BUS-LINK-2"},
     )
     bus = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "BUS-802",
@@ -253,8 +271,16 @@ def test_unassign_bus_from_route(client):
 
 
 def test_route_detail_and_list_show_bus_id_when_assigned(client):
+    db_engine = _get_client_db_engine(client)
+    with Session(db_engine) as db:
+        district = District(name="BUS-LINK-3 District")
+        db.add(district)
+        db.commit()
+        db.refresh(district)
+        district_id = district.id
+
     route = client.post(
-        "/routes/",
+        f"/districts/{district_id}/routes",
         json={"route_number": "BUS-LINK-3"},
     )
     bus = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "BUS-803",
@@ -289,8 +315,16 @@ def test_assign_bus_to_route_rejects_missing_route_or_bus(client):
             "size": "mini",
         },
     )
+    db_engine = _get_client_db_engine(client)
+    with Session(db_engine) as db:
+        district = District(name="BUS-LINK-4 District")
+        db.add(district)
+        db.commit()
+        db.refresh(district)
+        district_id = district.id
+
     route = client.post(
-        "/routes/",
+        f"/districts/{district_id}/routes",
         json={"route_number": "BUS-LINK-4"},
     )
 
@@ -328,14 +362,22 @@ def test_bus_detail_returns_empty_assigned_routes_when_unassigned(client):
 
 
 def test_bus_detail_returns_assigned_route_with_nested_context(client):
+    db_engine = _get_client_db_engine(client)
+    with Session(db_engine) as db:
+        district = District(name="Bus Detail District")
+        db.add(district)
+        db.commit()
+        db.refresh(district)
+        district_id = district.id
+
     school = client.post(
-        "/schools/",
+        f"/districts/{district_id}/schools",
         json={"name": "Bus Detail School", "address": "901 Bus Detail Rd"},
     )
     driver = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "Bus Detail Driver", "email": "bus.detail.driver@test.com", "phone": "901", "pin": "1234"},
     )
     route = client.post(
-        "/routes/",
+        f"/districts/{district_id}/routes",
         json={"route_number": "BUS-DETAIL-ROUTE", "school_ids": [school.json()["id"]]},
     )
     bus = client.post("/buses/", json={"yard_id": client.ensure_current_operator_yard_id(), "bus_number": "BUS-902",
@@ -356,11 +398,18 @@ def test_bus_detail_returns_assigned_route_with_nested_context(client):
     assert assign_bus.status_code == 200
     _ensure_route_has_execution_yard(client, route.json()["id"])
 
-    run = client.post(f"/routes/{route.json()['id']}/runs", json={"run_type": "Morning"})
+    run = client.post(
+        f"/districts/{district_id}/routes/{route.json()['id']}/runs",
+        json={
+            "run_type": "Morning",
+            "scheduled_start_time": "07:00:00",
+            "scheduled_end_time": "08:00:00",
+        },
+    )
     assert run.status_code in (200, 201)
 
     stop = client.post(
-        f"/runs/{run.json()['id']}/stops",
+        f"/districts/{district_id}/routes/{route.json()['id']}/runs/{run.json()['id']}/stops",
         json={
             "name": "Bus Detail Stop",
             "address": "902 Bus Detail Rd",
@@ -373,7 +422,33 @@ def test_bus_detail_returns_assigned_route_with_nested_context(client):
     )
     assert stop.status_code in (200, 201)
 
-    student = ensure_prepared_run_student(client, run.json()["id"])
+    student = client.post(
+        f"/districts/{district_id}/routes/{route.json()['id']}/runs/{run.json()['id']}/stops/{stop.json()['id']}/students",
+        json={"name": "Prepared Student", "grade": "1", "school_id": school.json()["id"]},
+    )
+    assert student.status_code in (200, 201)
+    pretrip = client.post(
+        "/pretrips/",
+        json={
+            "bus_number": bus.json()["bus_number"],
+            "license_plate": bus.json()["license_plate"],
+            "driver_name": "Bus Detail Driver",
+            "inspection_date": date.today().isoformat(),
+            "inspection_time": "06:30:00",
+            "odometer": 1902,
+            "inspection_place": "Test Yard",
+            "use_type": "school_bus",
+            "brakes_checked": True,
+            "lights_checked": True,
+            "tires_checked": True,
+            "emergency_equipment_checked": True,
+            "fit_for_duty": "yes",
+            "no_defects": True,
+            "signature": "test-signature",
+            "defects": [],
+        },
+    )
+    assert pretrip.status_code in (200, 201)
     start = client.post(f"/runs/start?run_id={run.json()['id']}")
     assert start.status_code in (200, 201)
 
@@ -419,8 +494,8 @@ def test_bus_detail_returns_assigned_route_with_nested_context(client):
     ]
     assert run_detail["students"] == [
         {
-            "student_id": student["id"],
-            "student_name": student["name"],
+            "student_id": student.json()["id"],
+            "student_name": student.json()["name"],
             "school_id": school.json()["id"],
             "school_name": "Bus Detail School",
             "stop_id": stop.json()["id"],

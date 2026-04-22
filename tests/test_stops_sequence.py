@@ -1,133 +1,308 @@
 from tests.conftest import ensure_route_has_execution_yard
 
 
-def _create_driver(client):
-    r = client.post("/drivers/", json={"yard_id": client.ensure_current_operator_yard_id(), "name": "T", "email": "t@t.com", "phone": "1", "pin": "1234"})
-    assert r.status_code in (200, 201)
-    return r.json()["id"]
-
-
-def _create_route(client, driver_id: int):
-    r = client.post(
-        "/routes/",
-        json={"route_number": "R1"},
-    )
-    assert r.status_code in (200, 201)
-    route_id = r.json()["id"]
-
-    r = client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
-    assert r.status_code in (200, 201)
-    ensure_route_has_execution_yard(client, route_id)
-    return route_id
-
-
-def _create_run(client, driver_id: int, route_id: int):
-    r = client.post(f"/routes/{route_id}/runs", json={"run_type": "AM"})
-    assert r.status_code in (200, 201)
-    return r.json()["id"]
-
-
-def _create_stop(client, run_id: int, name: str, sequence=None):
-    payload = {
-        "run_id": run_id,
-        "name": name,
-        "latitude": 40.0,
-        "longitude": -70.0,
-        "type": "pickup",
-    }
-    if sequence is not None:
-        payload["sequence"] = sequence
-
-    r = client.post("/stops/", json=payload)
-    assert r.status_code in (200, 201)
-    return r.json()
-
-
-def _list_stops(client, run_id: int):
-    r = client.get("/stops/", params={"run_id": run_id})
-    assert r.status_code == 200
-    return r.json()
-
-
 def test_stop_append_mode_assigns_next_sequence(client):
-    driver_id = _create_driver(client)
-    route_id = _create_route(client, driver_id)
-    run_id = _create_run(client, driver_id, route_id)
+    driver = client.post(
+        "/drivers/",
+        json={"yard_id": client.ensure_current_operator_yard_id(), "name": "T", "email": "t@t.com", "phone": "1", "pin": "1234"},
+    )
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]
 
-    s1 = _create_stop(client, run_id, "A")
-    s2 = _create_stop(client, run_id, "B")
+    district = client.post("/districts/", json={"name": "R1 District"})
+    assert district.status_code in (200, 201)
+    district_id = district.json()["id"]
 
-    assert s1["sequence"] == 1
-    assert s2["sequence"] == 2
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "R1 School", "address": "1 Main St"},
+    )
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]
+
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "R1", "school_ids": [school_id]},
+    )
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    assigned_driver = client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
+    assert assigned_driver.status_code in (200, 201)
+    ensure_route_has_execution_yard(client, route_id)
+
+    run = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs",
+        json={"run_type": "AM", "scheduled_start_time": "07:00:00", "scheduled_end_time": "08:00:00"},
+    )
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    s1 = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops",
+        json={"name": "A", "latitude": 40.0, "longitude": -70.0, "type": "pickup"},
+    )
+    s2 = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops",
+        json={"name": "B", "latitude": 40.0, "longitude": -70.0, "type": "pickup"},
+    )
+
+    assert s1.status_code in (200, 201)
+    assert s2.status_code in (200, 201)
+    assert s1.json()["sequence"] == 1
+    assert s2.json()["sequence"] == 2
 
 
 def test_stop_insert_mode_shifts_block(client):
-    driver_id = _create_driver(client)
-    route_id = _create_route(client, driver_id)
-    run_id = _create_run(client, driver_id, route_id)
+    driver = client.post(
+        "/drivers/",
+        json={"yard_id": client.ensure_current_operator_yard_id(), "name": "T", "email": "t@t.com", "phone": "1", "pin": "1234"},
+    )
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]
 
-    _create_stop(client, run_id, "A")
-    _create_stop(client, run_id, "B")
-    _create_stop(client, run_id, "C")
+    district = client.post("/districts/", json={"name": "R1 District"})
+    assert district.status_code in (200, 201)
+    district_id = district.json()["id"]
 
-    _create_stop(client, run_id, "X", sequence=2)
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "R1 School", "address": "1 Main St"},
+    )
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]
 
-    stops = _list_stops(client, run_id)
-    names = [s["name"] for s in stops]
-    seqs = [s["sequence"] for s in stops]
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "R1", "school_ids": [school_id]},
+    )
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    assigned_driver = client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
+    assert assigned_driver.status_code in (200, 201)
+    ensure_route_has_execution_yard(client, route_id)
+
+    run = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs",
+        json={"run_type": "AM", "scheduled_start_time": "07:00:00", "scheduled_end_time": "08:00:00"},
+    )
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    first = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops",
+        json={"name": "A", "latitude": 40.0, "longitude": -70.0, "type": "pickup"},
+    )
+    second = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops",
+        json={"name": "B", "latitude": 40.0, "longitude": -70.0, "type": "pickup"},
+    )
+    third = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops",
+        json={"name": "C", "latitude": 40.0, "longitude": -70.0, "type": "pickup"},
+    )
+    inserted = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops",
+        json={"name": "X", "latitude": 40.0, "longitude": -70.0, "type": "pickup", "sequence": 2},
+    )
+
+    assert first.status_code in (200, 201)
+    assert second.status_code in (200, 201)
+    assert third.status_code in (200, 201)
+    assert inserted.status_code in (200, 201)
+
+    stops = client.get("/stops/", params={"run_id": run_id})
+    assert stops.status_code == 200
+    names = [s["name"] for s in stops.json()]
+    seqs = [s["sequence"] for s in stops.json()]
 
     assert names == ["A", "X", "B", "C"]
     assert seqs == [1, 2, 3, 4]
 
 
 def test_stop_reorder_moves_and_shifts(client):
-    driver_id = _create_driver(client)
-    route_id = _create_route(client, driver_id)
-    run_id = _create_run(client, driver_id, route_id)
+    driver = client.post(
+        "/drivers/",
+        json={"yard_id": client.ensure_current_operator_yard_id(), "name": "T", "email": "t@t.com", "phone": "1", "pin": "1234"},
+    )
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]
 
-    _create_stop(client, run_id, "A")
-    _create_stop(client, run_id, "B")
-    _create_stop(client, run_id, "C")
-    d = _create_stop(client, run_id, "D")
+    district = client.post("/districts/", json={"name": "R1 District"})
+    assert district.status_code in (200, 201)
+    district_id = district.json()["id"]
 
-    r = client.put(f"/stops/{d['id']}/reorder", json={"new_sequence": 2})
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "R1 School", "address": "1 Main St"},
+    )
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]
+
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "R1", "school_ids": [school_id]},
+    )
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    assigned_driver = client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
+    assert assigned_driver.status_code in (200, 201)
+    ensure_route_has_execution_yard(client, route_id)
+
+    run = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs",
+        json={"run_type": "AM", "scheduled_start_time": "07:00:00", "scheduled_end_time": "08:00:00"},
+    )
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    first = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops",
+        json={"name": "A", "latitude": 40.0, "longitude": -70.0, "type": "pickup"},
+    )
+    second = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops",
+        json={"name": "B", "latitude": 40.0, "longitude": -70.0, "type": "pickup"},
+    )
+    third = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops",
+        json={"name": "C", "latitude": 40.0, "longitude": -70.0, "type": "pickup"},
+    )
+    d = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops",
+        json={"name": "D", "latitude": 40.0, "longitude": -70.0, "type": "pickup"},
+    )
+
+    assert first.status_code in (200, 201)
+    assert second.status_code in (200, 201)
+    assert third.status_code in (200, 201)
+    assert d.status_code in (200, 201)
+
+    r = client.put(f"/stops/{d.json()['id']}/reorder", json={"new_sequence": 2})
     assert r.status_code == 200
 
-    stops = _list_stops(client, run_id)
-    names = [s["name"] for s in stops]
-    seqs = [s["sequence"] for s in stops]
+    stops = client.get("/stops/", params={"run_id": run_id})
+    assert stops.status_code == 200
+    names = [s["name"] for s in stops.json()]
+    seqs = [s["sequence"] for s in stops.json()]
 
     assert names == ["A", "D", "B", "C"]
     assert seqs == [1, 2, 3, 4]
 
 
 def test_stop_delete_normalizes_gap_free(client):
-    driver_id = _create_driver(client)
-    route_id = _create_route(client, driver_id)
-    run_id = _create_run(client, driver_id, route_id)
+    driver = client.post(
+        "/drivers/",
+        json={"yard_id": client.ensure_current_operator_yard_id(), "name": "T", "email": "t@t.com", "phone": "1", "pin": "1234"},
+    )
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]
 
-    _create_stop(client, run_id, "A")
-    b = _create_stop(client, run_id, "B")
-    _create_stop(client, run_id, "C")
+    district = client.post("/districts/", json={"name": "R1 District"})
+    assert district.status_code in (200, 201)
+    district_id = district.json()["id"]
 
-    r = client.delete(f"/stops/{b['id']}")
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "R1 School", "address": "1 Main St"},
+    )
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]
+
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "R1", "school_ids": [school_id]},
+    )
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    assigned_driver = client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
+    assert assigned_driver.status_code in (200, 201)
+    ensure_route_has_execution_yard(client, route_id)
+
+    run = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs",
+        json={"run_type": "AM", "scheduled_start_time": "07:00:00", "scheduled_end_time": "08:00:00"},
+    )
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    first = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops",
+        json={"name": "A", "latitude": 40.0, "longitude": -70.0, "type": "pickup"},
+    )
+    b = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops",
+        json={"name": "B", "latitude": 40.0, "longitude": -70.0, "type": "pickup"},
+    )
+    third = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops",
+        json={"name": "C", "latitude": 40.0, "longitude": -70.0, "type": "pickup"},
+    )
+
+    assert first.status_code in (200, 201)
+    assert b.status_code in (200, 201)
+    assert third.status_code in (200, 201)
+
+    r = client.delete(f"/stops/{b.json()['id']}")
     assert r.status_code in (200, 204)
 
-    stops = _list_stops(client, run_id)
-    names = [s["name"] for s in stops]
-    seqs = [s["sequence"] for s in stops]
+    stops = client.get("/stops/", params={"run_id": run_id})
+    assert stops.status_code == 200
+    names = [s["name"] for s in stops.json()]
+    seqs = [s["sequence"] for s in stops.json()]
 
     assert names == ["A", "C"]
     assert seqs == [1, 2]
 
 
 def test_run_context_stop_creation_auto_assigns_sequence_and_default_name(client):
-    driver_id = _create_driver(client)
-    route_id = _create_route(client, driver_id)
-    run_id = _create_run(client, driver_id, route_id)
+    driver = client.post(
+        "/drivers/",
+        json={"yard_id": client.ensure_current_operator_yard_id(), "name": "T", "email": "t@t.com", "phone": "1", "pin": "1234"},
+    )
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]
 
-    first = client.post(f"/runs/{run_id}/stops", json={"type": "pickup"})
-    second = client.post(f"/runs/{run_id}/stops", json={"type": "dropoff"})
+    district = client.post("/districts/", json={"name": "R1 District"})
+    assert district.status_code in (200, 201)
+    district_id = district.json()["id"]
+
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "R1 School", "address": "1 Main St"},
+    )
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]
+
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "R1", "school_ids": [school_id]},
+    )
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    assigned_driver = client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
+    assert assigned_driver.status_code in (200, 201)
+    ensure_route_has_execution_yard(client, route_id)
+
+    run = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs",
+        json={"run_type": "AM", "scheduled_start_time": "07:00:00", "scheduled_end_time": "08:00:00"},
+    )
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
+
+    first = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops",
+        json={"type": "pickup"},
+    )
+    second = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops",
+        json={"type": "dropoff"},
+    )
 
     assert first.status_code in (200, 201)
     assert second.status_code in (200, 201)
@@ -138,21 +313,48 @@ def test_run_context_stop_creation_auto_assigns_sequence_and_default_name(client
 
 
 def test_run_context_stop_creation_supports_school_stops(client):
-    driver_id = _create_driver(client)
-    route_id = _create_route(client, driver_id)
-    school = client.post("/schools/", json={"name": "Central School", "address": "9 School Way"})
+    driver = client.post(
+        "/drivers/",
+        json={"yard_id": client.ensure_current_operator_yard_id(), "name": "T", "email": "t@t.com", "phone": "1", "pin": "1234"},
+    )
+    assert driver.status_code in (200, 201)
+    driver_id = driver.json()["id"]
+
+    district = client.post("/districts/", json={"name": "R1 District"})
+    assert district.status_code in (200, 201)
+    district_id = district.json()["id"]
+
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "Central School", "address": "9 School Way"},
+    )
     assert school.status_code in (200, 201)
     school_id = school.json()["id"]
-    assign = client.put(f"/routes/{route_id}", json={"route_number": "R1", "school_ids": [school_id]})
-    assert assign.status_code == 200
-    run_id = _create_run(client, driver_id, route_id)
+
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "R1", "school_ids": [school_id]},
+    )
+    assert route.status_code in (200, 201)
+    route_id = route.json()["id"]
+
+    assigned_driver = client.post(f"/routes/{route_id}/assign_driver/{driver_id}")
+    assert assigned_driver.status_code in (200, 201)
+    ensure_route_has_execution_yard(client, route_id)
+
+    run = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs",
+        json={"run_type": "AM", "scheduled_start_time": "07:00:00", "scheduled_end_time": "08:00:00"},
+    )
+    assert run.status_code in (200, 201)
+    run_id = run.json()["id"]
 
     arrive = client.post(
-        f"/runs/{run_id}/stops",
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops",
         json={"type": "school_arrive", "school_id": school_id},
     )
     depart = client.post(
-        f"/runs/{run_id}/stops",
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops",
         json={"type": "SCHOOL_DEPART", "school_id": school_id},
     )
 

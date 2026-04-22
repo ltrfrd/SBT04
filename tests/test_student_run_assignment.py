@@ -50,10 +50,14 @@ def _build_assignment_context(client, route_number: str, run_types: list[str]):
     ).json()
 
     # -------------------------------------------------------------------------
-    # Create school
+    # Create district and school
     # -------------------------------------------------------------------------
+    district = client.post(
+        "/districts/",
+        json={"name": f"{route_number} District"},
+    ).json()
     school = client.post(
-        "/schools/",
+        f"/districts/{district['id']}/schools",
         json={
             "name": f"{route_number} School",
             "address": f"{route_number} School Street",
@@ -65,7 +69,7 @@ def _build_assignment_context(client, route_number: str, run_types: list[str]):
     # Create route
     # -------------------------------------------------------------------------
     route = client.post(
-        "/routes/",
+        f"/districts/{district['id']}/routes",
         json={
             "route_number": route_number,
             "school_ids": [school["id"]],
@@ -82,16 +86,17 @@ def _build_assignment_context(client, route_number: str, run_types: list[str]):
     # -------------------------------------------------------------------------
     for index, run_type in enumerate(run_types, start=1):
         run = client.post(
-            "/runs/",
+            f"/districts/{district['id']}/routes/{route['id']}/runs",
             json={
-                "route_id": route["id"],
                 "run_type": run_type,
+                "scheduled_start_time": "07:00:00",
+                "scheduled_end_time": "08:00:00",
             },
         ).json()
         runs.append(run)
 
         stop = client.post(
-            f"/runs/{run['id']}/stops",
+            f"/districts/{district['id']}/routes/{route['id']}/runs/{run['id']}/stops",
             json={
                 "type": "pickup",
                 "sequence": 1,

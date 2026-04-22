@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.dispatch_alert import DispatchAlert
 
-from tests.conftest import ensure_prepared_run_student
+from tests.conftest import ensure_route_has_execution_yard
 
 
 def _pretrip_payload(context, **overrides):
@@ -44,9 +44,27 @@ def _create_pretrip_enforced_run(client, *, route_number: str, run_type: str = "
     )
     assert driver.status_code in (200, 201)
 
-    route = client.post("/routes/", json={"route_number": route_number})
+    district = client.post(
+        "/districts/",
+        json={"name": f"{route_number} District"},
+    )
+    assert district.status_code in (200, 201)
+    district_id = district.json()["id"]
+
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": f"{route_number} School", "address": f"{route_number} Way"},
+    )
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]
+
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": route_number, "school_ids": [school_id]},
+    )
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
+    ensure_route_has_execution_yard(client, route_id)
 
     assigned_driver = client.post(f"/routes/{route_id}/assign_driver/{driver.json()['id']}")
     assert assigned_driver.status_code in (200, 201)
@@ -64,7 +82,7 @@ def _create_pretrip_enforced_run(client, *, route_number: str, run_type: str = "
     assert assigned_bus.status_code == 200
 
     run = client.post(
-        f"/routes/{route_id}/runs",
+        f"/districts/{district_id}/routes/{route_id}/runs",
         json={
             "run_type": run_type,
             "scheduled_start_time": scheduled_start_time,
@@ -75,12 +93,17 @@ def _create_pretrip_enforced_run(client, *, route_number: str, run_type: str = "
     run_id = run.json()["id"]
 
     stop = client.post(
-        f"/runs/{run_id}/stops",
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops",
         json={"name": f"{route_number} Stop", "sequence": 1, "type": "pickup"},
     )
     assert stop.status_code in (200, 201)
+    stop_id = stop.json()["id"]
 
-    ensure_prepared_run_student(client, run_id)
+    student = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs/{run_id}/stops/{stop_id}/students",
+        json={"name": f"{route_number} Student", "grade": "1", "school_id": school_id},
+    )
+    assert student.status_code in (200, 201)
 
     return {
         "driver": driver.json(),
@@ -111,15 +134,33 @@ def test_start_run_blocks_when_route_has_no_active_bus(client):
     )
     assert driver.status_code in (200, 201)
 
-    route = client.post("/routes/", json={"route_number": "NO-ACTIVE-BUS-START"})
+    district = client.post(
+        "/districts/",
+        json={"name": "NO-ACTIVE-BUS-START District"},
+    )
+    assert district.status_code in (200, 201)
+    district_id = district.json()["id"]
+
+    school = client.post(
+        f"/districts/{district_id}/schools",
+        json={"name": "NO-ACTIVE-BUS-START School", "address": "No Active Bus Way"},
+    )
+    assert school.status_code in (200, 201)
+    school_id = school.json()["id"]
+
+    route = client.post(
+        f"/districts/{district_id}/routes",
+        json={"route_number": "NO-ACTIVE-BUS-START", "school_ids": [school_id]},
+    )
     assert route.status_code in (200, 201)
     route_id = route.json()["id"]
+    ensure_route_has_execution_yard(client, route_id)
 
     assigned_driver = client.post(f"/routes/{route_id}/assign_driver/{driver.json()['id']}")
     assert assigned_driver.status_code in (200, 201)
 
     run = client.post(
-        f"/routes/{route_id}/runs",
+        f"/districts/{district_id}/routes/{route_id}/runs",
         json={
             "run_type": "AM",
             "scheduled_start_time": "07:00:00",
@@ -129,12 +170,17 @@ def test_start_run_blocks_when_route_has_no_active_bus(client):
     assert run.status_code in (200, 201)
 
     stop = client.post(
-        f"/runs/{run.json()['id']}/stops",
+        f"/districts/{district_id}/routes/{route_id}/runs/{run.json()['id']}/stops",
         json={"name": "No Bus Stop", "sequence": 1, "type": "pickup"},
     )
     assert stop.status_code in (200, 201)
+    stop_id = stop.json()["id"]
 
-    ensure_prepared_run_student(client, run.json()["id"])
+    student = client.post(
+        f"/districts/{district_id}/routes/{route_id}/runs/{run.json()['id']}/stops/{stop_id}/students",
+        json={"name": "No Bus Student", "grade": "1", "school_id": school_id},
+    )
+    assert student.status_code in (200, 201)
 
     response = client._wrapped_client.post(f"/runs/start?run_id={run.json()['id']}")
 
